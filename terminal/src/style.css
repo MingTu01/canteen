@@ -1,0 +1,294 @@
+@import "tailwindcss";
+
+/* ============================================================
+ * MiSans 全局字体(对齐 H5 项目)
+ * - 只引入 Regular(font-weight 330),所有 400/500/600/700 都就近匹配 Regular
+ * - 原因:MiSans 字重数值非标准(Regular=330, Medium=360),
+ *   若同时引入 Medium,浏览器默认 400 会匹配 360 导致中文发粗发虚
+ * - 字体文件 npm 包已做 unicode-range 分片,按需加载
+ * ============================================================ */
+@import 'misans/lib/Normal/MiSans-Regular.min.css';
+
+/* ============================================================
+ * Tailwind v4 @theme:生成 --color-* 工具类(对齐 H5 variables.scss)
+ * ============================================================ */
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #0e1115;
+  --color-primary: #0065fd;
+  --color-primary-foreground: #ffffff;
+  --color-card: #ffffff;
+  --color-card-foreground: #0e1115;
+  --color-secondary: #eff1f4;
+  --color-secondary-foreground: #333942;
+  --color-muted: #eff1f4;
+  --color-muted-foreground: #7f8d9f;
+  --color-border: #e7eaef;
+  --color-accent: #e5e9ff;
+  --color-accent-foreground: #00266b;
+  --color-destructive: #ef4444;
+  --color-success: #07c160;
+  --color-warning: #ff976a;
+  --color-ring: #557fff;
+  /* 餐次三色(与 H5 useMealConfig.ts 完全一致) */
+  --color-meal-breakfast: #ff6b35;
+  --color-meal-lunch: #10b981;
+  --color-meal-dinner: #7c3aed;
+}
+
+/* ============================================================
+ * 设计稿统一配色变量(对齐 H5 --doubao-* 变量,所有页面内联引用)
+ * ============================================================ */
+:root {
+  --doubao-background: #ffffff;
+  --doubao-foreground: #0e1115;
+  --doubao-primary: #0065fd;
+  --doubao-primary-foreground: #ffffff;
+  --doubao-card: #ffffff;
+  --doubao-card-foreground: #0e1115;
+  --doubao-secondary: #eff1f4;
+  --doubao-secondary-foreground: #333942;
+  --doubao-muted: #eff1f4;
+  --doubao-muted-foreground: #7f8d9f;
+  --doubao-border: #e7eaef;
+  --doubao-ring: #557fff;
+  --doubao-accent: #e5e9ff;
+  --doubao-accent-foreground: #00266b;
+  --doubao-destructive: #ef4444;
+  --doubao-success: #07c160;
+  --doubao-warning: #ff976a;
+  --doubao-radius: 16px; /* 主卡片统一 16px(H5 模板核心规范) */
+  --doubao-radius-sm: 12px; /* 中等元素 */
+  --doubao-radius-xs: 8px; /* 小元素 */
+  --doubao-input: #e7eaef;
+  /* 餐次配色(与 H5 完全一致) */
+  --doubao-meal-breakfast: #ff6b35;
+  --doubao-meal-lunch: #10b981;
+  --doubao-meal-dinner: #7c3aed;
+  /* 餐次 rgba(用于胶囊渐变背景) */
+  --doubao-meal-breakfast-rgb: 255, 107, 53;
+  --doubao-meal-lunch-rgb: 16, 185, 129;
+  --doubao-meal-dinner-rgb: 124, 58, 237;
+}
+
+html,
+body {
+  background: var(--doubao-background);
+  color: var(--doubao-foreground);
+  /* MiSans 优先,系统字体兜底(对齐 H5) */
+  font-family: 'MiSans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  /* 禁用文本选择(终端触摸屏防误选) */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+
+/* ============================================================
+ * 多分辨率适配策略
+ * - 终端设备:1920×1080(标准横屏) / 1280×720(旧设备横屏) / 1080×1920(竖屏)
+ * - 使用 CSS 变量 + clamp() 实现流式缩放,避免硬编码尺寸
+ * - 通过 aspect-ratio 媒体查询区分横屏/竖屏布局
+ * ============================================================ */
+:root {
+  /* 字号流式缩放:横屏 1080p 基准,旧设备 720p 自动缩小 */
+  --fs-xs: clamp(10px, 0.9vw, 12px);
+  --fs-sm: clamp(12px, 1.1vw, 14px);
+  --fs-base: clamp(14px, 1.3vw, 16px);
+  --fs-lg: clamp(16px, 1.6vw, 20px);
+  --fs-xl: clamp(18px, 2vw, 24px);
+  --fs-2xl: clamp(24px, 2.8vw, 32px);
+  --fs-3xl: clamp(32px, 4vw, 48px);
+  --fs-4xl: clamp(48px, 6vw, 72px);
+  --fs-clock: clamp(64px, 8vw, 120px); /* 待机页时钟(居中显示) */
+
+  /* 触摸目标尺寸:最小 44px(无障碍标准),推荐 56-64px */
+  --touch-min: 44px;
+  --touch-md: 56px;
+  --touch-lg: 72px;
+}
+
+/* 竖屏设备布局调整(宽 < 高) */
+@media (orientation: portrait) {
+  :root {
+    /* 竖屏字号略小,避免拥挤 */
+    --fs-clock: clamp(48px, 8vh, 96px);
+  }
+}
+
+/* 低分辨率横屏(720p) */
+@media (max-width: 1366px) and (orientation: landscape) {
+  :root {
+    --doubao-radius: 12px;
+    --doubao-radius-sm: 10px;
+  }
+}
+
+/* ============================================================
+ * 全局工具类(对齐 H5 .card / .price / .text-* 等)
+ * ============================================================ */
+.card {
+  background: var(--doubao-card);
+  border: 1px solid var(--doubao-border);
+  border-radius: var(--doubao-radius);
+  padding: 16px;
+}
+
+.price {
+  color: var(--doubao-primary);
+  font-weight: 700;
+  font-size: 16px;
+}
+.price::before {
+  content: '¥';
+  font-size: 12px;
+  font-weight: 400;
+  margin-right: 1px;
+}
+
+.text-primary { color: var(--doubao-foreground); }
+.text-secondary { color: var(--doubao-secondary-foreground); }
+.text-muted { color: var(--doubao-muted-foreground); }
+.text-danger { color: var(--doubao-destructive); }
+.text-success { color: var(--doubao-success); }
+.text-warning { color: var(--doubao-warning); }
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.flex { display: flex; }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.flex-1 { flex: 1; }
+
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+
+/* ============================================================
+ * 终端专用样式
+ * ============================================================ */
+.terminal-container {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 隐藏滚动条(终端触摸屏不需要滚动条) */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ============================================================
+ * 动画(对齐 H5,仅保留终端必要的)
+ * ============================================================ */
+/* 待机页脉冲刷卡区 */
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.6; }
+  100% { transform: scale(0.95); opacity: 1; }
+}
+@keyframes float-icon {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.card-pulse { animation: pulse-ring 2.4s ease-in-out infinite; }
+.card-icon-float { animation: float-icon 2.4s ease-in-out infinite; }
+
+/* 旋转 spinner(加载/验证页) */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { animation: spin 0.8s linear infinite; }
+
+/* 通用按钮按压反馈(触摸屏触感) */
+.btn-press {
+  transition: transform 0.12s ease, box-shadow 0.16s ease, border-color 0.16s ease, opacity 0.15s ease;
+}
+.btn-press:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+/* 页面切换过渡 */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* ============================================================
+ * 终端主按钮(大尺寸触摸目标)
+ * ============================================================ */
+.btn-terminal {
+  background: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+  font-weight: 600;
+  border-radius: var(--doubao-radius);
+  border: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.15s ease;
+  /* 触摸目标最小 56px */
+  min-height: var(--touch-md);
+}
+.btn-terminal:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+.btn-terminal:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 次按钮(描边) */
+.btn-terminal-outline {
+  background: transparent;
+  color: var(--doubao-primary);
+  border: 1px solid var(--doubao-primary);
+  font-weight: 500;
+  border-radius: var(--doubao-radius);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease;
+  min-height: var(--touch-md);
+}
+.btn-terminal-outline:active {
+  transform: scale(0.97);
+  background: rgba(0, 101, 253, 0.06);
+}
+
+/* 危险按钮(取消/退出) */
+.btn-terminal-danger {
+  background: transparent;
+  color: var(--doubao-destructive);
+  border: 1px solid var(--doubao-destructive);
+  font-weight: 500;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.btn-terminal-danger:active {
+  transform: scale(0.97);
+  background: rgba(239, 68, 68, 0.06);
+}

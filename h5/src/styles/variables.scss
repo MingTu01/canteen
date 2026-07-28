@@ -1,0 +1,45 @@
+// ============================================================
+// 品牌配色与全局 SCSS 变量(对齐 meal-system-demo 模板)
+// ============================================================
+
+// 品牌色板(与 meal-miniapp/pages/*.html --doubao-* 变量完全一致)
+$brand-primary: #0065fd;
+$brand-primary-fg: #ffffff;
+$brand-foreground: #0e1115; // 主文字色(深黑)
+$brand-card: #ffffff;
+$brand-card-foreground: #0e1115;
+$brand-secondary: #eff1f4; // 次级背景(浅灰)
+$brand-secondary-foreground: #333942;
+$brand-muted: #eff1f4;
+$brand-muted-foreground: #7f8d9f; // 次级文字(中灰)
+$brand-border: #e7eaef;
+$brand-ring: #557fff;
+$brand-accent: #e5e9ff; // 浅蓝标签背景
+$brand-accent-foreground: #00266b;
+$brand-destructive: #ef4444;
+$brand-input: #e7eaef;
+$brand-radius: 1.2rem; // ~19.2px 模板统一圆角
+
+// 业务语义色(保留兼容旧代码)
+$brand-orange: #ff6b35;
+$brand-success: #07c160;
+$brand-warning: #ff976a;
+$brand-danger: #ee0a24;
+
+// 旧变量别名(逐步迁移,先保留)
+$bg-gray: $brand-secondary;
+$text-primary: $brand-foreground;
+$text-secondary: $brand-muted-foreground;
+$text-placeholder: #c8c9cc;
+$border-color: $brand-border;
+
+// Vant 4 主题变量(覆盖默认蓝色,统一品牌色)
+$button-primary-background: $brand-primary;
+$button-primary-border-color: $brand-primary;
+$tab-active-text-color: $brand-primary;
+$tabs-bottom-bar-color: $brand-primary;
+$sidebar-selected-border-color: $brand-primary;
+$stepper-button-round-theme-color: $brand-primary;
+$tag-primary-background: $brand-primary;
+$nav-bar-icon-color: $brand-primary;
+$nav-bar-title-text-color: $brand-foreground;

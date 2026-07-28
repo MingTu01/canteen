@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.canteen.mapper.DiningTimeSlotMapper">
+    <select id="selectByStoreId" resultType="com.example.canteen.entity.DiningTimeSlot">
+        SELECT * FROM dining_time_slot WHERE store_id = #{storeId} ORDER BY meal_type
+    </select>
+</mapper>

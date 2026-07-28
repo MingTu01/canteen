@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.canteen.mapper.MenuMapper">
+    <select id="selectByStoreDateType" resultType="com.example.canteen.entity.Menu">
+        SELECT * FROM menu WHERE store_id = #{storeId} AND date = #{date} AND meal_type = #{mealType}
+    </select>
+
+    <select id="selectByStoreDate" resultType="com.example.canteen.entity.Menu">
+        SELECT * FROM menu WHERE store_id = #{storeId} AND date = #{date} ORDER BY meal_type
+    </select>
+
+    <select id="selectByStoreDateRange" resultType="com.example.canteen.entity.Menu">
+        SELECT * FROM menu
+        WHERE store_id = #{storeId} AND date &gt;= #{startDate} AND date &lt;= #{endDate}
+        ORDER BY date, meal_type
+    </select>
+</mapper>

@@ -1,0 +1,232 @@
+@use 'variables' as *;
+
+// ============================================================
+// MiSans 全局字体(npm 包已做 unicode-range 分片,浏览器按需加载)
+// - 只引入 Regular (font-weight: 330),所有字重 400/500/600/700 都会就近匹配到 Regular
+// - 原因:MiSans 字重数值非标准(Regular=330, Medium=360),若同时引入 Medium,
+//   浏览器默认 font-weight: 400 会就近匹配 Medium(360),导致中文渲染发粗发虚
+// - font-display: swap 已由 npm 包内置配置,避免 FOIT 白屏
+// - 每个分片约 5-20KB,首屏实际下载量 < 200KB
+// ============================================================
+@import 'misans/lib/Normal/MiSans-Regular.min.css';
+
+// ============================================================
+// Vant 4 主题定制(CSS 变量覆盖,官方推荐方式)
+// ============================================================
+:root {
+  --van-primary-color: #{$brand-primary};
+  --van-primary-background: #{$brand-primary};
+  --van-button-primary-background: #{$brand-primary};
+  --van-button-primary-border-color: #{$brand-primary};
+  --van-tab-active-text-color: #{$brand-primary};
+  --van-tabs-bottom-bar-color: #{$brand-primary};
+  --van-sidebar-selected-border-color: #{$brand-primary};
+  --van-stepper-button-round-theme-color: #{$brand-primary};
+  --van-tag-primary-background: #{$brand-primary};
+  --van-nav-bar-icon-color: #{$brand-primary};
+  --van-nav-bar-title-text-color: #{$brand-foreground};
+  --van-tabbar-item-active-color: #{$brand-primary};
+  --van-tabbar-background: #{$brand-card};
+  --van-switch-on-background: #{$brand-primary};
+  --van-checkbox-checked-icon-color: #{$brand-primary};
+  --van-radio-checked-icon-color: #{$brand-primary};
+  --van-slider-active-background: #{$brand-primary};
+  --van-action-bar-button-danger-color: #{$brand-danger};
+  --van-cell-background: #{$brand-card};
+  --van-cell-text-color: #{$brand-foreground};
+  --van-cell-value-color: #{$brand-muted-foreground};
+  --van-cell-border-color: #{$brand-border};
+  --van-background: #{$brand-card};
+}
+
+// ============================================================
+// 全局 reset(对齐模板:纯白背景 + system-ui 字体)
+// ============================================================
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  background-color: #{$brand-card}; // 模板要求纯白背景
+  color: $brand-foreground;
+  // MiSans 优先,系统字体兜底(字体加载期间用系统字体,避免布局抖动)
+  font-family: 'MiSans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+// ============================================================
+// 安全区域适配(刘海屏 / 底部 Home 指示条)
+// ============================================================
+.pt-safe {
+  padding-top: constant(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top);
+}
+
+.pb-safe {
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-area-bottom {
+  padding-bottom: calc(constant(safe-area-inset-bottom) + 12px);
+  padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
+}
+
+// ============================================================
+// 通用工具类(对齐模板风格:卡片用 border 不用阴影,圆角 19px)
+// ============================================================
+.card {
+  background: $brand-card;
+  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid $brand-border;
+}
+
+.price {
+  color: $brand-primary;
+  font-weight: 700;
+  font-size: 16px;
+
+  &::before {
+    content: '¥';
+    font-size: 12px;
+    font-weight: 400;
+    margin-right: 1px;
+  }
+}
+
+.text-secondary {
+  color: $brand-muted-foreground;
+}
+
+.text-primary {
+  color: $brand-foreground;
+}
+
+.text-danger {
+  color: $brand-destructive;
+}
+
+.text-success {
+  color: $brand-success;
+}
+
+.text-warning {
+  color: $brand-warning;
+}
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-1 {
+  flex: 1;
+  min-width: 0;
+}
+
+.mt-8 {
+  margin-top: 8px;
+}
+
+.mt-12 {
+  margin-top: 12px;
+}
+
+.mt-16 {
+  margin-top: 16px;
+}
+
+.mb-8 {
+  margin-bottom: 8px;
+}
+
+.mb-12 {
+  margin-bottom: 12px;
+}
+
+.mb-16 {
+  margin-bottom: 16px;
+}
+
+// ============================================================
+// 桌面端居中容器适配(最大宽度 430px,模拟手机宽度)
+// ============================================================
+@media (min-width: 500px) {
+  body {
+    background: #{$brand-secondary};
+  }
+  #app {
+    max-width: 430px;
+    margin: 0 auto;
+    background: #{$brand-card};
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.08);
+    position: relative;
+    overflow-x: hidden;
+  }
+}
+
+// 页面切换过渡
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.canteen.mapper.OrderMapper">
+    <select id="selectByStoreId" resultType="com.example.canteen.entity.Order">
+        SELECT * FROM `order` WHERE store_id = #{storeId} ORDER BY created_at DESC
+    </select>
+
+    <select id="selectByEmployeeId" resultType="com.example.canteen.entity.Order">
+        SELECT * FROM `order` WHERE employee_id = #{employeeId} ORDER BY created_at DESC
+    </select>
+
+    <select id="selectByStoreDate" resultType="com.example.canteen.entity.Order">
+        SELECT * FROM `order` WHERE store_id = #{storeId} AND date = #{date} ORDER BY created_at DESC
+    </select>
+
+    <select id="selectByEmployeeDateMeal" resultType="com.example.canteen.entity.Order">
+        SELECT * FROM `order`
+        WHERE employee_id = #{employeeId} AND date = #{date} AND meal_type = #{mealType}
+          AND status IN (1, 2)
+        LIMIT 1
+    </select>
+
+    <select id="selectByPickupCode" resultType="com.example.canteen.entity.Order">
+        SELECT * FROM `order` WHERE pickup_code = #{pickupCode} LIMIT 1
+    </select>
+</mapper>

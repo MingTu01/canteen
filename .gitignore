@@ -1,0 +1,48 @@
+# Maven
+target/
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# Node
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Backup(运行时数据,不提交)
+backup/*
+!backup/.gitkeep
+
+# Uploads(运行时数据,不提交)
+uploads/*
+!uploads/.gitkeep
+
+# 临时文件
+_*.py
+_*.sql
+canteen-mysqldump-err.log
+
+# Docker
+docker-compose.override.yml

@@ -1,0 +1,88 @@
+# 开发/测试环境配置 - 使用H2内存数据库，无需安装MySQL和Redis
+server:
+  port: 8080
+
+spring:
+  # DevTools 热重载配置(Docker 挂载卷专用)
+  # Windows 主机 → Linux 容器的卷挂载不传递 inotify 事件,必须用 polling 模式
+  devtools:
+    restart:
+      enabled: true
+      # 轮询间隔:每 2 秒检查一次 classpath 变化
+      poll-interval: 2s
+      # 静默期:两次轮询间文件须稳定 1 秒才触发重启(避免编译中途触发)
+      quiet-period: 1s
+      # 额外监听源码目录(配合 mvn compile 后 target/classes 的变化)
+      additional-paths:
+        - /build/target/classes
+        - /build/src/main/resources
+      # trigger 文件:不使用(空表示任何 classpath 变化都触发)
+      trigger-file: ""
+    livereload:
+      enabled: false  # 后端无前端页面,关闭 livereload 省资源
+
+  datasource:
+    url: jdbc:h2:mem:canteen;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  # 禁用Redis（开发环境不需要）
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+
+  # 禁用Flyway（使用sql.init替代）
+  flyway:
+    enabled: false
+
+  # 使用H2兼容的初始化脚本(D1 三方统一,指向更新后的 schema-h2.sql)
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-h2.sql
+      continue-on-error: true
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+  # 备份导入文件上传限制
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1GB
+      file-size-threshold: 10MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      table-underline: true
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+# dev 专用 JWT 密钥(至少 32 字节),可硬编码用于开发
+jwt:
+  secret: enterprise-canteen-secret-key-2026-dev-test-environment-only
+  expiration: 86400000
+
+logging:
+  level:
+    com.example.canteen: DEBUG
+    org.springframework: WARN
+    org.springframework.jdbc.datasource.init: DEBUG
+    org.springframework.boot.sql.init: DEBUG

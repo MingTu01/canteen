@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.canteen.mapper.OrderItemMapper">
+    <select id="selectByOrderId" resultType="com.example.canteen.entity.OrderItem">
+        SELECT oi.*, d.image AS dish_image
+        FROM order_item oi
+        LEFT JOIN dish d ON oi.dish_id = d.id
+        WHERE oi.order_id = #{orderId}
+        ORDER BY oi.id
+    </select>
+
+    <!-- 批量查询多个订单的菜品(避免 N+1,终端订单查询列表用) -->
+    <select id="selectByOrderIds" resultType="com.example.canteen.entity.OrderItem">
+        SELECT oi.*, d.image AS dish_image
+        FROM order_item oi
+        LEFT JOIN dish d ON oi.dish_id = d.id
+        WHERE oi.order_id IN
+        <foreach collection="orderIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        ORDER BY oi.order_id, oi.id
+    </select>
+
+    <!-- 订餐汇总:JOIN order 表获取门店/日期/餐次/状态,按菜品分组求和 -->
+    <select id="selectDishOrderSummary" resultType="java.util.Map">
+        SELECT
+            oi.dish_id      AS dish_id,
+            oi.dish_name    AS dish_name,
+            oi.price        AS price,
+            SUM(oi.quantity) AS quantity,
+            COUNT(DISTINCT oi.order_id) AS order_count
+        FROM order_item oi
+        INNER JOIN `order` o ON oi.order_id = o.id
+        WHERE o.store_id = #{storeId}
+          AND o.date = #{date}
+          AND o.status IN (1, 2)
+          <if test="mealType != null">
+            AND o.meal_type = #{mealType}
+          </if>
+        GROUP BY oi.dish_id, oi.dish_name, oi.price
+        ORDER BY quantity DESC
+    </select>
+
+    <!-- 去重订单数:同筛选条件下的实际订单数(避免多菜品订单被重复计数) -->
+    <select id="countDistinctOrders" resultType="java.lang.Integer">
+        SELECT COUNT(DISTINCT o.id)
+        FROM `order` o
+        WHERE o.store_id = #{storeId}
+          AND o.date = #{date}
+          AND o.status IN (1, 2)
+          <if test="mealType != null">
+            AND o.meal_type = #{mealType}
+          </if>
+    </select>
+</mapper>

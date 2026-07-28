@@ -1,0 +1,163 @@
+# 全局默认:所有服务日志轮转,避免 Docker json-file 日志无限增长撑爆 40GB 系统盘
+# 单文件最大 50MB,最多保留 3 份(每服务约 150MB 上限)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: canteen-mysql
+    restart: always
+    logging: *default-logging
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-canteen2026}
+      MYSQL_DATABASE: canteen
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backup:/backup
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=200
+      --innodb-buffer-pool-size=256M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-canteen2026}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - canteen-net
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: canteen-redis
+    restart: always
+    logging: *default-logging
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - canteen-net
+
+  # 后端 Spring Boot
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: canteen-backend
+    restart: always
+    logging: *default-logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/canteen?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-canteen2026}
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-canteen2026}
+      DB_ALLOW_PUBLIC_KEY: "true"
+      DB_USESSL: "false"
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-canteen-jwt-secret-key-2026-please-change-in-production}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      JWT_TERMINAL_EXPIRATION: ${JWT_TERMINAL_EXPIRATION:-31536000000}
+      # 备份目录:与下方 ./backup:/app/backup 挂载对齐(BackupService 读取 BACKUP_DIR 环境变量)
+      BACKUP_DIR: /app/backup
+      TZ: Asia/Shanghai
+      # 显式激活生产 profile:启用 application-prod.yml,排除 @Profile("dev") 的 TestController
+      SPRING_PROFILES_ACTIVE: prod
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      # 容器内仅安装 curl(无 wget),使用 curl 健康检查白名单接口 /api/system/health
+      test: ["CMD-SHELL", "curl -fs -o /dev/null http://localhost:8080/api/system/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    volumes:
+      - ./backup:/app/backup
+      # 上传文件持久化:FileController 写入 ./uploads/(容器内 /app/uploads/),
+      # 必须挂载到主机,否则容器重启/重建后所有上传的图片丢失
+      - ./uploads:/app/uploads
+    networks:
+      - canteen-net
+
+  # 管理后台前端
+  admin-web:
+    build:
+      context: ./admin-web
+      dockerfile: Dockerfile
+    container_name: canteen-admin
+    restart: always
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    networks:
+      - canteen-net
+
+  # H5 订餐端(后续接入公众号)
+  h5:
+    build:
+      context: ./h5
+      dockerfile: Dockerfile
+    container_name: canteen-h5
+    restart: always
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "81:80"
+    networks:
+      - canteen-net
+
+  # X86终端
+  terminal:
+    build:
+      context: ./terminal
+      dockerfile: Dockerfile
+    container_name: canteen-terminal
+    restart: always
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "82:80"
+    networks:
+      - canteen-net
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  canteen-net:
+    driver: bridge

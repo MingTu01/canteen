@@ -1,0 +1,84 @@
+server:
+  port: 8080
+  # 优雅停机:接收 SIGTERM 后,新请求返回 503,正在处理的请求继续完成
+  shutdown: graceful
+  # HTTP 编码:强制 UTF-8,修复 JSON 响应中文乱码(Content-Type 加 charset=utf-8)
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  datasource:
+    # C3 MySQL SSL 参数环境变量化
+    url: jdbc:mysql://localhost:3306/canteen?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=${DB_ALLOW_PUBLIC_KEY:false}&useSSL=${DB_USESSL:true}
+    username: root
+    # C2 数据库密码环境变量化(未配置 DB_PASSWORD 即启动失败,避免使用弱密码)
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 强制连接使用 utf8mb4 字符集,修复 Flyway 迁移中文双重编码问题
+    # (MySQL 默认 client/connection charset 可能是 latin1,导致 UTF-8 被当 Latin-1 重新编码)
+    hikari:
+      connection-init-sql: SET NAMES utf8mb4
+
+  redis:
+    host: localhost
+    port: 6379
+    password:
+    database: 0
+
+  # 优雅停机:每个阶段最长等待时间
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
+    # 显式指定 SQL 迁移文件编码为 UTF-8(避免 JVM 默认编码差异)
+    encoding: UTF-8
+
+  # A8 Jackson 时区与格式统一
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+  # 备份导入文件上传限制(允许大文件)
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1GB
+      file-size-threshold: 10MB
+
+  # 静态资源:/uploads/** 映射由 WebConfig.addResourceHandlers 显式注册,
+  # 不再使用 static-locations(后者不会创建 URL 前缀映射,会导致 /uploads/xxx.jpg 404)
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+      table-underline: true
+      # 逻辑删除配置(D1/D7):配合实体 isDeleted 字段
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+# C2 JWT 密钥与过期时间环境变量化(未配置 JWT_SECRET 即启动失败,避免使用默认密钥)
+jwt:
+  secret: ${JWT_SECRET}
+  # 管理员/员工 token 过期时间(24 小时)
+  expiration: ${JWT_EXPIRATION:86400000}
+  # 终端 token 过期时间(默认 365 天,避免 7x24 终端频繁失绑)
+  terminal-expiration: ${JWT_TERMINAL_EXPIRATION:31536000000}
+
+logging:
+  level:
+    com.example.canteen: INFO
