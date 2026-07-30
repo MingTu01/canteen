@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   showToast,
@@ -32,6 +32,7 @@ import {
   relativeDateLabel,
   formatGroupDate,
 } from '@/utils/date'
+import { getCachedImage } from '@/utils/imageCache'
 import type {
   MenuWithItems,
   MenuItemView,
@@ -757,11 +758,42 @@ const handleImgError = (itemId: number): void => {
   erroredImages.value = next
 }
 
-/** 当前项的菜品图片地址;已失败的返回空串触发 emoji 占位 */
+/** 菜品图片缓存 Map（item.id → 缓存后的 blob URL 或原 URL），异步填充 */
+const cachedDishImages = ref<Map<number, string>>(new Map())
+
+/** 批量预加载菜品图片到缓存 Map（懒加载：首次 fetch 后缓存，后续命中缓存直接返回 blob URL） */
+const refreshDishImages = async (): Promise<void> => {
+  const map = new Map<number, string>()
+  const promises: Promise<void>[] = []
+  for (const [, menus] of menusByDate.value) {
+    for (const menu of menus) {
+      for (const iv of menu.items) {
+        if (!iv.item.id || map.has(iv.item.id)) continue
+        const raw = iv.dish?.imageUrl || iv.dish?.image
+        if (!raw) continue
+        // 完整 URL 或 data URL 直接使用，不走 IndexedDB 缓存
+        if (/^(https?:)?\/\//.test(raw) || raw.startsWith('data:')) {
+          map.set(iv.item.id, raw)
+          continue
+        }
+        promises.push(
+          getCachedImage(raw).then((url) => { map.set(iv.item.id, url) }),
+        )
+      }
+    }
+  }
+  await Promise.all(promises)
+  cachedDishImages.value = map
+}
+
+/** 当前项的菜品图片地址(优先返回缓存 blob URL);已失败的返回空串触发 emoji 占位 */
 const getDishImg = (iv: MenuItemView): string => {
   if (erroredImages.value.has(iv.item.id)) return ''
-  return iv.dish?.imageUrl || iv.dish?.image || ''
+  return cachedDishImages.value.get(iv.item.id) || ''
 }
+
+// 菜单数据变化时异步刷新缓存 Map
+watch(menusByDate, refreshDishImages, { deep: true, immediate: true })
 
 const categoryEmoji = (category?: string): string => {
   const cat = (category || '').toLowerCase()

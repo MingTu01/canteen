@@ -18,7 +18,7 @@ import {
   ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
-import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -452,6 +452,172 @@ onMounted(() => {
   fetchList()
   fetchDepartments()
 })
+
+// ===== 批量导入照片 =====
+interface PhotoImportItem {
+  file: File
+  cardNo: string
+  preview: string
+  status: 'pending' | 'uploading' | 'success' | 'error'
+  progress: number
+  error: string
+  /** 该卡号当前已有头像（替换提示） */
+  existingAvatar?: string
+}
+
+const photoImportVisible = ref(false)
+const photoImportItems = ref<PhotoImportItem[]>([])
+const photoImportLoading = ref(false)
+const photoFileInput = ref<HTMLInputElement | null>(null)
+
+/** 从文件名提取卡号(去扩展名) */
+const extractCardNo = (fileName: string): string => {
+  const lastSlash = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'))
+  const base = lastSlash >= 0 ? fileName.slice(lastSlash + 1) : fileName
+  const dot = base.lastIndexOf('.')
+  return dot >= 0 ? base.slice(0, dot).trim() : base.trim()
+}
+
+/** 打开照片导入弹窗 */
+const openPhotoImport = () => {
+  photoImportItems.value = []
+  photoImportVisible.value = true
+}
+
+/** 触发文件选择 */
+const triggerPhotoFileInput = () => {
+  photoFileInput.value?.click()
+}
+
+/** 选择照片文件后处理:同卡号去重(后选覆盖先选) + 标记已有头像 */
+const handlePhotoFileChange = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = '' // 清空,允许重复选择同一文件
+
+  if (files.length === 0) return
+  const imageFiles = files.filter((f) => f.type.startsWith('image/'))
+  if (imageFiles.length === 0) {
+    ElMessage.warning('请选择图片文件')
+    return
+  }
+
+  // 同卡号去重:后选的覆盖先选的
+  const seen = new Map<string, PhotoImportItem>()
+  for (const file of imageFiles) {
+    const cardNo = extractCardNo(file.name)
+    if (!cardNo) continue
+    const item: PhotoImportItem = {
+      file,
+      cardNo,
+      preview: URL.createObjectURL(file),
+      status: 'pending',
+      progress: 0,
+      error: '',
+    }
+    // 释放旧项的 objectURL 避免内存泄漏
+    const existing = seen.get(cardNo)
+    if (existing?.preview) {
+      URL.revokeObjectURL(existing.preview)
+    }
+    seen.set(cardNo, item)
+  }
+  photoImportItems.value = Array.from(seen.values())
+
+  // 标记已有头像的项(供 UI 显示"将替换"提示)
+  if (photoImportItems.value.length > 0) {
+    const cardNos = photoImportItems.value.map((it) => it.cardNo)
+    try {
+      // 复用当前列表 + 后端查询获取已有头像
+      const existingMap = new Map<string, string>()
+      // 从当前已加载的员工列表中查找(覆盖第一页常见情况)
+      for (const emp of employees.value) {
+        if (emp.cardNo && cardNos.includes(emp.cardNo) && emp.avatar) {
+          existingMap.set(emp.cardNo, emp.avatar)
+        }
+      }
+      // 标记
+      for (const item of photoImportItems.value) {
+        const existing = existingMap.get(item.cardNo)
+        if (existing) {
+          item.existingAvatar = existing
+        }
+      }
+    } catch {
+      /* 忽略,标记失败不影响上传 */
+    }
+  }
+
+  ElMessage.info(`已选择 ${photoImportItems.value.length} 张照片`)
+}
+
+/** 移除单项 */
+const removePhotoItem = (index: number) => {
+  const item = photoImportItems.value[index]
+  if (item?.preview) URL.revokeObjectURL(item.preview)
+  photoImportItems.value.splice(index, 1)
+}
+
+/** 批量上传照片 */
+const startPhotoUpload = async () => {
+  const pending = photoImportItems.value.filter((it) => it.status === 'pending')
+  if (pending.length === 0) {
+    ElMessage.warning('没有待上传的照片')
+    return
+  }
+  // 如有已有头像项,二次确认
+  const replaceCount = pending.filter((it) => it.existingAvatar).length
+  if (replaceCount > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `检测到 ${replaceCount} 名员工已有头像,将继续上传并替换旧头像。是否继续？`,
+        '替换确认',
+        { type: 'warning', confirmButtonText: '继续替换', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+
+  photoImportLoading.value = true
+  let success = 0
+  let failed = 0
+  // 串行上传(避免并发过大冲击服务器)
+  for (const item of pending) {
+    item.status = 'uploading'
+    item.progress = 30
+    try {
+      await employeeApi.uploadAvatar(item.cardNo, item.file, sid.value || undefined)
+      item.status = 'success'
+      item.progress = 100
+      success++
+    } catch (e: unknown) {
+      item.status = 'error'
+      item.progress = 0
+      const msg = e instanceof Error ? e.message : '上传失败'
+      item.error = msg.includes('员工不存在') ? '员工不存在' : msg
+      failed++
+    }
+  }
+  photoImportLoading.value = false
+
+  if (failed === 0) {
+    ElMessage.success(`全部上传成功,共 ${success} 张`)
+    photoImportVisible.value = false
+  } else {
+    ElMessage.warning(`上传完成: 成功 ${success} 张, 失败 ${failed} 张`)
+  }
+  // 刷新列表(头像已更新)
+  if (success > 0) fetchList()
+}
+
+/** 清理预览 URL(关闭弹窗时) */
+const onPhotoImportClose = () => {
+  for (const item of photoImportItems.value) {
+    if (item.preview) URL.revokeObjectURL(item.preview)
+  }
+  photoImportItems.value = []
+}
 </script>
 
 <template>
@@ -460,6 +626,7 @@ onMounted(() => {
       <template #actions>
         <ElButton :icon="Download" @click="handleDownloadTemplate">下载模板</ElButton>
         <ElButton :icon="Upload" @click="openImportDialog">导入员工</ElButton>
+        <ElButton v-if="sid" :icon="ImagePlus" @click="openPhotoImport">批量照片</ElButton>
         <ElButton v-if="sid" :icon="AlertTriangle" type="danger" @click="openLowBalance">余额预警</ElButton>
         <ElButton v-if="sid" :icon="FileSpreadsheet" :loading="exportLoading" @click="handleExport">导出</ElButton>
         <ElButton v-if="sid" type="warning" :icon="Wallet" @click="openBatchRecharge">批量充值</ElButton>
@@ -905,6 +1072,73 @@ onMounted(() => {
         </div>
         <template #footer>
           <ElButton @click="lowBalanceVisible = false">关闭</ElButton>
+        </template>
+      </ElDialog>
+
+      <!-- 批量导入照片弹窗 -->
+      <ElDialog
+        v-model="photoImportVisible"
+        title="批量导入员工照片"
+        width="720px"
+        :close-on-click-modal="false"
+        @close="onPhotoImportClose"
+      >
+        <input
+          ref="photoFileInput"
+          type="file"
+          accept="image/*"
+          multiple
+          style="display: none"
+          @change="handlePhotoFileChange"
+        />
+        <div class="mb-4 flex items-center justify-between">
+          <div class="text-sm text-gray-500">
+            文件名作为卡号自动匹配员工(如 CARD001.jpg → 卡号 CARD001)。同卡号多次选择,后选的覆盖先选的。
+          </div>
+          <ElButton type="primary" :icon="ImagePlus" @click="triggerPhotoFileInput">选择照片</ElButton>
+        </div>
+
+        <div v-if="photoImportItems.length === 0" class="py-12 text-center text-gray-400">
+          点击"选择照片"按钮,选择员工照片文件(支持多选)
+        </div>
+
+        <div v-else class="space-y-2">
+          <div
+            v-for="(item, idx) in photoImportItems"
+            :key="idx"
+            class="flex items-center gap-3 rounded-lg border border-gray-200 p-3"
+          >
+            <img :src="item.preview" :alt="item.cardNo" class="h-12 w-12 rounded object-cover" />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-gray-800">{{ item.cardNo }}</span>
+                <ElTag v-if="item.existingAvatar" type="warning" size="small">已存在,将替换</ElTag>
+                <ElTag v-if="item.status === 'success'" type="success" size="small">成功</ElTag>
+                <ElTag v-else-if="item.status === 'error'" type="danger" size="small">失败: {{ item.error }}</ElTag>
+                <ElTag v-else-if="item.status === 'uploading'" type="primary" size="small">上传中...</ElTag>
+              </div>
+              <div class="mt-1 text-xs text-gray-500 truncate">{{ item.file.name }}</div>
+            </div>
+            <ElButton
+              v-if="item.status === 'pending' || item.status === 'error'"
+              :icon="X"
+              circle
+              size="small"
+              @click="removePhotoItem(idx)"
+            />
+          </div>
+        </div>
+
+        <template #footer>
+          <ElButton @click="photoImportVisible = false">关闭</ElButton>
+          <ElButton
+            type="primary"
+            :loading="photoImportLoading"
+            :disabled="photoImportItems.filter((it) => it.status === 'pending').length === 0"
+            @click="startPhotoUpload"
+          >
+            开始上传 ({{ photoImportItems.filter((it) => it.status === 'pending').length }})
+          </ElButton>
         </template>
       </ElDialog>
     </PageContainer>

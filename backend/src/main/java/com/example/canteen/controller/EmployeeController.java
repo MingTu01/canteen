@@ -16,13 +16,20 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -316,5 +323,166 @@ public class EmployeeController {
             return "\"" + v.replace("\"", "\"\"") + "\"";
         }
         return v;
+    }
+
+    /**
+     * 上传/更新员工头像(批量导入照片使用)。
+     * 文件名(去扩展名)作为卡号,自动匹配当前门店内对应员工。
+     * 走与 FileController 一致的存储策略:UUID 重命名 + magic bytes 校验 + /uploads 目录。
+     * 替换头像时自动删除旧文件,避免磁盘孤儿文件。
+     *
+     * @param cardNo  卡号(从路径取,前端用文件名提取)
+     * @param storeId 门店 ID(超管需显式传;门店管理员可不传,自动取当前门店)
+     * @param file    图片文件(前端已 canvas 压缩到 300x300 / JPEG 0.8)
+     */
+    @PostMapping("/{cardNo}/avatar")
+    public ApiResponse<Map<String, Object>> uploadAvatar(@PathVariable String cardNo,
+                                                         @RequestParam(required = false) Long storeId,
+                                                         @RequestParam("file") MultipartFile file) {
+        if (!SecurityContext.hasAdminLevel()) {
+            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        }
+        Long targetStore = storeId != null ? storeId : SecurityContext.currentStoreId();
+        if (targetStore == null) {
+            throw new com.example.canteen.exception.BusinessException("缺少 storeId");
+        }
+        SecurityContext.checkStoreAccess(targetStore);
+
+        if (cardNo == null || cardNo.isBlank()) {
+            return ApiResponse.error(400, "卡号不能为空");
+        }
+        if (file == null || file.isEmpty()) {
+            return ApiResponse.error(400, "文件为空");
+        }
+        // 5MB 防御性上限(前端已压缩到 300x300 / JPEG 0.8,实际约几十 KB)
+        if (file.getSize() > 5 * 1024 * 1024) {
+            return ApiResponse.error(400, "文件过大,最大 5MB");
+        }
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            return ApiResponse.error(400, "仅允许上传图片文件");
+        }
+
+        Employee employee = employeeService.getEmployeeByCardNoAndStore(cardNo, targetStore);
+        if (employee == null) {
+            return ApiResponse.error(404, "员工不存在: " + cardNo);
+        }
+
+        try {
+            // 删除旧头像文件(避免磁盘孤儿文件)
+            if (employee.getAvatar() != null && !employee.getAvatar().isBlank()) {
+                try {
+                    String oldUrl = employee.getAvatar().split("\\?")[0]; // 去掉 ?v=xxx
+                    String oldFileName = oldUrl.replace("/uploads/", "");
+                    Path oldFile = Paths.get("uploads").resolve(oldFileName).normalize();
+                    // 防止路径遍历
+                    if (oldFile.startsWith(Paths.get("uploads").normalize())
+                            && Files.exists(oldFile)) {
+                        Files.delete(oldFile);
+                    }
+                } catch (Exception e) {
+                    // 删除失败不影响主流程,记录日志即可
+                    org.slf4j.LoggerFactory.getLogger(EmployeeController.class)
+                            .warn("删除旧头像文件失败: {}", e.getMessage());
+                }
+            }
+            String url = saveAvatarFile(file);
+            // 仅更新 avatar 字段:用 updateById 时其他字段为 null 会被默认 NOT_NULL 策略跳过
+            Employee patch = new Employee();
+            patch.setId(employee.getId());
+            patch.setAvatar(url);
+            employeeMapper.updateById(patch);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("url", url);
+            result.put("cardNo", cardNo);
+            result.put("employeeId", employee.getId());
+            result.put("employeeName", employee.getName());
+            return ApiResponse.success(result);
+        } catch (IOException e) {
+            return ApiResponse.error(500, "文件保存失败: " + e.getMessage());
+        }
+    }
+
+    /** 保存头像到 uploads 目录,UUID 重命名 + 扩展名白名单 + magic bytes 校验。返回相对 URL(带 mtime 版本号)。 */
+    private String saveAvatarFile(MultipartFile file) throws IOException {
+        Path uploadDir = Paths.get("uploads");
+        if (!Files.exists(uploadDir)) {
+            Files.createDirectories(uploadDir);
+        }
+        String originalName = file.getOriginalFilename();
+        String ext = ".jpg";
+        if (originalName != null && originalName.contains(".")) {
+            ext = originalName.substring(originalName.lastIndexOf('.'));
+            String lowerExt = ext.toLowerCase();
+            if (!lowerExt.matches("\\.(jpg|jpeg|png|gif|webp)")) {
+                ext = ".jpg";
+            }
+        }
+        String fileName = UUID.randomUUID().toString().replace("-", "") + ext;
+        Path target = uploadDir.resolve(fileName).normalize().toAbsolutePath();
+        if (!target.startsWith(uploadDir.toAbsolutePath())) {
+            throw new com.example.canteen.exception.BusinessException("非法文件名");
+        }
+        validateImageMagicBytes(file, ext.toLowerCase());
+        file.transferTo(target.toFile());
+        long mtime = Files.getLastModifiedTime(target).toMillis();
+        return "/uploads/" + fileName + "?v=" + mtime;
+    }
+
+    /** 校验图片前几字节是否匹配声明的扩展名,防止扩展名伪装上传恶意脚本。 */
+    private void validateImageMagicBytes(MultipartFile file, String lowerExt) throws IOException {
+        byte[] header = new byte[12];
+        int read;
+        try (InputStream is = file.getInputStream()) {
+            read = is.read(header);
+        }
+        if (read <= 0) {
+            throw new com.example.canteen.exception.BusinessException("文件内容与扩展名不符");
+        }
+        boolean ok = false;
+        switch (lowerExt) {
+            case ".jpg":
+            case ".jpeg":
+                ok = read >= 3
+                        && (header[0] & 0xFF) == 0xFF
+                        && (header[1] & 0xFF) == 0xD8
+                        && (header[2] & 0xFF) == 0xFF;
+                break;
+            case ".png":
+                ok = read >= 8
+                        && (header[0] & 0xFF) == 0x89
+                        && (header[1] & 0xFF) == 0x50
+                        && (header[2] & 0xFF) == 0x4E
+                        && (header[3] & 0xFF) == 0x47
+                        && (header[4] & 0xFF) == 0x0D
+                        && (header[5] & 0xFF) == 0x0A
+                        && (header[6] & 0xFF) == 0x1A
+                        && (header[7] & 0xFF) == 0x0A;
+                break;
+            case ".gif":
+                ok = read >= 4
+                        && (header[0] & 0xFF) == 0x47
+                        && (header[1] & 0xFF) == 0x49
+                        && (header[2] & 0xFF) == 0x46
+                        && (header[3] & 0xFF) == 0x38;
+                break;
+            case ".webp":
+                ok = read >= 12
+                        && (header[0] & 0xFF) == 0x52
+                        && (header[1] & 0xFF) == 0x49
+                        && (header[2] & 0xFF) == 0x46
+                        && (header[3] & 0xFF) == 0x46
+                        && (header[8] & 0xFF) == 0x57
+                        && (header[9] & 0xFF) == 0x45
+                        && (header[10] & 0xFF) == 0x42
+                        && (header[11] & 0xFF) == 0x50;
+                break;
+            default:
+                ok = false;
+        }
+        if (!ok) {
+            throw new com.example.canteen.exception.BusinessException("文件内容与扩展名不符");
+        }
     }
 }

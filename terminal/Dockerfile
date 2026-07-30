@@ -4,6 +4,8 @@ WORKDIR /build
 COPY package.json ./
 RUN npm install --registry=https://registry.npmmirror.com
 COPY . .
+# 类型检查(0 错误才能继续构建,符合项目硬约束)
+RUN npx vue-tsc --noEmit
 RUN npm run build
 
 FROM nginx:alpine

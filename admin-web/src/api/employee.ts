@@ -78,4 +78,16 @@ export const employeeApi = {
     // 拦截器对 blob 不会走 code 校验,res 即 Blob
     return res as unknown as Blob
   },
+  /** 上传/更新员工头像(文件名作为卡号自动匹配) */
+  uploadAvatar: (cardNo: string, file: Blob, storeId?: number) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api
+      .post<{ url: string; cardNo: string; employeeId: number; employeeName: string }>(
+        `/employee/${encodeURIComponent(cardNo)}/avatar`,
+        form,
+        { params: storeId ? { storeId } : undefined },
+      )
+      .then((r) => r.data)
+  },
 }

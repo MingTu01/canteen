@@ -5,6 +5,7 @@ import com.example.canteen.exception.SecurityException;
 import com.example.canteen.security.SecurityContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 备份恢复服务。
@@ -23,6 +25,7 @@ import java.util.Map;
  * - createPreRestoreSnapshot:恢复前自动快照(便于回滚)
  * - verifyRestoredData:恢复后只读校验,行数不一致则抛异常回滚事务
  * - deleteAllBusinessData / deleteStoreData / insertRows:删除与插入的具体实现
+ * - evictCache:恢复成功后清理 Redis 缓存(dish/menu),避免前端读到旧数据
  *
  * 关键修复:原 BackupService.importBackup 通过 this.restoreBackup() 自调用,
  * Spring AOP 代理不生效,@Transactional 注解失效,恢复失败时已 DELETE 的数据无法回滚,
@@ -35,12 +38,19 @@ public class RestoreService {
 
     private static final Logger log = LoggerFactory.getLogger(RestoreService.class);
 
+    /** Redis 缓存 key 前缀(与 DishService/MenuService 保持一致) */
+    private static final String DISH_CACHE_PREFIX = "dish:store:";
+    private static final String MENU_CACHE_PREFIX = "menu:store:";
+
     private final JdbcTemplate jdbcTemplate;
     private final BackupService backupService;
+    private final RedisTemplate<String, Object> redisTemplate;
 
-    public RestoreService(JdbcTemplate jdbcTemplate, BackupService backupService) {
+    public RestoreService(JdbcTemplate jdbcTemplate, BackupService backupService,
+                          RedisTemplate<String, Object> redisTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         this.backupService = backupService;
+        this.redisTemplate = redisTemplate;
     }
 
     /**
@@ -109,6 +119,10 @@ public class RestoreService {
 
         // 恢复后只读校验:关键表行数应与备份声明一致(不一致则抛异常回滚事务)
         verifyRestoredData(document, data);
+
+        // 恢复成功后清理 Redis 缓存(dish/menu),避免前端读到旧数据
+        // 全库恢复清理所有门店缓存;门店恢复只清理该门店缓存
+        evictCache("full".equals(type) ? null : docStoreId);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("backupName", backupName);
@@ -250,5 +264,49 @@ public class RestoreService {
             batchArgs.add(args);
         }
         jdbcTemplate.batchUpdate(sql.toString(), batchArgs);
+    }
+
+    /**
+     * 清理 Redis 缓存。恢复后调用,避免前端读到旧数据。
+     * @param storeId 门店 ID;null 表示全库恢复,清理所有门店缓存
+     *
+     * 清理范围:
+     * - dish:store:{storeId}:*  (菜品列表/新品/全量)
+     * - menu:store:{storeId}:*  (菜单按日/按月)
+     *
+     * 使用 SCAN 而非 KEYS,避免阻塞 Redis(SCAN 游标式扫描,单次返回 count=100)
+     */
+    private void evictCache(Long storeId) {
+        try {
+            if (storeId != null) {
+                // 门店级清理:删除该门店的 dish/menu 缓存
+                String dishPattern = DISH_CACHE_PREFIX + storeId + ":*";
+                String menuPattern = MENU_CACHE_PREFIX + storeId + ":*";
+                deleteByPattern(dishPattern);
+                deleteByPattern(menuPattern);
+                log.info("恢复后清理门店 {} 的 Redis 缓存", storeId);
+            } else {
+                // 全库清理:删除所有门店的 dish/menu 缓存
+                deleteByPattern(DISH_CACHE_PREFIX + "*");
+                deleteByPattern(MENU_CACHE_PREFIX + "*");
+                log.info("恢复后清理所有门店的 Redis 缓存");
+            }
+        } catch (Exception e) {
+            // 缓存清理失败不影响恢复结果(缓存有 TTL,会自然过期)
+            log.warn("恢复后缓存清理失败(忽略,缓存会自然过期): {}", e.getMessage());
+        }
+    }
+
+    /** SCAN 游标式删除匹配 pattern 的 key,避免 KEYS 阻塞 Redis */
+    private void deleteByPattern(String pattern) {
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            if (keys != null && !keys.isEmpty()) {
+                redisTemplate.delete(keys);
+                log.debug("删除 {} 个缓存 key: {}", keys.size(), pattern);
+            }
+        } catch (Exception e) {
+            log.debug("删除缓存 key 失败(pattern={}): {}", pattern, e.getMessage());
+        }
     }
 }

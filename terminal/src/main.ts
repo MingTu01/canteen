@@ -2,6 +2,10 @@ import { createApp } from 'vue'
 import router from './router'
 import './style.css'
 import App from './App.vue'
+import { cleanExpiredCache as cleanAvatarCache } from './utils/imageCache'
+
+// 启动时清理过期头像缓存
+cleanAvatarCache()
 
 /**
  * 全局错误兜底:7x24 终端任意未捕获错误不得导致白屏无响应。

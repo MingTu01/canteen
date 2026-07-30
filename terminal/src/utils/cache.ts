@@ -166,9 +166,12 @@ async function doRefreshDishes(storeId: number): Promise<void> {
   console.log(`[cache] 已缓存 ${cached.length} 个菜品`)
 
   // 并发下载图片(限并发 5)
+  // 支持两种图片源:
+  //   /uploads/xxx.jpg      - 后端上传的本地图(相对路径,需拼 baseUrl)
+  //   https://xxx.com/xxx.jpg - 外部图床(如 themealdb 测试图),绝对 URL 直接下载
   const imageUrls = cached
     .map((d) => d.image)
-    .filter((u): u is string => !!u && u.startsWith('/uploads/'))
+    .filter((u): u is string => !!u && (u.startsWith('/uploads/') || /^https?:\/\//.test(u)))
   await downloadImages(imageUrls)
 
   // 清理不再使用的图片 Blob(菜品下架或图片 URL 变更后,旧 Blob 残留)

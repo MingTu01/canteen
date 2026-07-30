@@ -4,6 +4,9 @@ import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { loadConfig } from '@/api'
 import { initLocalCache, destroyLocalCache } from '@/utils/cache'
+import AdminEntryZone from '@/components/AdminEntryZone.vue'
+import { purgeOldBrandingCache } from '@/store/branding'
+import { loadRuntimeConfig } from '@/store/terminalSettings'
 
 const route = useRoute()
 
@@ -20,7 +23,12 @@ function syncCache() {
 }
 
 onMounted(() => {
+  // 清理旧版本 branding 缓存(含相对路径 URL 的数据)
+  purgeOldBrandingCache()
   syncCache()
+  // 加载 Python 侧运行时配置(window_mode/card_interval/idle_timeout)
+  // 浏览器/Tauri 环境静默跳过(保留默认值)
+  loadRuntimeConfig().catch(() => {})
 })
 
 // 路由变化时检查(终端绑定/解绑后自动同步)
@@ -31,4 +39,6 @@ watch(() => route.path, () => {
 
 <template>
   <RouterView />
+  <!-- 全局管理入口:右上角 6 次点击触发,任何页面都可用 -->
+  <AdminEntryZone />
 </template>

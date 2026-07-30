@@ -110,16 +110,16 @@ export async function dbGetAllDishes(): Promise<CachedDish[]> {
   }
 }
 
-export async function dbClearDishesByStore(storeId: number): Promise<void> {
+export async function dbClearDishesByStore(_storeId: number): Promise<void> {
   // 简化:全清后重写。菜品种类有限(<100),性能可接受
   const db = await openDb()
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const t = db.transaction(STORE_DISHES, 'readwrite')
     t.objectStore(STORE_DISHES).clear()
     t.oncomplete = () => resolve()
     t.onerror = () => reject(t.error)
     t.onabort = () => reject(t.error)
-  }).then(() => undefined)
+  })
 }
 
 /* ============ 图片 Blob 缓存 ============ */

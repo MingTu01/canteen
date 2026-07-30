@@ -474,7 +474,7 @@ onMounted(fetchStores)
             <ImageUploader
               v-model="brandingForm.logoUrl"
               label="Logo"
-              hint="显示在 H5 顶部、取餐终端顶栏、admin-web 侧栏(建议 1:1 正方形)"
+              hint="显示在 H5 顶部、取餐终端顶栏、admin-web 侧栏(建议 1:1 正方形,请上传 PNG 格式以保留透明背景)"
               :preview-size="80"
             />
           </div>

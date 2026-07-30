@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Dish } from '@/api/types'
+import { getCachedImage } from '@/utils/imageCache'
 
 /**
  * 菜品卡片组件。
@@ -26,8 +27,8 @@ const emit = defineEmits<{
   (e: 'remove', dish: Dish): void
 }>()
 
-/** 菜品图片地址(后端返回 /uploads/xxx 相对路径,直接使用;为空则用占位) */
-const imageUrl = computed<string>(() => {
+/** 菜品图片原始地址(后端返回 /uploads/xxx 相对路径,直接使用;为空则用占位) */
+const rawImageUrl = computed<string>(() => {
   const img = props.dish.image || props.dish.imageUrl
   if (!img) return ''
   // 已是完整 URL 或 data URL 直接使用
@@ -35,6 +36,20 @@ const imageUrl = computed<string>(() => {
   // 相对路径直接使用(开发环境由 vite 代理或后端直出)
   return img
 })
+
+/** 经过本地缓存处理的图片 URL（命中缓存返回 blob URL，否则原 URL） */
+const imageUrl = ref('')
+watch(
+  rawImageUrl,
+  async (raw) => {
+    if (!raw) {
+      imageUrl.value = ''
+      return
+    }
+    imageUrl.value = await getCachedImage(raw)
+  },
+  { immediate: true },
+)
 
 const isSoldOut = computed<boolean>(() => props.dish.status === 0)
 

@@ -130,12 +130,38 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 
 ## X86 终端配置
 
-终端使用同一安装包，通过设置页面配置：
-1. 服务器 API 地址
-2. 门店 ID
-3. 运行模式（订餐 / 取餐）
+终端使用 **Tauri** 打包为原生 EXE(`src-tauri/dist-portable/canteen-terminal.exe`),绿色免安装,**默认全屏无边框启动**。
 
-配置存储在终端本地，不同终端可独立配置。本地 IndexedDB 缓存菜品图片和菜单数据，断网时仍可展示。
+### 配置文件 config.json
+
+EXE 同目录放置 `config.json`(支持 `//` 行注释)配置以下字段:
+
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| `admin_password_hash` | 管理员密码的 SHA256 哈希(64 位十六进制),用于右上角 6 次点击后的密码验证 | "admin" 的哈希 |
+| `server_url` | 预设后端服务器地址,绑定页面会自动填入;留空则要求手动输入 | "" |
+
+修改后重启 EXE 生效。密码哈希生成方法见 [X86 终端需求书](file:///d:/文档/enterprise-canteen/enterprise-canteen/docs/X86终端需求书.md#81-configjson-配置说明)。
+
+### 管理入口
+
+运行模式下界面无管理按钮,**连续点击窗口右上角 6 下**(2 秒内)→ 弹出密码框 → 验证通过显示三按钮菜单:
+- **配置模式**:退出全屏,进入 `/settings` 配置页(绑定/解绑/切换模式)
+- **退出**:关闭整个应用
+- **取消**:返回运行模式
+
+### 终端本地配置(localStorage)
+
+通过设置页面配置:
+1. 服务器 API 地址
+2. 管理员账号密码 + 食堂安全码(绑定签发终端 token)
+3. 运行模式(订餐 / 取餐)
+
+配置存储在终端本地,不同终端可独立配置。本地 IndexedDB 缓存菜品图片和菜单数据,断网时仍可展示。
+
+### CH372 读卡器驱动
+
+内置 CH372/CH375/CH376 USB 芯片驱动(位于 `src-tauri/drivers/CH372/`),支持 VID_4348&PID_5537 等多种芯片。首次部署时运行 `读写器驱动安装32or64bit.exe` 安装。
 
 ## 数据备份
 

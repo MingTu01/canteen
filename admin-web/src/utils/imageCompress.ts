@@ -4,7 +4,7 @@
  * 策略:
  * - 大图(>200k)逐步降低 quality 直至 <=200k
  * - 保持宽高比,最大尺寸 800px(菜品图最大展示场景 H5 详情 ~400px,800px 仍 2 倍冗余;管理后台预览够用)
- * - 输出 JPEG(jpeg 压缩率最高,适合照片;logo/图标用 PNG,但 200k 内的 PNG 直接原样返回)
+ * - PNG / 含透明通道的图片保持 PNG 格式(保留透明通道,logo/图标必需);JPEG/WebP 用 JPEG 压缩
  *
  * 用法:
  *   const file = event.target.files[0]
@@ -23,14 +23,19 @@ const MIN_QUALITY = 0.5
  * @returns 压缩后的 File 对象(保留原文件名)
  */
 export async function compressImage(file: File, targetKB: number = TARGET_SIZE_KB): Promise<File> {
-  // 非图片直接返回
-  if (!file.type.startsWith('image/')) {
+  // 非图片直接返回(部分浏览器对特殊格式可能不报告 type,也放行让后端校验)
+  if (file.type && !file.type.startsWith('image/')) {
     return file
   }
   // 已经小于目标大小,直接返回(无需压缩)
   if (file.size <= targetKB * 1024) {
     return file
   }
+
+  // PNG 检测:同时检查 MIME 类型和文件扩展名(部分系统可能不报告正确的 MIME)
+  const isPngByMime = file.type === 'image/png'
+  const isPngByExt = /\.png$/i.test(file.name)
+  let isPng = isPngByMime || isPngByExt
 
   const img = await loadImage(file)
   const { width, height } = clampDimension(img.width, img.height, MAX_DIMENSION)
@@ -45,12 +50,26 @@ export async function compressImage(file: File, targetKB: number = TARGET_SIZE_K
   }
   ctx.drawImage(img, 0, 0, width, height)
 
-  // 逐步降低 quality 直到 <= 目标大小
-  let quality = 0.9
-  let blob = await canvasToBlob(canvas, 'image/jpeg', quality)
-  while (blob && blob.size > targetKB * 1024 && quality > MIN_QUALITY) {
-    quality -= 0.1
+  // 检测 canvas 中是否真正存在透明像素(alpha < 255)
+  // 如果有,强制使用 PNG 输出以保留透明通道(即使原文件扩展名不是 .png)
+  if (!isPng && hasTransparency(ctx, width, height)) {
+    isPng = true
+  }
+
+  const outputType = isPng ? 'image/png' : 'image/jpeg'
+
+  let blob: Blob | null
+  if (isPng) {
+    // PNG 无损压缩(仅缩放尺寸,不降质量),保留透明通道
+    blob = await canvasToBlob(canvas, 'image/png')
+  } else {
+    // JPEG 逐步降低 quality 直到 <= 目标大小
+    let quality = 0.9
     blob = await canvasToBlob(canvas, 'image/jpeg', quality)
+    while (blob && blob.size > targetKB * 1024 && quality > MIN_QUALITY) {
+      quality -= 0.1
+      blob = await canvasToBlob(canvas, 'image/jpeg', quality)
+    }
   }
 
   if (!blob) {
@@ -62,10 +81,35 @@ export async function compressImage(file: File, targetKB: number = TARGET_SIZE_K
     return file
   }
 
-  // 保留原扩展名,但统一用 jpeg(压缩后一定是 jpeg)
-  const ext = file.name.lastIndexOf('.') >= 0 ? file.name.substring(file.name.lastIndexOf('.')) : '.jpg'
-  const newName = file.name.replace(/\.[^.]+$/, '') + (ext.toLowerCase() === '.png' ? '.jpg' : ext)
-  return new File([blob], newName, { type: 'image/jpeg', lastModified: Date.now() })
+  const ext = isPng ? '.png' : '.jpg'
+  const baseName = file.name.replace(/\.[^.]+$/, '') || 'image'
+  return new File([blob], baseName + ext, { type: outputType, lastModified: Date.now() })
+}
+
+/**
+ * 检测 canvas 中是否存在透明像素(alpha < 255)。
+ * 用于判断图片是否真正包含透明通道,决定是否需要 PNG 格式保留透明。
+ * 采用采样检测,避免全量扫描大图导致性能问题。
+ */
+function hasTransparency(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  try {
+    const imageData = ctx.getImageData(0, 0, width, height)
+    const data = imageData.data
+    // 采样步长:最多检测 ~5000 个像素点,保证性能
+    const totalPixels = width * height
+    const sampleStep = Math.max(1, Math.floor(Math.sqrt(totalPixels / 5000)))
+    for (let y = 0; y < height; y += sampleStep) {
+      for (let x = 0; x < width; x += sampleStep) {
+        const alpha = data[(y * width + x) * 4 + 3]
+        if (alpha < 255) {
+          return true
+        }
+      }
+    }
+  } catch {
+    // getImageData 可能因跨域限制失败,保守返回 false
+  }
+  return false
 }
 
 /** 加载 File 为 HTMLImageElement */
@@ -98,7 +142,7 @@ function clampDimension(width: number, height: number, max: number): { width: nu
 }
 
 /** canvas 转 Blob */
-function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), type, quality)
   })

@@ -1,0 +1,229 @@
+"""
+本地 HTTP 服务器。
+
+双重功能:
+1. serve Vue 前端的 dist 目录(静态文件)
+2. 处理 /__api__/xxx 端点(前端 → Python 的 API 调用)
+
+绑定到 127.0.0.1 的随机端口,避免冲突。
+"""
+import http.server
+import socketserver
+import os
+import threading
+import json
+import urllib.parse
+
+
+def find_web_dist():
+    """查找 Vue 前端 dist 目录。
+
+    优先级:
+    1. PyInstaller 临时目录(web 目录打包进 EXE)
+    2. EXE 同目录的 web 目录
+    3. 开发模式:terminal/dist
+    """
+    from config import get_meipass, get_exe_dir
+
+    candidates = [
+        os.path.join(get_meipass(), 'web'),
+        os.path.join(get_exe_dir(), 'web'),
+        os.path.join(get_exe_dir(), '..', 'terminal', 'dist'),
+    ]
+
+    for path in candidates:
+        abs_path = os.path.abspath(path)
+        if os.path.isdir(abs_path) and os.path.exists(os.path.join(abs_path, 'index.html')):
+            return abs_path
+    return None
+
+
+class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
+    """处理静态文件 + API 请求的 HTTP handler。"""
+
+    # 由 start_server 注入
+    web_dir = '.'
+    bridge = None
+
+    def log_message(self, format, *args):
+        pass  # 静默,不打印访问日志
+
+    def do_GET(self):
+        """处理 GET 请求:API 端点或静态文件。"""
+        parsed = urllib.parse.urlparse(self.path)
+
+        # API 端点:/__api__/xxx —— 全部转发给 bridge 处理
+        # (bridge 自行判断方法是否支持,不支持的返回错误)
+        if parsed.path.startswith('/__api__/'):
+            method = parsed.path[len('/__api__/'):]
+            self._handle_api(method)
+            return
+
+        # 静态文件:Vue SPA 路由回退到 index.html
+        self._serve_static(parsed.path)
+
+    def do_POST(self):
+        """处理 POST 请求:API 端点。"""
+        parsed = urllib.parse.urlparse(self.path)
+
+        if parsed.path.startswith('/__api__/'):
+            method = parsed.path[len('/__api__/'):]
+            self._handle_api(method)
+        else:
+            self._send_json(404, {'ok': False, 'error': 'Not Found'})
+
+    def _handle_api(self, method):
+        """调用 bridge 处理 API 请求。"""
+        if not self.bridge:
+            self._send_json(500, {'ok': False, 'error': 'Bridge 未初始化'})
+            return
+
+        # 读取请求体(POST 可能有 body)
+        body = None
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length > 0:
+            try:
+                raw = self.rfile.read(content_length)
+                body = json.loads(raw)
+            except Exception:
+                body = None
+
+        try:
+            result = self.bridge.handle_api(method, body)
+            self._send_json(200, result)
+        except Exception as e:
+            self._send_json(500, {'ok': False, 'error': str(e)})
+
+    def _send_json(self, code, data):
+        """发送 JSON 响应。"""
+        body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        # 允许跨域(虽然同源不需要,但保险)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_static(self, path):
+        """serve 静态文件,SPA 路由回退到 index.html。"""
+        # 去掉开头的 /
+        if path.startswith('/'):
+            path = path[1:]
+
+        # URL 解码
+        path = urllib.parse.unquote(path)
+
+        # 默认 index.html
+        if path == '':
+            path = 'index.html'
+
+        file_path = os.path.join(self.web_dir, path)
+
+        # 安全检查:防止目录穿越
+        file_path = os.path.normpath(file_path)
+        if not file_path.startswith(os.path.abspath(self.web_dir)):
+            self.send_error(403)
+            return
+
+        # 文件存在 → 直接 serve
+        if os.path.isfile(file_path):
+            super().do_GET()
+            return
+
+        # 文件不存在 → SPA 路由回退到 index.html
+        index_path = os.path.join(self.web_dir, 'index.html')
+        if os.path.isfile(index_path):
+            self._serve_file(index_path)
+        else:
+            self.send_error(404)
+
+    def _serve_file(self, file_path):
+        """直接 serve 指定文件。"""
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read()
+            self.send_response(200)
+            self._guess_header(file_path)
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_error(500, str(e))
+
+    def _guess_header(self, file_path):
+        """根据扩展名设置 Content-Type。"""
+        ext = os.path.splitext(file_path)[1].lower()
+        types = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'application/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.ico': 'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf': 'font/ttf',
+        }
+        self.send_header('Content-Type', types.get(ext, 'application/octet-stream'))
+
+    def translate_path(self, path):
+        """重写 SimpleHTTPRequestHandler 的路径转换,使用 web_dir。"""
+        if path.startswith('/'):
+            path = path[1:]
+        return os.path.join(self.web_dir, urllib.parse.unquote(path))
+
+
+def start_server(directory, bridge, port=0):
+    """启动本地 HTTP 服务器。
+
+    Args:
+        directory: Vue dist 目录
+        bridge: ShellBridge 实例
+        port: 端口号,0 表示自动分配(不推荐,会导致 origin 不稳定)
+
+    Returns:
+        (server, url): 服务器实例和访问 URL
+    """
+    # 创建 handler 类,注入 web_dir 和 bridge
+    class Handler(ApiAwareHandler):
+        pass
+    Handler.web_dir = directory
+    Handler.bridge = bridge
+
+    # 固定端口优先:保证 origin(http://127.0.0.1:port)稳定,
+    # 否则 localStorage/IndexedDB 会因端口变化而丢失(绑定配置、菜品缓存全部失效)。
+    # 候选端口按优先级尝试:1287 是终端默认端口,后续端口作为 fallback。
+    if port != 0:
+        # 调用方显式指定端口,直接用
+        candidates = [port]
+    else:
+        candidates = [1287, 1288, 1289, 1290, 1291]
+
+    server = None
+    actual_port = None
+    last_error = None
+    for p in candidates:
+        try:
+            server = socketserver.TCPServer(('127.0.0.1', p), Handler)
+            server.allow_reuse_address = True
+            actual_port = p
+            break
+        except OSError as e:
+            last_error = e
+            continue
+
+    if server is None:
+        raise RuntimeError(f'无法绑定本地端口(尝试过 {candidates}):{last_error}')
+
+    url = f'http://127.0.0.1:{actual_port}'
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    print(f'[Server] 本地 HTTP 服务器已启动: {url} -> {directory} (端口:{actual_port})')
+    return server, url

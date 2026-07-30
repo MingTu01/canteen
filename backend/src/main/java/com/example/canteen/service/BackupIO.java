@@ -3,6 +3,7 @@ package com.example.canteen.service;
 import com.example.canteen.exception.BusinessException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
@@ -43,6 +44,10 @@ public class BackupIO {
     BackupIO(String backupDir) {
         this.backupDir = backupDir;
         this.objectMapper = new ObjectMapper();
+        // 注册 JSR310 模块以支持 java.time.* 类型(LocalDateTime/Instant 等)
+        // JdbcTemplate.queryForList 会把 MySQL DATETIME 列转为 LocalDateTime,
+        // 默认 ObjectMapper 无法序列化,会抛 "Java 8 date/time type not supported by default"
+        this.objectMapper.registerModule(new JavaTimeModule());
         this.objectMapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
     }
 

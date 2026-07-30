@@ -60,6 +60,13 @@ public class JwtAuthenticationFilter implements Filter {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
 
         String path = httpRequest.getRequestURI();
+        // CORS 预检请求(OPTIONS)直接放行:浏览器发送预检时不带 Authorization 头,
+        // 若在此处拒绝会返回 401 且无 CORS 头,导致浏览器屏蔽实际请求。
+        // 预检无认证意义,后续 CorsConfig 会处理 CORS 头部。
+        if ("OPTIONS".equalsIgnoreCase(httpRequest.getMethod())) {
+            chain.doFilter(request, response);
+            return;
+        }
         // 白名单(login/health/logout/version/actuator/uploads 等)直接放行
         if (whitelistMatcher.isWhitelisted(path)) {
             chain.doFilter(request, response);

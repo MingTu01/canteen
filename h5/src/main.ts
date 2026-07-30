@@ -10,6 +10,12 @@ import 'vant/lib/index.css'
 // 全局样式
 import './styles/global.scss'
 
+// 图片本地缓存（IndexedDB）
+import { cleanExpiredCache } from './utils/imageCache'
+// H5 懒加载缓存：菜品图片 + 登录用户头像（用到才加载，加载后缓存）
+// 启动时清理过期缓存
+cleanExpiredCache()
+
 const app = createApp(App)
 
 const pinia = createPinia()

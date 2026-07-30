@@ -31,6 +31,11 @@ public class StoreAccessInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS 预检请求(OPTIONS)直接放行:预检无认证信息,无法做门店权限校验,
+        // 且预检不携带业务语义,实际请求仍会经过完整校验。
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String path = request.getRequestURI();
 
         Long targetStoreId = extractStoreId(path, request);

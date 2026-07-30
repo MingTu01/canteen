@@ -12,11 +12,12 @@
  */
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '@/api'
+import api, { loadConfig } from '@/api'
 import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { mealTypeLabel, mealTypeTime, toDateKey } from '@/utils'
 import { getDishImgUrl } from '@/utils/cache'
+import { getCachedAvatar } from '@/utils/imageCache'
 import { Pause, Play } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import Modal from '@/components/Modal.vue'
@@ -33,6 +34,36 @@ const remaining = ref(COUNTDOWN_TOTAL)
 const paused = ref(false)
 const completing = ref(false)
 let timer = 0
+
+/** 头像缓存处理 */
+const avatarError = ref(false)
+const avatarSrc = ref('')
+let avatarObjectUrl = ''
+
+const revokeAvatarUrl = () => {
+  if (avatarObjectUrl && avatarObjectUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(avatarObjectUrl)
+  }
+  avatarObjectUrl = ''
+}
+
+watch(
+  () => employee.value?.avatar,
+  async (raw) => {
+    avatarError.value = false
+    revokeAvatarUrl()
+    if (!raw) {
+      avatarSrc.value = ''
+      return
+    }
+    const config = loadConfig()
+    const baseUrl = config?.serverUrl || ''
+    const url = await getCachedAvatar(raw, baseUrl)
+    if (url.startsWith('blob:')) avatarObjectUrl = url
+    avatarSrc.value = url
+  },
+  { immediate: true },
+)
 
 const { mealBadgeStyle, mealIconMap, mealIconColor } = useMealConfig()
 
@@ -114,17 +145,12 @@ const resetCountdown = () => {
 /** 取餐完成:调用 complete 接口,成功后直接返回待机主页 */
 const completePickup = async () => {
   if (completing.value || !order.value) return
-  // 模拟订单(id < 0,测试阶段):直接返回主页,不调用后端接口
-  if (order.value.id < 0) {
-    goBack()
-    return
-  }
   completing.value = true
   try {
     await api.put(`/order/${order.value.id}/complete`)
     goBack()
   } catch (e: any) {
-    errorMsg.value = e?.response?.data?.message || '取餐完成失败,请重试'
+    errorMsg.value = e?.response?.data?.message ?? '取餐完成失败,请重试'
     showError.value = true
   } finally {
     completing.value = false
@@ -188,7 +214,7 @@ const switchEmployee = async (cardNo: string) => {
     const newEmp = resp.data.data
     // 拉取今日待取餐订单(先拉订单,成功后再更新 employee,避免中间态错配)
     const listResp = await api.get(`/order/employee/${newEmp.id}`)
-    const list: any[] = listResp.data?.code === 200 ? (listResp.data.data || []) : []
+    const list: any[] = listResp.data?.code === 200 ? (listResp.data.data ?? []) : []
     const today = toDateKey(new Date())
     const pending = list
       .filter((o) => o.date === today && o.status === 1)
@@ -245,12 +271,13 @@ onUnmounted(() => {
   if (cardBufferTimer) clearTimeout(cardBufferTimer)
   // 释放所有 ObjectURL,避免内存泄漏
   revokeLocalImgUrls()
+  revokeAvatarUrl()
 })
 </script>
 
 <template>
   <main v-if="employee" class="pickup-info">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.5" />
+    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.15" />
     <TopBar title="取餐窗口" :show-back="false">
       <template #right>
         <div class="pickup-info__countdown">
@@ -276,9 +303,16 @@ onUnmounted(() => {
 
       <!-- 正常态:展示员工 + 订单详情 -->
       <template v-else>
-        <!-- 员工头像(放大) -->
+        <!-- 员工头像(放大,图片优先,失败回退首字母) -->
         <div class="pickup-info__avatar">
-          <span>{{ employee.name?.charAt(0) }}</span>
+          <img
+            v-if="avatarSrc && !avatarError"
+            :src="avatarSrc"
+            :alt="employee.name"
+            class="pickup-info__avatar-img"
+            @error="avatarError = true"
+          />
+          <span v-else>{{ employee.name?.charAt(0) }}</span>
         </div>
         <!-- 部门·名字 -->
         <div class="pickup-info__user-info">
@@ -288,7 +322,7 @@ onUnmounted(() => {
         </div>
 
       <!-- 餐别信息卡片 -->
-      <div class="pickup-info__card" :class="{ 'pickup-info__card--unsolicited': order.orderSource === 1 }">
+      <div v-if="order" class="pickup-info__card" :class="{ 'pickup-info__card--unsolicited': order.orderSource === 1 }">
         <div class="pickup-info__meal-head">
           <div class="pickup-info__badge" :style="mealBadgeStyle(order.mealType)">
             <component
@@ -358,7 +392,8 @@ onUnmounted(() => {
 .pickup-info {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   /* 取餐端统一深色背景 + 白色文字 */
   background: var(--doubao-foreground);
 }
@@ -392,8 +427,9 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   padding: 32px 24px;
-  gap: 16px;
+  gap: 24px;
   position: relative;
+  overflow-y: auto;
 }
 /* 切换中遮罩:半透明覆盖,提示正在切换员工 */
 .pickup-info__body--switching {
@@ -410,7 +446,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 12px;
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   color: #ffffff;
   background: var(--doubao-foreground);
 }
@@ -433,11 +469,16 @@ onUnmounted(() => {
   color: var(--doubao-primary-foreground);
   font-size: 48px;
   font-weight: 700;
-  margin-bottom: 4px;
+  flex-shrink: 0;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.pickup-info__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .pickup-info__user-info {
-  margin-bottom: 16px;
   text-align: center;
 }
 .pickup-info__dept-name {
@@ -455,7 +496,6 @@ onUnmounted(() => {
   border-radius: var(--doubao-radius);
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.08);
-  margin-bottom: 32px;
   backdrop-filter: blur(8px);
 }
 .pickup-info__meal-head {
@@ -473,7 +513,7 @@ onUnmounted(() => {
   border-radius: 999px;
   border: 1px solid;
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
 }
 .pickup-info__time {
   font-size: var(--fs-base);
@@ -498,7 +538,7 @@ onUnmounted(() => {
   background: #ff9800;
   color: #fff;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   margin-left: 8px;
   letter-spacing: 1px;
   box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
@@ -565,7 +605,7 @@ onUnmounted(() => {
 .pickup-info__confirm {
   padding: 8px 32px;
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
   border-radius: var(--doubao-radius-sm);
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);

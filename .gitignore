@@ -34,6 +34,7 @@ logs/
 # Backup(运行时数据,不提交)
 backup/*
 !backup/.gitkeep
+backend/backups/*
 
 # Uploads(运行时数据,不提交)
 uploads/*
@@ -43,6 +44,11 @@ uploads/*
 _*.py
 _*.sql
 canteen-mysqldump-err.log
+
+# Python Shell 运行时数据(IndexedDB/Local Storage/缓存等)
+src-python/data/
+src-python/build/
+src-python/dist/
 
 # Docker
 docker-compose.override.yml

@@ -88,7 +88,9 @@ services:
       # 显式激活生产 profile:启用 application-prod.yml,排除 @Profile("dev") 的 TestController
       SPRING_PROFILES_ACTIVE: prod
     ports:
-      - "127.0.0.1:8080:8080"
+      # 绑定 0.0.0.0 让局域网内的 X86 终端设备可以访问后端 API
+      # (终端 Tauri 应用通过 http://<服务器IP>:8080 调用)
+      - "8080:8080"
     healthcheck:
       # 容器内仅安装 curl(无 wget),使用 curl 健康检查白名单接口 /api/system/health
       test: ["CMD-SHELL", "curl -fs -o /dev/null http://localhost:8080/api/system/health || exit 1"]

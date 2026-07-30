@@ -17,7 +17,6 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Server,
-  Save,
   RotateCcw,
   Info,
   ShieldCheck,
@@ -25,10 +24,21 @@ import {
   CheckCircle2,
   ShoppingCart,
   ClipboardList,
+  Monitor,
+  CreditCard,
+  Timer,
 } from 'lucide-vue-next'
 import { loadConfig, bindTerminal, clearConfig, saveConfig, type TerminalConfig } from '@/api'
 import { clearBranding } from '@/store/branding'
 import { destroyLocalCache } from '@/utils/cache'
+import { getServerUrl, setRuntimeConfig } from '@/api/shellApi'
+import {
+  loadRuntimeConfig,
+  windowMode,
+  cardInterval,
+  idleTimeoutSeconds,
+  isPythonShell,
+} from '@/store/terminalSettings'
 import TopBar from '@/components/TopBar.vue'
 
 const router = useRouter()
@@ -52,12 +62,70 @@ const bindError = ref('')
 const bindSuccess = ref(false)
 let bindSuccessTimer: ReturnType<typeof setTimeout> | null = null
 
+// 探测状态:用于按钮文案与提示
+const probing = ref(false)
+const probeMessage = ref('')
+
 // ===== 解绑(需管理员密码二次校验,防止未授权人员物理接触后解绑) =====
 const unbindConfirmVisible = ref(false)
 const unbindVerifying = ref(false)
 const unbindVerifyError = ref('')
 // 二次校验:管理员用户名 + 密码(调用 /admin/login 验证,不依赖本地保存的凭据)
 const unbindForm = ref({ username: '', password: '' })
+
+// ===== 终端运行设置(仅 Python Shell 环境可用) =====
+// 本地表单副本,编辑时用;保存时同步到 store + Python config.json
+const runtimeForm = ref({
+  windowMode: 'fullscreen' as 'fullscreen' | 'windowed',
+  cardInterval: 2.0,
+  idleTimeout: 30,
+})
+const runtimeSaving = ref(false)
+const runtimeMsg = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
+let runtimeMsgTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 从 store 同步到本地表单(进入页面/保存后调用) */
+function syncRuntimeForm() {
+  runtimeForm.value.windowMode = windowMode.value
+  runtimeForm.value.cardInterval = cardInterval.value
+  runtimeForm.value.idleTimeout = idleTimeoutSeconds.value
+}
+
+/**
+ * 保存运行设置到 Python config.json(静默保存,仅失败时提示)。
+ * 由 goRun 在"进入运行模式"时自动调用,无需独立保存按钮。
+ * @returns 是否保存成功
+ */
+async function saveRuntimeConfig(): Promise<boolean> {
+  if (!isPythonShell.value) return true
+  runtimeSaving.value = true
+  runtimeMsg.value = null
+  try {
+    const updates = {
+      window_mode: runtimeForm.value.windowMode,
+      card_interval: Number(runtimeForm.value.cardInterval),
+      idle_timeout: Number(runtimeForm.value.idleTimeout),
+    }
+    const ok = await setRuntimeConfig(updates)
+    if (ok) {
+      // 重新从 Python 读取,同步 store(保持单一数据源)
+      await loadRuntimeConfig()
+      syncRuntimeForm()
+      // window_mode 的动态切换由 Python 端 on_config_updated 信号处理:
+      // set_config 写入后 emit config_updated → main.py 直接调用 switch_to_fullscreen_mode / switch_to_config_mode
+    } else {
+      runtimeMsg.value = { type: 'error', text: '保存失败,请检查配置文件权限' }
+    }
+    return ok
+  } catch (e: any) {
+    runtimeMsg.value = { type: 'error', text: e?.message || '保存失败' }
+    return false
+  } finally {
+    runtimeSaving.value = false
+    if (runtimeMsgTimer) clearTimeout(runtimeMsgTimer)
+    runtimeMsgTimer = setTimeout(() => { runtimeMsg.value = null }, 4000)
+  }
+}
 
 const reloadBound = () => {
   boundConfig.value = loadConfig()
@@ -67,6 +135,84 @@ const reloadBound = () => {
     form.value.deviceLabel = boundConfig.value.deviceLabel
     form.value.mode = boundConfig.value.mode
   }
+}
+
+/**
+ * 自动探测后端端口。
+ * 用户输入 "http://192.168.10.79" 时,自动尝试常见端口找到后端。
+ * 探测用 no-cors fetch:只要 TCP 连通就认为端口可用(opaque 响应也 resolve)。
+ *
+ * @param baseUrl 用户输入的基础地址
+ * @returns 探测到的完整 URL(含端口);无需探测或探测失败返回 null
+ */
+async function probeBackendPort(baseUrl: string): Promise<string | null> {
+  let parsed: URL
+  try {
+    // 允许不带协议的输入,如 "192.168.10.79"
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      baseUrl = 'http://' + baseUrl
+    }
+    parsed = new URL(baseUrl)
+  } catch {
+    return null
+  }
+
+  const protocol = parsed.protocol
+  const hostname = parsed.hostname
+
+  // 已显式带端口 → 不探测
+  if (parsed.port) return null
+
+  // 候选端口:按可能性排序
+  const candidates = protocol === 'https:'
+    ? [443, 8443, 8080, 9080, 9000]
+    : [8080, 80, 8443, 8888, 9090, 3000, 5000, 81, 82, 83, 8081, 8082, 9000]
+
+  // 探测单个端口:2 秒超时,no-cors 模式只检测连通性
+  const probe = (port: number): Promise<number | null> => {
+    return new Promise((resolve) => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => {
+        controller.abort()
+        resolve(null)
+      }, 2000)
+      fetch(`${protocol}//${hostname}:${port}/api/system/health`, {
+        mode: 'no-cors',
+        signal: controller.signal,
+        cache: 'no-cache',
+      }).then(() => {
+        clearTimeout(timer)
+        resolve(port)
+      }).catch(() => {
+        clearTimeout(timer)
+        resolve(null)
+      })
+    })
+  }
+
+  // 并行探测,第一个成功即返回
+  return new Promise((resolve) => {
+    let settled = false
+    let remaining = candidates.length
+    candidates.forEach(port => {
+      probe(port).then(result => {
+        if (settled) return
+        if (result !== null) {
+          settled = true
+          // 默认端口不显式写出
+          if ((protocol === 'http:' && result === 80) ||
+              (protocol === 'https:' && result === 443)) {
+            resolve(`${protocol}//${hostname}`)
+          } else {
+            resolve(`${protocol}//${hostname}:${result}`)
+          }
+        } else {
+          remaining--
+          if (remaining === 0) resolve(null)
+        }
+      })
+    })
+  })
 }
 
 const doBind = async () => {
@@ -80,10 +226,36 @@ const doBind = async () => {
     bindError.value = '请输入食堂安全码'
     return
   }
+
   binding.value = true
+
+  // 自动探测端口:用户输入的地址没带端口时,尝试常见端口
+  let finalServerUrl = form.value.serverUrl.trim()
+  if (finalServerUrl && !/^https?:\/\/[^\s/]+:\d+/i.test(finalServerUrl)) {
+    probing.value = true
+    probeMessage.value = '正在探测服务器端口...'
+    try {
+      const detected = await probeBackendPort(finalServerUrl)
+      if (detected) {
+        finalServerUrl = detected
+        form.value.serverUrl = detected // 回填到表单,用户可见
+        probeMessage.value = ''
+      } else {
+        probing.value = false
+        bindError.value = '无法连接服务器,请检查地址或手动指定端口(如 :8080)'
+        binding.value = false
+        return
+      }
+    } catch {
+      probing.value = false
+      // 探测失败不阻断,继续用原地址尝试绑定(让后端给出明确错误)
+    }
+    probing.value = false
+  }
+
   try {
     await bindTerminal({
-      serverUrl: form.value.serverUrl.trim(),
+      serverUrl: finalServerUrl,
       username: form.value.username.trim(),
       password: form.value.password,
       securityCode: form.value.securityCode.trim(),
@@ -162,8 +334,16 @@ const switchMode = (mode: 'order' | 'pickup') => {
   saveConfig(boundConfig.value)
 }
 
-/** 进入运行模式(根据当前 mode 跳转) */
-const goRun = () => {
+/**
+ * 进入运行模式:先自动保存终端运行设置(Python Shell 环境),
+ * 保存成功后根据当前 mode 跳转。保存失败则停留在配置页提示错误。
+ */
+const goRun = async () => {
+  // Python Shell 环境下先保存运行设置(窗口模式/读卡间隔/无操作超时)
+  if (isPythonShell.value) {
+    const ok = await saveRuntimeConfig()
+    if (!ok) return // 保存失败不跳转,让用户看到错误提示
+  }
   const cfg = loadConfig()
   if (!cfg) return
   if (cfg.mode === 'pickup') {
@@ -188,9 +368,29 @@ const userAgent = navigator.userAgent
 const screenWidth = window.screen.width
 const screenHeight = window.screen.height
 
-onMounted(reloadBound)
+/**
+ * 从 shell config.json 读取预设服务器地址,自动填入表单。
+ * 仅在未绑定时填充,避免覆盖已绑定配置的展示。
+ * 浏览器开发模式下返回空,静默忽略。
+ */
+async function prefillServerUrl() {
+  if (boundConfig.value) return // 已绑定不覆盖
+  const url = await getServerUrl()
+  if (url) {
+    form.value.serverUrl = url
+  }
+}
+
+onMounted(async () => {
+  reloadBound()
+  await prefillServerUrl()
+  // 主动加载运行时配置(不等 App.vue 的异步加载,确保 isPythonShell 及时更新)
+  await loadRuntimeConfig().catch(() => {})
+  syncRuntimeForm()
+})
 onBeforeUnmount(() => {
   if (bindSuccessTimer) clearTimeout(bindSuccessTimer)
+  if (runtimeMsgTimer) clearTimeout(runtimeMsgTimer)
 })
 </script>
 
@@ -262,13 +462,102 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <!-- 主操作按钮 -->
+          <!-- 终端运行设置卡(仅 Python Shell 环境) -->
+          <section v-if="isPythonShell" class="card">
+            <header class="card__header">
+              <h2 class="card__title">
+                <Monitor :size="22" class="card__icon card__icon--primary" />
+                终端运行设置
+              </h2>
+              <span class="card__hint">进入运行模式时自动保存</span>
+            </header>
+
+            <div class="settings__runtime-form">
+              <!-- 窗口模式 -->
+              <div class="settings__field">
+                <label class="settings__label">
+                  <Monitor :size="14" />
+                  窗口模式
+                </label>
+                <div class="settings__seg-group">
+                  <button
+                    class="seg-btn btn-press"
+                    :class="{ 'seg-btn--active': runtimeForm.windowMode === 'fullscreen' }"
+                    @click="runtimeForm.windowMode = 'fullscreen'"
+                  >
+                    全屏无边框
+                  </button>
+                  <button
+                    class="seg-btn btn-press"
+                    :class="{ 'seg-btn--active': runtimeForm.windowMode === 'windowed' }"
+                    @click="runtimeForm.windowMode = 'windowed'"
+                  >
+                    窗口模式
+                  </button>
+                </div>
+                <p class="settings__field-hint">全屏适合终端设备;窗口模式(1280×800)适合调试。进入运行模式时切换生效。</p>
+              </div>
+
+              <!-- 读卡间隔 -->
+              <div class="settings__field">
+                <label class="settings__label" for="cfg-card-interval">
+                  <CreditCard :size="14" />
+                  读卡防抖间隔(秒)
+                </label>
+                <input
+                  id="cfg-card-interval"
+                  v-model.number="runtimeForm.cardInterval"
+                  type="number"
+                  min="0.5"
+                  max="10"
+                  step="0.5"
+                  class="settings__input"
+                />
+                <p class="settings__field-hint">同一张卡在此间隔内不重复触发,避免一次刷卡多次响应。推荐 1.0~3.0 秒。</p>
+              </div>
+
+              <!-- 菜品显示时间(自动返回待机) -->
+              <div class="settings__field">
+                <label class="settings__label" for="cfg-idle-timeout">
+                  <Timer :size="14" />
+                  无操作返回待机时间(秒)
+                </label>
+                <input
+                  id="cfg-idle-timeout"
+                  v-model.number="runtimeForm.idleTimeout"
+                  type="number"
+                  min="0"
+                  max="3600"
+                  step="10"
+                  class="settings__input"
+                />
+                <p class="settings__field-hint">用户在选菜/取餐页面无操作超过此时间后自动返回待机页。0 表示永不自动返回。</p>
+              </div>
+
+              <!-- 错误提示(仅保存失败时显示) -->
+              <div
+                v-if="runtimeMsg && runtimeMsg.type === 'error'"
+                class="settings__alert settings__alert--error"
+              >
+                <Info :size="18" class="settings__alert-icon" />
+                <span>{{ runtimeMsg.text }}</span>
+              </div>
+
+              <p class="settings__field-hint settings__field-hint--save-tip">
+                设置在点击"进入运行模式"时自动保存并生效。
+              </p>
+            </div>
+          </section>
+
+          <!-- 主操作按钮(自动保存运行设置后跳转) -->
           <button
             class="settings__primary-btn btn-press"
+            :disabled="runtimeSaving"
             @click="goRun"
           >
-            <CheckCircle2 :size="22" />
-            <span>进入运行模式</span>
+            <Loader2 v-if="runtimeSaving" class="spinner" :size="22" />
+            <CheckCircle2 v-else :size="22" />
+            <span>{{ runtimeSaving ? '保存并进入...' : '进入运行模式' }}</span>
           </button>
 
           <!-- 解绑按钮 -->
@@ -296,12 +585,12 @@ onBeforeUnmount(() => {
             </p>
             <div class="settings__form">
               <div class="settings__field">
-                <label class="settings__label">服务器域名(留空=同源开发模式)</label>
+                <label class="settings__label">服务器域名(留空=同源开发模式,可省略端口自动探测)</label>
                 <input
                   v-model="form.serverUrl"
                   type="text"
                   class="settings__input"
-                  placeholder="留空走当前站点代理,或填 https://canteen.xxx.com"
+                  placeholder="如 http://192.168.10.79 或 https://canteen.xxx.com (端口可省略)"
                 />
               </div>
               <div class="settings__field-row">
@@ -380,6 +669,11 @@ onBeforeUnmount(() => {
             <Info :size="18" class="settings__alert-icon" />
             <span>{{ bindError }}</span>
           </div>
+          <!-- 探测中提示 -->
+          <div v-if="probing" class="settings__alert settings__alert--info">
+            <Loader2 :size="18" class="spinner" />
+            <span>{{ probeMessage || '正在探测服务器端口...' }}</span>
+          </div>
           <!-- 成功提示 -->
           <div v-if="bindSuccess" class="settings__alert settings__alert--success">
             <CheckCircle2 :size="18" class="settings__alert-icon" />
@@ -389,12 +683,12 @@ onBeforeUnmount(() => {
           <!-- 绑定按钮 -->
           <button
             class="settings__primary-btn btn-press"
-            :disabled="binding"
+            :disabled="binding || probing"
             @click="doBind"
           >
-            <Loader2 v-if="binding" class="spinner" :size="22" />
+            <Loader2 v-if="binding || probing" class="spinner" :size="22" />
             <Save v-else :size="22" />
-            <span>{{ binding ? '绑定中...' : '测试并绑定' }}</span>
+            <span>{{ probing ? '探测中...' : (binding ? '绑定中...' : '测试并绑定') }}</span>
           </button>
         </template>
 
@@ -481,12 +775,14 @@ onBeforeUnmount(() => {
 .settings {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--doubao-background);
 }
 .settings__body {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
   padding: 24px;
 }
 .settings__container {
@@ -503,6 +799,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--doubao-border);
   border-radius: var(--doubao-radius);
   padding: 24px;
+  overflow: hidden;
 }
 .card__header {
   display: flex;
@@ -516,7 +813,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   margin: 0;
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 .card__icon { flex-shrink: 0; }
@@ -543,7 +840,7 @@ onBeforeUnmount(() => {
   background: rgba(7, 193, 96, 0.12);
   color: var(--doubao-success);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* 信息列表 */
@@ -623,6 +920,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 .settings__field-row {
   display: grid;
@@ -632,9 +930,13 @@ onBeforeUnmount(() => {
 .settings__label {
   font-size: var(--fs-sm);
   color: var(--doubao-muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .settings__input {
   width: 100%;
+  min-width: 0;
   padding: 14px 16px;
   border-radius: var(--doubao-radius-sm);
   background: var(--doubao-muted);
@@ -668,7 +970,7 @@ onBeforeUnmount(() => {
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   font-family: inherit;
 }
@@ -691,7 +993,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--doubao-destructive);
   font-size: var(--fs-sm);
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
   font-family: inherit;
 }
@@ -713,7 +1015,76 @@ onBeforeUnmount(() => {
   background: rgba(7, 193, 96, 0.08);
   color: var(--doubao-success);
 }
+.settings__alert--info {
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+}
 .settings__alert-icon { flex-shrink: 0; }
+
+/* ============ 终端运行设置表单 ============ */
+.settings__runtime-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.settings__field-hint {
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--doubao-muted-foreground);
+  line-height: 1.4;
+}
+/* 分段按钮(窗口模式切换) */
+.settings__seg-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.seg-btn {
+  flex: 1;
+  padding: 14px 12px;
+  border-radius: var(--doubao-radius-sm);
+  border: 1.5px solid var(--doubao-border);
+  background: var(--doubao-card);
+  color: var(--doubao-secondary-foreground);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.seg-btn:hover {
+  border-color: var(--doubao-ring);
+}
+.seg-btn--active {
+  border-color: var(--doubao-primary);
+  background: rgba(0, 101, 253, 0.06);
+  color: var(--doubao-primary);
+  font-weight: 700;
+}
+/* 运行设置保存按钮 */
+.settings__runtime-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 12px 24px;
+  border-radius: var(--doubao-radius-sm);
+  border: none;
+  background: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+  font-size: var(--fs-base);
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.15s ease;
+}
+.settings__runtime-save:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+.settings__runtime-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* 模态框 */
 .modal {
@@ -791,7 +1162,7 @@ onBeforeUnmount(() => {
   border-radius: var(--doubao-radius-sm);
   border: none;
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   font-family: inherit;
 }

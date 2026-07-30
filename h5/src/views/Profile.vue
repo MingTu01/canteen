@@ -25,6 +25,7 @@ import { useCartStore } from '@/stores/cart'
 import { getMyRecharges } from '@/api/recharge'
 import * as authApi from '@/api/auth'
 import { formatMoney, formatDateTime } from '@/composables/useFormat'
+import { getCachedImage } from '@/utils/imageCache'
 import type { RechargeRecord, EmployeeQrcode } from '@/api/types'
 
 defineOptions({ name: 'Profile' })
@@ -66,12 +67,20 @@ const rechargeRefreshing = ref(false)
 
 // ============ 头像回退 ============
 const avatarError = ref(false)
+/** 经过本地缓存处理的头像 URL（命中缓存返回 blob URL，否则原 URL） */
+const avatarSrc = ref('')
 // 头像 URL 变化时重置错误标志,避免新头像被旧失败状态卡在默认占位
 watch(
   () => employee.value?.avatar,
-  () => {
+  async (raw) => {
     avatarError.value = false
+    if (!raw) {
+      avatarSrc.value = ''
+      return
+    }
+    avatarSrc.value = await getCachedImage(raw)
   },
+  { immediate: true },
 )
 
 onMounted(async () => {
@@ -258,9 +267,9 @@ const menuItems: MenuItem[] = [
       <div class="profile__user-top">
         <div class="profile__avatar">
           <img
-            v-if="employee?.avatar && !avatarError"
-            :src="employee.avatar"
-            :alt="employee.name"
+            v-if="avatarSrc && !avatarError"
+            :src="avatarSrc"
+            :alt="employee?.name"
             class="profile__avatar-img"
             @error="avatarError = true"
           />

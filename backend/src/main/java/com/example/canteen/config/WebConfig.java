@@ -3,7 +3,6 @@ package com.example.canteen.config;
 import com.example.canteen.security.StoreAccessInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
@@ -70,30 +69,57 @@ public class WebConfig implements WebMvcConfigurer {
 }
 
 /**
- * CORS 配置(仅 dev profile 生效)。
+ * CORS 配置(全 profile 生效)。
  *
- * 生产环境通过 Nginx 反代同源访问,无需后端 CORS。
+ * - admin-web / H5 通过 Nginx 反代同源访问,CORS 不会触发
+ * - X86 终端(Tauri EXE)直接跨域调用后端 API,需要允许 Tauri origin
+ * - dev 环境的 localhost:* 端口用于 vite dev server 调试
+ *
+ * Tauri origin 说明:
+ * - Windows / Linux: http://tauri.localhost
+ * - macOS: tauri://localhost
  */
 @Configuration
-@Profile("dev")
-class DevCorsConfig implements WebMvcConfigurer {
+class CorsConfig implements WebMvcConfigurer {
 
     /**
-     * CORS 配置:开发环境允许所有 localhost / 127.0.0.1 端口(admin-web 3000、H5 5174、终端 5175 等)。
+     * CORS 配置:允许 localhost / 127.0.0.1 端口(admin-web 3000、H5 5174、终端 5175 等),
+     * 以及 Tauri 桌面应用的 origin(Windows/Linux: http://tauri.localhost,macOS: tauri://localhost)。
      * 使用 allowedOriginPatterns 以支持端口通配(allowedOrigins 不支持)。
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        // API 接口 CORS
         registry.addMapping("/api/**")
                 .allowedOriginPatterns(
                         "http://localhost:*",
                         "http://127.0.0.1:*",
                         "https://localhost:*",
-                        "https://127.0.0.1:*"
+                        "https://127.0.0.1:*",
+                        // Tauri 桌面应用 origin(X86 终端 EXE)
+                        "http://tauri.localhost",
+                        "https://tauri.localhost",
+                        "tauri://localhost"
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true)
+                .maxAge(3600);
+        // 静态资源(头像/菜品图片)CORS
+        // 终端前端运行在 http://127.0.0.1:1287,fetch 后端 /uploads/xxx.jpg 需要 CORS 头
+        // 否则 imageCache.ts 中 fetch 头像图片会被浏览器拦截,无法缓存到 IndexedDB
+        registry.addMapping("/uploads/**")
+                .allowedOriginPatterns(
+                        "http://localhost:*",
+                        "http://127.0.0.1:*",
+                        "https://localhost:*",
+                        "https://127.0.0.1:*",
+                        "http://tauri.localhost",
+                        "https://tauri.localhost",
+                        "tauri://localhost"
+                )
+                .allowedMethods("GET", "OPTIONS")
+                .allowedHeaders("*")
                 .maxAge(3600);
     }
 }

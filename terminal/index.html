@@ -5,9 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>企业智慧食堂 - 终端</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      /* 只保留 box-sizing 非层化声明,确保所有元素 border-box。
+         margin/padding 交给 Tailwind v4 preflight(@layer base)处理,
+         这样 Tailwind utilities(@layer utilities)的间距类能正常覆盖。*/
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; overflow: hidden; }
       body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #ffffff; }
-      #app { width: 100%; height: 100vh; }
+      #app { width: 100%; height: 100vh; overflow: hidden; }
     </style>
   </head>
   <body>

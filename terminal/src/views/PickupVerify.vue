@@ -5,12 +5,13 @@
  * 刷卡后拉取员工今日待取餐订单,选第一条 status===1 的,
  * 设置 store 后跳转取餐信息页。至少展示 1.2s "验证中" 动画。
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
 import { pickupStore, type PickupOrder } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey } from '@/utils'
+import { getCachedAvatar } from '@/utils/imageCache'
 import { User } from 'lucide-vue-next'
 import BrandingBg from '@/components/BrandingBg.vue'
 import Modal from '@/components/Modal.vue'
@@ -18,6 +19,36 @@ import Modal from '@/components/Modal.vue'
 const router = useRouter()
 const employee = computed(() => pickupStore.employee)
 const branding = computed(() => brandingState.data)
+
+/** 头像缓存处理 */
+const avatarError = ref(false)
+const avatarSrc = ref('')
+let avatarObjectUrl = ''
+
+const revokeAvatarUrl = () => {
+  if (avatarObjectUrl && avatarObjectUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(avatarObjectUrl)
+  }
+  avatarObjectUrl = ''
+}
+
+watch(
+  () => employee.value?.avatar,
+  async (raw) => {
+    avatarError.value = false
+    revokeAvatarUrl()
+    if (!raw) {
+      avatarSrc.value = ''
+      return
+    }
+    const config = loadConfig()
+    const baseUrl = config?.serverUrl || ''
+    const url = await getCachedAvatar(raw, baseUrl)
+    if (url.startsWith('blob:')) avatarObjectUrl = url
+    avatarSrc.value = url
+  },
+  { immediate: true },
+)
 const startedAt = ref(0)
 let done = false
 let advanceTimer: ReturnType<typeof setTimeout> | null = null
@@ -36,14 +67,17 @@ const fetchAndAdvance = async () => {
   }
   try {
     const resp = await api.get(`/order/employee/${employee.value.id}`)
-    const list: any[] = resp.data?.code === 200 ? (resp.data.data || []) : []
+    const list: any[] = resp.data?.code === 200 ? (resp.data.data ?? []) : []
     const today = toDateKey(new Date())
     const pending = list
       .filter((o) => o.date === today && o.status === 1)
       .sort((a, b) => Number(a.mealType) - Number(b.mealType))
     if (pending.length === 0) {
-      // 测试阶段:无真实订单时,从今日菜单随机生成模拟订单便于测试取餐展示
-      await buildMockOrderFromTodayMenu(today)
+      // 无待取餐订单:提示用户并返回待机页(生产环境不生成模拟订单)
+      errorTitle.value = '暂无待取餐订单'
+      errorMsg.value = '今日暂无待取餐订单,请先在订餐端下单'
+      errorVariant.value = 'info'
+      showError.value = true
       return
     }
     const o = pending[0]
@@ -73,63 +107,8 @@ const fetchAndAdvance = async () => {
     }, wait)
   } catch (e: any) {
     errorTitle.value = '查询失败'
-    errorMsg.value = e?.response?.data?.message || '查询订餐信息失败,请重试'
+    errorMsg.value = e?.response?.data?.message ?? '查询订餐信息失败,请重试'
     errorVariant.value = 'warning'
-    showError.value = true
-  }
-}
-
-/**
- * 测试阶段辅助:无真实订单时,从今日菜单随机生成模拟订单。
- * 随机选一个餐次,从该餐次菜品中随机选 2-4 道,展示取餐页面。
- * 模拟订单 id 为负数,避免与真实订单混淆。
- */
-const buildMockOrderFromTodayMenu = async (today: string) => {
-  try {
-    const cfg = loadConfig()
-    if (!cfg || !cfg.storeId) {
-      throw new Error('未绑定门店')
-    }
-    const resp = await api.get(`/menu/store/${cfg.storeId}/date/${today}`)
-    const menus: any[] = resp.data?.code === 200 ? (resp.data.data || []) : []
-    if (menus.length === 0) {
-      throw new Error('今日菜单未配置')
-    }
-    // 随机选一个餐次
-    const randomMenu = menus[Math.floor(Math.random() * menus.length)]
-    const dishes: any[] = randomMenu.items || randomMenu.dishes || []
-    if (dishes.length === 0) {
-      throw new Error('今日菜单无菜品')
-    }
-    // 随机选 2-4 道菜
-    const pickCount = Math.min(dishes.length, 2 + Math.floor(Math.random() * 3))
-    const shuffled = [...dishes].sort(() => Math.random() - 0.5)
-    const picked = shuffled.slice(0, pickCount)
-    const totalAmount = picked.reduce((sum, d) => sum + Number(d.price || 0), 0)
-    const order: PickupOrder = {
-      id: -1, // 模拟订单 id 为负数,标识测试数据
-      mealType: Number(randomMenu.mealType),
-      date: today,
-      totalAmount,
-      orderItems: picked.map((d) => ({
-        dishName: String(d.dishName || d.name || ''),
-        price: Number(d.price ?? 0),
-        quantity: 1,
-        dishImage: String(d.dishImage || d.image || ''),
-      })),
-    }
-    pickupStore.order = order
-    const elapsed = Date.now() - startedAt.value
-    const wait = Math.max(0, 1200 - elapsed)
-    advanceTimer = setTimeout(() => {
-      if (done) return
-      done = true
-      router.replace('/pickup/info')
-    }, wait)
-  } catch (e: any) {
-    errorTitle.value = '暂无待取餐订单'
-    errorMsg.value = '今日暂无待取餐订单(测试阶段也未配置菜单)'
-    errorVariant.value = 'info'
     showError.value = true
   }
 }
@@ -148,6 +127,7 @@ onMounted(() => {
 onUnmounted(() => {
   done = true
   if (advanceTimer) clearTimeout(advanceTimer)
+  revokeAvatarUrl()
 })
 </script>
 
@@ -165,7 +145,14 @@ onUnmounted(() => {
       <!-- 用户信息卡片 -->
       <div v-if="employee" class="verify__card">
         <div class="verify__avatar">
-          <User :size="32" />
+          <img
+            v-if="avatarSrc && !avatarError"
+            :src="avatarSrc"
+            :alt="employee.name"
+            class="verify__avatar-img"
+            @error="avatarError = true"
+          />
+          <User v-else :size="32" />
         </div>
         <div class="verify__user">
           {{ employee.name }} · {{ employee.departmentName || '未分配部门' }} · 工号 {{ employee.cardNo }}
@@ -191,7 +178,8 @@ onUnmounted(() => {
 <style scoped>
 .verify {
   position: relative;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   /* 取餐端统一深色背景 + 白色文字 */
   background: var(--doubao-foreground);
 }
@@ -202,7 +190,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  height: 100vh;
   gap: 32px;
   padding: 40px 24px;
 }
@@ -215,7 +203,7 @@ onUnmounted(() => {
 }
 .verify__title {
   font-size: var(--fs-xl);
-  font-weight: 600;
+  font-weight: 700;
   color: #ffffff;
 }
 .verify__card {
@@ -239,10 +227,16 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--doubao-accent);
   color: var(--doubao-primary);
+  overflow: hidden;
+}
+.verify__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .verify__user {
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   color: #ffffff;
   text-align: center;
 }

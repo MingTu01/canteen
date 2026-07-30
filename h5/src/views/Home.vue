@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 
 import { useRouter } from 'vue-router'
 import { showToast, showDialog } from 'vant'
@@ -19,6 +19,7 @@ import { useBrandingStore } from '@/stores/branding'
 import { getStoreNotifications } from '@/api/notification'
 import { getNewDishes } from '@/api/menu'
 import { formatMoney, formatDate } from '@/composables/useFormat'
+import { getCachedImage } from '@/utils/imageCache'
 import type { Notification, Dish } from '@/api/types'
 
 defineOptions({ name: 'Home' })
@@ -136,14 +137,35 @@ const onDishImgError = (dish: Dish): void => {
   erroredDishImages.value = next
 }
 
-/** 菜品图片地址(后端可能返回相对路径或完整 URL);已失败的返回空串触发占位图标 */
+/** 菜品图片缓存 Map（dish.id → 缓存后的 blob URL 或原 URL），异步填充 */
+const cachedDishImages = ref<Map<number, string>>(new Map())
+
+/** 批量预加载菜品图片到缓存 Map（懒加载：首次 fetch 后缓存，后续命中缓存直接返回 blob URL） */
+const refreshDishImages = async (): Promise<void> => {
+  const map = new Map<number, string>()
+  await Promise.all(
+    newDishes.value.map(async (dish) => {
+      const raw = dish.image || dish.imageUrl
+      if (!raw) return
+      // 完整 URL 或 data URL 直接使用，不走 IndexedDB 缓存
+      if (/^(https?:)?\/\//.test(raw) || raw.startsWith('data:')) {
+        map.set(dish.id, raw)
+        return
+      }
+      map.set(dish.id, await getCachedImage(raw))
+    }),
+  )
+  cachedDishImages.value = map
+}
+
+/** 菜品图片地址(优先返回缓存 blob URL);已失败的返回空串触发占位图标 */
 const getDishImage = (dish: Dish): string => {
   if (erroredDishImages.value.has(dish.id)) return ''
-  const img = dish.image || dish.imageUrl
-  if (!img) return ''
-  if (/^(https?:)?\/\//.test(img) || img.startsWith('data:')) return img
-  return img
+  return cachedDishImages.value.get(dish.id) || ''
 }
+
+// 菜品列表变化时异步刷新缓存 Map
+watch(newDishes, refreshDishImages, { immediate: true })
 
 /** 点击新品卡片 */
 const onDishCardClick = (): void => {
