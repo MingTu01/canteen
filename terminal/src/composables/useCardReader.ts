@@ -112,7 +112,9 @@ export function useCardReader(
 
 /**
  * 全局清理(应用退出时调用)
+ * 重置模块级标志,使下次使用时能重新初始化 Python Shell 桥接。
  */
 export async function destroyCardReader() {
   handlers.value.clear()
+  pythonBridgeReady = false
 }
