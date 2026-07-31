@@ -138,16 +138,24 @@ watch(() => authStore.storeId, () => {
           row-key="id"
         >
           <ElTableColumn prop="id" label="ID" width="80" align="center" />
-          <ElTableColumn prop="operation" label="操作" min-width="160" />
-          <ElTableColumn prop="method" label="方法" min-width="200" />
-          <ElTableColumn prop="params" label="参数" min-width="200" />
+          <ElTableColumn label="操作人" width="140">
+            <template #default="{ row }">
+              <span class="font-medium text-text">{{ row.adminName || `#${row.adminId}` || '—' }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn prop="operation" label="操作" min-width="140" />
+          <ElTableColumn label="操作详情" min-width="200">
+            <template #default="{ row }">
+              <span class="text-text-secondary">{{ row.params || '—' }}</span>
+            </template>
+          </ElTableColumn>
           <ElTableColumn prop="ip" label="IP" width="140" />
           <ElTableColumn label="状态" width="100" align="center">
             <template #default="{ row }">
               <StatusTag :value="row.status" :map="LOG_STATUS" />
             </template>
           </ElTableColumn>
-          <ElTableColumn prop="errorMsg" label="错误信息" min-width="180" />
+          <ElTableColumn prop="errorMsg" label="错误信息" min-width="180" show-overflow-tooltip />
           <ElTableColumn prop="createdAt" label="时间" width="180" />
           <template #empty>
             <EmptyState description="暂无操作日志" />

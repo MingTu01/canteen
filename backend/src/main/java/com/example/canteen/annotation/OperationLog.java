@@ -14,4 +14,11 @@ import java.lang.annotation.Target;
 public @interface OperationLog {
     /** 操作描述,如 "创建备份"、"修改系统配置" */
     String value();
+
+    /**
+     * 详细描述模板(可选),支持 SpEL 表达式引用方法参数。
+     * 例: "日期 #{#dto.date} 餐次 #{#dto.mealType}"
+     * 未设置时 detail 字段为空,仅记录 operation 描述。
+     */
+    String detail() default "";
 }

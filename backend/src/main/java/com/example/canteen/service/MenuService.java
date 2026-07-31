@@ -119,18 +119,37 @@ public class MenuService {
 
     /* ============ 业务查询(走缓存) ============ */
 
+    /**
+     * 查询某日菜单(管理端,返回全部含未发布)。
+     * 点菜端请用 getPublishedMenuByDate。
+     */
     public List<MenuWithItemsDTO> getMenuByDate(Long storeId, LocalDate date) {
         String key = String.format(CACHE_KEY_MENU_BY_DATE, storeId, date);
         List<MenuWithItemsDTO> cached = cacheGet(key);
         if (cached != null) return cached;
 
-        List<MenuWithItemsDTO> result = loadMenuByDateFromDb(storeId, date);
+        List<MenuWithItemsDTO> result = loadMenuByDateFromDb(storeId, date, false);
         cachePut(key, result, MENU_TTL);
         return result;
     }
 
-    private List<MenuWithItemsDTO> loadMenuByDateFromDb(Long storeId, LocalDate date) {
-        List<Menu> menus = menuMapper.selectByStoreDate(storeId, date);
+    /**
+     * 查询某日已发布菜单(点菜端使用)。
+     */
+    public List<MenuWithItemsDTO> getPublishedMenuByDate(Long storeId, LocalDate date) {
+        String key = String.format(CACHE_KEY_MENU_BY_DATE, storeId, date) + ":published";
+        List<MenuWithItemsDTO> cached = cacheGet(key);
+        if (cached != null) return cached;
+
+        List<MenuWithItemsDTO> result = loadMenuByDateFromDb(storeId, date, true);
+        cachePut(key, result, MENU_TTL);
+        return result;
+    }
+
+    private List<MenuWithItemsDTO> loadMenuByDateFromDb(Long storeId, LocalDate date, boolean publishedOnly) {
+        List<Menu> menus = publishedOnly
+                ? menuMapper.selectPublishedByStoreDate(storeId, date)
+                : menuMapper.selectByStoreDate(storeId, date);
         if (menus == null || menus.isEmpty()) {
             return Collections.emptyList();
         }
@@ -168,23 +187,31 @@ public class MenuService {
         return result;
     }
 
-    public List<String> getMenuDatesByMonth(Long storeId, int year, int month) {
+    public List<Map<String, Object>> getMenuDatesByMonth(Long storeId, int year, int month) {
         String key = String.format(CACHE_KEY_MENU_DATES, storeId, year, month);
-        List<String> cached = cacheGet(key);
+        List<Map<String, Object>> cached = cacheGet(key);
         if (cached != null) return cached;
 
         LocalDate start = LocalDate.of(year, month, 1);
         LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
-        List<Menu> menus = menuMapper.selectByStoreDateRange(storeId, start, end);
-        List<String> result;
-        if (menus == null || menus.isEmpty()) {
+        List<Map<String, Object>> raw = menuMapper.selectDateStatusByRange(storeId, start, end);
+        List<Map<String, Object>> result;
+        if (raw == null || raw.isEmpty()) {
             result = Collections.emptyList();
         } else {
-            result = menus.stream()
-                    .map(m -> m.getDate().toString())
-                    .distinct()
-                    .sorted()
-                    .collect(Collectors.toList());
+            result = new ArrayList<>();
+            for (Map<String, Object> row : raw) {
+                Map<String, Object> m = new HashMap<>();
+                Object dateVal = row.get("date");
+                String dateStr = dateVal == null ? null : dateVal.toString();
+                m.put("date", dateStr);
+                Object pubVal = row.get("published");
+                boolean published = pubVal != null && (
+                        (pubVal instanceof Number n && n.intValue() == 1) ||
+                        "1".equals(pubVal.toString()));
+                m.put("published", published);
+                result.add(m);
+            }
         }
         cachePut(key, result, MENU_DATES_TTL);
         return result;
@@ -209,6 +236,10 @@ public class MenuService {
                 }
             }
         }
+        // 新建菜单默认未发布(草稿),需手动发布后点菜端才可见
+        if (menu.getPublished() == null) {
+            menu.setPublished(0);
+        }
         menuMapper.insert(menu);
 
         int sortOrder = 0;
@@ -223,6 +254,29 @@ public class MenuService {
         cacheEvictMenu(menu.getStoreId(), menu.getDate());
         broadcastMenuChanged(menu.getStoreId(), menu.getDate(), menu.getMealType());
         return menu;
+    }
+
+    /**
+     * 发布某日所有菜单:将 published 设为 1,点菜端即可看到。
+     */
+    @Transactional
+    public int publishMenu(Long storeId, LocalDate date) {
+        SecurityContext.checkStoreAccess(storeId);
+        List<Menu> menus = menuMapper.selectByStoreDate(storeId, date);
+        if (menus == null || menus.isEmpty()) {
+            throw new BusinessException("当天无菜单可发布");
+        }
+        int count = 0;
+        for (Menu menu : menus) {
+            if (menu.getPublished() == null || menu.getPublished() == 0) {
+                menu.setPublished(1);
+                menuMapper.updateById(menu);
+                count++;
+            }
+        }
+        cacheEvictMenu(storeId, date);
+        broadcastMenuChanged(storeId, date, null);
+        return count;
     }
 
     @Transactional

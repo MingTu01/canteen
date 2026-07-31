@@ -240,6 +240,8 @@ export interface Menu {
   storeId: number
   date: string
   mealType: number
+  /** 发布状态:0=未发布(草稿),1=已发布 */
+  published?: number
   createdAt?: string
   updatedAt?: string
 }
@@ -281,6 +283,12 @@ export interface MenuWithItems {
 
 export interface MenuByDateResult {
   [date: string]: MenuWithItems[] | unknown
+}
+
+/** 月历日期状态(后端 getMenuDatesByMonth 返回) */
+export interface MenuDateStatus {
+  date: string
+  published: boolean
 }
 
 /* ============================================================

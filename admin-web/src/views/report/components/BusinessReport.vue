@@ -98,16 +98,18 @@ const asMealStats = (raw: unknown): { breakfast: number; lunch: number; dinner: 
     raw.forEach((item) => {
       const o = (item ?? {}) as Record<string, unknown>
       const mt = num(o.mealType ?? o.type)
-      const cnt = num(o.count ?? o.total ?? o.orders ?? o.amount)
+      const cnt = num(o.count ?? o.total ?? o.orders ?? o.amount ?? o.orderCount)
       if (mt === 1) result.breakfast = cnt
       else if (mt === 2) result.lunch = cnt
       else if (mt === 3) result.dinner = cnt
     })
   } else if (raw && typeof raw === 'object') {
     const o = raw as Record<string, unknown>
-    result.breakfast = num(o.breakfast ?? o.morning)
-    result.lunch = num(o.lunch ?? o.noon)
-    result.dinner = num(o.dinner ?? o.evening)
+    // 后端格式: {count: {breakfast, lunch, dinner}, ratio: {...}}
+    const countObj = (o.count ?? o) as Record<string, unknown>
+    result.breakfast = num(countObj.breakfast ?? countObj.morning ?? o.breakfast)
+    result.lunch = num(countObj.lunch ?? countObj.noon ?? o.lunch)
+    result.dinner = num(countObj.dinner ?? countObj.evening ?? o.dinner)
   }
   return result
 }
@@ -335,62 +337,65 @@ defineExpose({ refresh: fetchReport })
     </div>
   </div>
 
-  <!-- 统计卡 -->
-  <div v-loading="loading" class="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <StatCard title="订单总数" :value="summary.totalOrders" :icon="ShoppingCart" color="primary" />
-    <StatCard title="总营业额" :value="money(summary.totalRevenue)" :icon="DollarSign" color="success" />
-    <StatCard title="客单价" :value="money(summary.avgOrderAmount)" :icon="TrendingUp" color="warning" />
-    <StatCard title="完成率" :value="`${summary.completionRate}%`" :icon="CheckCircle" color="accent" />
-  </div>
+  <!-- 报表内容区域(整体 loading 遮罩) -->
+  <div v-loading="loading" element-loading-text="正在加载报表数据...">
+    <!-- 统计卡 -->
+    <div class="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatCard title="订单总数" :value="summary.totalOrders" :icon="ShoppingCart" color="primary" />
+      <StatCard title="总营业额" :value="money(summary.totalRevenue)" :icon="DollarSign" color="success" />
+      <StatCard title="客单价" :value="money(summary.avgOrderAmount)" :icon="TrendingUp" color="warning" />
+      <StatCard title="完成率" :value="`${summary.completionRate}%`" :icon="CheckCircle" color="accent" />
+    </div>
 
-  <!-- 图表区 -->
-  <div class="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-    <div class="rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <h3 class="mb-3 text-base font-semibold text-text">营业额趋势</h3>
-      <div ref="trendRef" class="h-72 w-full"></div>
+    <!-- 图表区 -->
+    <div class="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <div class="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <h3 class="mb-3 text-base font-semibold text-text">营业额趋势</h3>
+        <div ref="trendRef" class="h-72 w-full"></div>
+      </div>
+      <div class="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <h3 class="mb-3 text-base font-semibold text-text">餐次占比</h3>
+        <div ref="pieRef" class="h-72 w-full"></div>
+      </div>
     </div>
-    <div class="rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <h3 class="mb-3 text-base font-semibold text-text">餐次占比</h3>
-      <div ref="pieRef" class="h-72 w-full"></div>
+    <div class="mb-5 rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <h3 class="mb-3 text-base font-semibold text-text">热销菜品 TOP5</h3>
+      <div ref="barRef" class="h-72 w-full"></div>
     </div>
-  </div>
-  <div class="mb-5 rounded-2xl border border-border bg-card p-5 shadow-sm">
-    <h3 class="mb-3 text-base font-semibold text-text">热销菜品 TOP5</h3>
-    <div ref="barRef" class="h-72 w-full"></div>
-  </div>
 
-  <!-- 数据表格 -->
-  <div class="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-    <div class="border-b border-border-light px-5 py-4">
-      <h3 class="text-base font-semibold text-text">热销菜品明细</h3>
+    <!-- 数据表格 -->
+    <div class="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div class="border-b border-border-light px-5 py-4">
+        <h3 class="text-base font-semibold text-text">热销菜品明细</h3>
+      </div>
+      <ElTable :data="topDishes" style="width: 100%">
+        <ElTableColumn label="排名" width="90" align="center">
+          <template #default="{ $index }">
+            <span
+              class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white"
+              :style="{ background: $index < 3 ? 'var(--color-primary)' : 'var(--color-text-muted)' }"
+            >{{ $index + 1 }}</span>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="菜品名称" min-width="200">
+          <template #default="{ row }">
+            <span class="font-medium text-text">{{ row.name }}</span>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="销量" width="140" align="right">
+          <template #default="{ row }">
+            <span class="tabular-nums font-semibold text-primary">{{ row.count }}</span>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="营业额" width="160" align="right">
+          <template #default="{ row }">
+            <span class="tabular-nums text-text-secondary">{{ row.revenue != null ? money(row.revenue) : '—' }}</span>
+          </template>
+        </ElTableColumn>
+        <template #empty>
+          <EmptyState description="暂无热销菜品数据" />
+        </template>
+      </ElTable>
     </div>
-    <ElTable :data="topDishes" style="width: 100%">
-      <ElTableColumn label="排名" width="90" align="center">
-        <template #default="{ $index }">
-          <span
-            class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white"
-            :style="{ background: $index < 3 ? 'var(--color-primary)' : 'var(--color-text-muted)' }"
-          >{{ $index + 1 }}</span>
-        </template>
-      </ElTableColumn>
-      <ElTableColumn label="菜品名称" min-width="200">
-        <template #default="{ row }">
-          <span class="font-medium text-text">{{ row.name }}</span>
-        </template>
-      </ElTableColumn>
-      <ElTableColumn label="销量" width="140" align="right">
-        <template #default="{ row }">
-          <span class="tabular-nums font-semibold text-primary">{{ row.count }}</span>
-        </template>
-      </ElTableColumn>
-      <ElTableColumn label="营业额" width="160" align="right">
-        <template #default="{ row }">
-          <span class="tabular-nums text-text-secondary">{{ row.revenue != null ? money(row.revenue) : '—' }}</span>
-        </template>
-      </ElTableColumn>
-      <template #empty>
-        <EmptyState description="暂无热销菜品数据" />
-      </template>
-    </ElTable>
   </div>
 </template>

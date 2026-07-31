@@ -24,19 +24,29 @@ public class MenuController {
         this.menuService = menuService;
     }
 
+    /**
+     * 查询某日菜单。
+     * 点菜端(H5/终端)传 published=1 只返回已发布菜单;管理端不传返回全部。
+     */
     @GetMapping("/store/{storeId}/date/{date}")
-    public ApiResponse<List<MenuWithItemsDTO>> getMenuByDate(@PathVariable Long storeId, @PathVariable String date) {
+    public ApiResponse<List<MenuWithItemsDTO>> getMenuByDate(
+            @PathVariable Long storeId, @PathVariable String date,
+            @RequestParam(required = false) Integer published) {
         SecurityContext.checkStoreAccess(storeId);
         LocalDate localDate = LocalDate.parse(date);
+        if (published != null && published == 1) {
+            return ApiResponse.success(menuService.getPublishedMenuByDate(storeId, localDate));
+        }
         return ApiResponse.success(menuService.getMenuByDate(storeId, localDate));
     }
 
     /**
-     * 查询门店某月已配置菜单的日期列表(用于月历标记)。
+     * 查询门店某月已配置菜单的日期列表(含发布状态,用于月历标记)。
      * GET /api/menu/store/{storeId}/dates?year=2026&month=7
+     * 返回: [{date: "2026-07-01", published: true}, ...]
      */
     @GetMapping("/store/{storeId}/dates")
-    public ApiResponse<List<String>> getMenuDatesByMonth(
+    public ApiResponse<List<Map<String, Object>>> getMenuDatesByMonth(
             @PathVariable Long storeId,
             @RequestParam int year,
             @RequestParam int month) {
@@ -44,7 +54,7 @@ public class MenuController {
         return ApiResponse.success(menuService.getMenuDatesByMonth(storeId, year, month));
     }
 
-    @OperationLog("创建菜单")
+    @OperationLog(value = "创建菜单", detail = "'日期 ' + #dto.date + ' 餐次 ' + #dto.mealType")
     @PostMapping
     public ApiResponse<Menu> createMenu(@Valid @RequestBody MenuCreateDTO dto) {
         if (SecurityContext.isEmployee()) {
@@ -59,10 +69,28 @@ public class MenuController {
     }
 
     /**
+     * 发布某日菜单(二次确认后调用):将当天所有菜单设为已发布,点菜端即可看到。
+     * POST /api/menu/publish?storeId=1&date=2026-08-01
+     */
+    @OperationLog(value = "发布菜单", detail = "'日期 ' + #date")
+    @PostMapping("/publish")
+    public ApiResponse<Map<String, Object>> publishMenu(
+            @RequestParam Long storeId,
+            @RequestParam String date) {
+        if (SecurityContext.isEmployee()) {
+            throw new com.example.canteen.exception.SecurityException("员工无权执行此操作");
+        }
+        SecurityContext.checkStoreAccess(storeId);
+        LocalDate localDate = LocalDate.parse(date);
+        int count = menuService.publishMenu(storeId, localDate);
+        return ApiResponse.success(Map.of("published", count));
+    }
+
+    /**
      * 复制菜单:把源日期所有餐次菜单复制到目标日期。
      * POST /api/menu/copy
      */
-    @OperationLog("复制菜单")
+    @OperationLog(value = "复制菜单", detail = "'源日期 ' + #dto.sourceDate + ' 目标日期 ' + #dto.targetDate")
     @PostMapping("/copy")
     public ApiResponse<Map<String, Object>> copyMenu(@Valid @RequestBody MenuCopyDTO dto) {
         if (SecurityContext.isEmployee()) {
@@ -73,7 +101,7 @@ public class MenuController {
         return ApiResponse.success(Map.of("copied", copied));
     }
 
-    @OperationLog("删除菜单")
+    @OperationLog(value = "删除菜单", detail = "'菜单ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteMenu(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

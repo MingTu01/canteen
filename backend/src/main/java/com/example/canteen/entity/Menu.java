@@ -16,6 +16,8 @@ public class Menu {
     private Long storeId;
     private LocalDate date;
     private Integer mealType;
+    /** 发布状态:0=未发布(草稿),1=已发布(点菜端可见) */
+    private Integer published;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

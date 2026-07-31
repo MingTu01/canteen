@@ -9,9 +9,25 @@
         SELECT * FROM menu WHERE store_id = #{storeId} AND date = #{date} ORDER BY meal_type
     </select>
 
+    <!-- 仅查询已发布菜单(点菜端使用) -->
+    <select id="selectPublishedByStoreDate" resultType="com.example.canteen.entity.Menu">
+        SELECT * FROM menu WHERE store_id = #{storeId} AND date = #{date} AND published = 1 ORDER BY meal_type
+    </select>
+
     <select id="selectByStoreDateRange" resultType="com.example.canteen.entity.Menu">
         SELECT * FROM menu
         WHERE store_id = #{storeId} AND date &gt;= #{startDate} AND date &lt;= #{endDate}
         ORDER BY date, meal_type
+    </select>
+
+    <!-- 按日期分组统计发布状态(管理端月历使用) -->
+    <select id="selectDateStatusByRange" resultType="java.util.Map">
+        SELECT date AS `date`,
+               MAX(published) AS published,
+               COUNT(*) AS total
+        FROM menu
+        WHERE store_id = #{storeId} AND date &gt;= #{startDate} AND date &lt;= #{endDate}
+        GROUP BY date
+        ORDER BY date
     </select>
 </mapper>

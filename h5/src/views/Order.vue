@@ -483,7 +483,13 @@ const loadMenuDates = async (): Promise<void> => {
   for (const { year, month } of monthsToFetch) {
     try {
       const list = await menuApi.getMenuDates(storeId, year, month)
-      for (const d of list || []) dates.add(d)
+      for (const d of list || []) {
+        if (typeof d === 'string') {
+          dates.add(d)
+        } else if (d && d.published) {
+          dates.add(d.date)
+        }
+      }
     } catch {
       // 忽略单月失败
     }

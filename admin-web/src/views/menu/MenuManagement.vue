@@ -52,7 +52,8 @@ const dishes = ref<Dish[]>([])
 const today = new Date()
 const viewYear = ref(today.getFullYear())
 const viewMonth = ref(today.getMonth() + 1) // 1-12
-const menuDates = ref<Set<string>>(new Set())
+/** 日期 -> {published: boolean} 用于月历标记已发布/未发布 */
+const menuDateMap = ref<Map<string, boolean>>(new Map())
 
 const fetchDayMenus = async () => {
   if (!selectedDate.value) return
@@ -94,13 +95,19 @@ const fetchDishes = async () => {
 const fetchMenuDates = async () => {
   const sid = storeId.value
   if (!sid) {
-    menuDates.value = new Set()
+    menuDateMap.value = new Map()
     return
   }
   try {
     const raw = await menuApi.getDatesByMonth(sid, viewYear.value, viewMonth.value)
-    const arr = normalizeList<string>(raw)
-    menuDates.value = new Set(arr)
+    const arr = normalizeList<{ date: string; published: boolean }>(raw)
+    const map = new Map<string, boolean>()
+    for (const item of arr) {
+      if (item && item.date) {
+        map.set(item.date, !!item.published)
+      }
+    }
+    menuDateMap.value = map
   } catch {
     /* 拦截器提示 */
   }
@@ -232,6 +239,51 @@ const handleSaveDayMenu = async () => {
     /* 拦截器提示 */
   } finally {
     dayMenuSaving.value = false
+  }
+}
+
+// ===== 发布当天菜单(二次确认) =====
+const publishing = ref(false)
+
+/** 当天是否已发布(所有餐次菜单 published=1) */
+const isDayPublished = computed(() => {
+  if (dayMenus.value.length === 0) return false
+  return dayMenus.value.every((mwi) => (mwi.menu.published ?? 0) === 1)
+})
+
+const handlePublish = async () => {
+  const sid = storeId.value
+  if (!sid || !selectedDate.value) {
+    ElMessage.warning('请先选择日期')
+    return
+  }
+  if (dayMenus.value.length === 0) {
+    ElMessage.warning('当天无菜单可发布,请先添加菜单')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要发布 ${selectedDate.value} 的菜单吗？发布后员工端将可以看到并点菜。`,
+      '发布确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认发布',
+        cancelButtonText: '取消',
+      }
+    )
+  } catch {
+    return
+  }
+  publishing.value = true
+  try {
+    const res = await menuApi.publish(sid, selectedDate.value)
+    ElMessage.success(`发布成功,共发布 ${res?.published ?? 0} 个餐次`)
+    await fetchDayMenus()
+    await fetchMenuDates()
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    publishing.value = false
   }
 }
 
@@ -515,6 +567,7 @@ interface CalendarCell {
   dateStr: string
   clickable: boolean
   hasMenu: boolean
+  published: boolean
   isToday: boolean
   isSelected: boolean
   inMonth: boolean
@@ -532,7 +585,7 @@ const calendarCells = computed<CalendarCell[]>(() => {
   const cells: CalendarCell[] = []
   // 前置空白
   for (let i = 0; i < startWeekday; i++) {
-    cells.push({ key: `b${i}`, day: '', dateStr: '', clickable: false, hasMenu: false, isToday: false, isSelected: false, inMonth: false })
+    cells.push({ key: `b${i}`, day: '', dateStr: '', clickable: false, hasMenu: false, published: false, isToday: false, isSelected: false, inMonth: false })
   }
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${y}-${pad2(m)}-${pad2(d)}`
@@ -541,7 +594,8 @@ const calendarCells = computed<CalendarCell[]>(() => {
       day: d,
       dateStr: ds,
       clickable: true,
-      hasMenu: menuDates.value.has(ds),
+      hasMenu: menuDateMap.value.has(ds),
+      published: menuDateMap.value.get(ds) === true,
       isToday: ds === todayDateStr,
       isSelected: ds === selectedDate.value,
       inMonth: true,
@@ -549,7 +603,7 @@ const calendarCells = computed<CalendarCell[]>(() => {
   }
   // 补齐到 7 的倍数
   while (cells.length % 7 !== 0) {
-    cells.push({ key: `a${cells.length}`, day: '', dateStr: '', clickable: false, hasMenu: false, isToday: false, isSelected: false, inMonth: false })
+    cells.push({ key: `a${cells.length}`, day: '', dateStr: '', clickable: false, hasMenu: false, published: false, isToday: false, isSelected: false, inMonth: false })
   }
   return cells
 })
@@ -559,7 +613,9 @@ const cellClass = (cell: CalendarCell) => {
   const base = 'relative h-9 rounded-md text-sm transition-colors cursor-pointer flex items-center justify-center '
   if (cell.isSelected) return base + 'bg-primary text-white font-semibold'
   if (cell.isToday) return base + 'border border-primary text-primary'
-  if (cell.hasMenu) return base + 'bg-primary/10 text-text hover:bg-primary/20'
+  // 已发布:绿色背景;有菜单未发布:橙色背景
+  if (cell.hasMenu && cell.published) return base + 'bg-success/15 text-text hover:bg-success/25'
+  if (cell.hasMenu && !cell.published) return base + 'bg-warning/15 text-text hover:bg-warning/25'
   return base + 'text-text-secondary hover:bg-bg-tertiary'
 }
 
@@ -616,10 +672,21 @@ onMounted(() => {
             <div class="flex items-center gap-2">
               <CalendarDays class="h-5 w-5 text-primary" />
               <span class="text-base font-semibold text-text">{{ fmtDate(selectedDate) }}</span>
-              <ElTag v-if="dayMenus.length > 0" type="success" size="small">已发布</ElTag>
-              <ElTag v-else type="info" size="small">未发布</ElTag>
+              <ElTag v-if="dayMenus.length > 0 && isDayPublished" type="success" size="small">已发布</ElTag>
+              <ElTag v-else-if="dayMenus.length > 0" type="warning" size="small">未发布</ElTag>
+              <ElTag v-else type="info" size="small">无菜单</ElTag>
             </div>
-            <span class="text-sm text-text-muted">共 {{ totalDishes }} 道菜 · {{ dayMenus.length }} 个餐次</span>
+            <div class="flex items-center gap-3">
+              <span class="text-sm text-text-muted">共 {{ totalDishes }} 道菜 · {{ dayMenus.length }} 个餐次</span>
+              <ElButton
+                v-if="dayMenus.length > 0 && !isDayPublished"
+                type="primary"
+                :icon="Send"
+                :loading="publishing"
+                size="small"
+                @click="handlePublish"
+              >发布</ElButton>
+            </div>
           </div>
 
           <!-- 三餐区块 -->
@@ -703,14 +770,18 @@ onMounted(() => {
                 <span>{{ cell.day }}</span>
                 <span
                   v-if="cell.hasMenu && !cell.isSelected"
-                  class="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-primary"
+                  class="absolute bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full"
+                  :class="cell.published ? 'bg-success' : 'bg-warning'"
                 ></span>
               </button>
             </div>
             <!-- 图例 -->
             <div class="mt-3 flex items-center gap-4 border-t border-border-light pt-3 text-xs text-text-muted">
               <span class="flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>已发布
+                <span class="h-1.5 w-1.5 rounded-full bg-success"></span>已发布
+              </span>
+              <span class="flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full bg-warning"></span>未发布
               </span>
               <span class="flex items-center gap-1.5">
                 <span class="h-3 w-3 rounded border border-primary"></span>今日
