@@ -3,6 +3,7 @@ package com.example.canteen.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.RechargeDTO;
 import com.example.canteen.entity.Employee;
@@ -36,6 +37,7 @@ public class RechargeRecordController {
         this.employeeMapper = employeeMapper;
     }
 
+    @OperationLog("员工充值")
     @PostMapping
     public ApiResponse<RechargeRecord> recharge(@Valid @RequestBody RechargeDTO dto) {
         // P1-3 员工(role=0)和终端(role=3)无权充值,防止资金漏洞

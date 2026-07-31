@@ -35,7 +35,7 @@ const authStore = useAuthStore()
 const sid = computed(() => authStore.storeId || null)
 const noStoreSelected = computed(() => sid.value === null)
 
-type OrderRow = Order & { employeeName?: string; departmentName?: string }
+type OrderRow = Order & { employeeName?: string; cardNo?: string; departmentName?: string }
 
 const orders = ref<OrderRow[]>([])
 const total = ref(0)
@@ -49,7 +49,6 @@ const filters = reactive({
   mealType: undefined as number | undefined,
   dateRange: [] as string[],
   keyword: '',
-  employeeName: '',
 })
 
 const statusOptions = Object.entries(ORDER_STATUS).map(([k, v]) => ({
@@ -79,7 +78,6 @@ const buildQuery = (overrides: Partial<OrderQuery> = {}): OrderQuery => ({
   startDate: filters.dateRange?.[0],
   endDate: filters.dateRange?.[1],
   keyword: filters.keyword,
-  employeeName: filters.employeeName,
   ...overrides,
 })
 
@@ -113,7 +111,6 @@ const handleReset = () => {
   filters.mealType = undefined
   filters.dateRange = []
   filters.keyword = ''
-  filters.employeeName = ''
   page.value = 1
   fetchOrders()
 }
@@ -147,6 +144,7 @@ const handleExport = async () => {
     const exportData = rows.map((o, idx) => ({
       '序号': idx + 1,
       '订单号': o.orderNo ?? '',
+      '卡号': o.cardNo ?? '',
       '员工姓名': o.employeeName ?? `#${o.employeeId}`,
       '日期': o.date ?? '',
       '餐次': mealLabel(o.mealType),
@@ -159,7 +157,7 @@ const handleExport = async () => {
     const ws = XLSX.utils.json_to_sheet(exportData)
     // 列宽
     ws['!cols'] = [
-      { wch: 6 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 8 },
+      { wch: 6 }, { wch: 22 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 8 },
       { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
     ]
     const wb = XLSX.utils.book_new()
@@ -289,18 +287,10 @@ watch(() => authStore.storeId, () => {
       <SearchBar @search="handleSearch" @reset="handleReset">
         <ElInput
           v-model="filters.keyword"
-          placeholder="搜索订单号"
+          placeholder="搜索订单号 / 卡号 / 姓名"
           clearable
-          style="width: 160px"
-          aria-label="搜索订单号"
-          @keyup.enter="handleSearch"
-        />
-        <ElInput
-          v-model="filters.employeeName"
-          placeholder="搜索员工姓名"
-          clearable
-          style="width: 140px"
-          aria-label="搜索员工姓名"
+          style="width: 220px"
+          aria-label="搜索订单号、卡号或姓名"
           @keyup.enter="handleSearch"
         />
         <ElSelect v-model="filters.status" placeholder="订单状态" clearable style="width: 120px" aria-label="筛选订单状态">
@@ -339,6 +329,7 @@ watch(() => authStore.storeId, () => {
           @row-click="openDetail"
         >
           <ElTableColumn prop="orderNo" label="订单号" min-width="160" />
+          <ElTableColumn prop="cardNo" label="卡号" min-width="130" />
           <ElTableColumn label="员工" min-width="110">
             <template #default="{ row }">
               {{ row.employeeName || `#${row.employeeId}` }}
@@ -413,6 +404,9 @@ watch(() => authStore.storeId, () => {
             <ElDescriptions :column="1" border class="mb-6">
               <ElDescriptionsItem label="订单号">
                 {{ detail.order.orderNo }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="卡号">
+                {{ (detail.order as OrderRow).cardNo || '—' }}
               </ElDescriptionsItem>
               <ElDescriptionsItem label="员工">
                 {{ (detail.order as OrderRow).employeeName || `#${detail.order.employeeId}` }}

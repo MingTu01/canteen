@@ -3,6 +3,7 @@ package com.example.canteen.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.OrderCreateDTO;
 import com.example.canteen.entity.Employee;
@@ -44,6 +45,7 @@ public class OrderController {
         this.rateLimiter = rateLimiter;
     }
 
+    @OperationLog("创建订单")
     @PostMapping
     public ApiResponse<Order> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
         // 多租户:订单只能创建到当前用户有权限的门店
@@ -59,8 +61,7 @@ public class OrderController {
                                                              @RequestParam(required = false) Integer mealType,
                                                              @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                                              @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-                                                             @RequestParam(required = false) String keyword,
-                                                             @RequestParam(required = false) String employeeName) {
+                                                             @RequestParam(required = false) String keyword) {
         SecurityContext.checkStoreAccess(storeId);
         if (SecurityContext.isEmployee()) {
             throw new SecurityException("无权访问管理端数据");
@@ -80,41 +81,43 @@ public class OrderController {
         if (endDate != null) {
             wrapper.le(Order::getDate, endDate);
         }
+        // 关键字搜索:orderNo OR 员工姓名 OR 员工卡号
         if (keyword != null && !keyword.isBlank()) {
-            wrapper.like(Order::getOrderNo, keyword);
-        }
-        // 员工姓名搜索:先查匹配的员工 ID 列表,再用 in() 过滤
-        if (employeeName != null && !employeeName.isBlank()) {
-            List<Long> matchedIds = employeeMapper.selectList(
+            List<Long> matchedEmpIds = employeeMapper.selectList(
                     new LambdaQueryWrapper<Employee>()
                             .eq(Employee::getStoreId, storeId)
-                            .like(Employee::getName, employeeName)
+                            .and(w -> w.like(Employee::getName, keyword)
+                                    .or().like(Employee::getCardNo, keyword))
                             .select(Employee::getId)
             ).stream().map(Employee::getId).collect(Collectors.toList());
-            if (matchedIds.isEmpty()) {
-                // 无匹配员工,直接返回空
-                Map<String, Object> empty = new HashMap<>();
-                empty.put("records", List.of());
-                empty.put("total", 0);
-                empty.put("page", page);
-                empty.put("size", size);
-                return ApiResponse.success(empty);
+            if (matchedEmpIds.isEmpty()) {
+                // 没有匹配的员工,仅按 orderNo 搜索
+                wrapper.like(Order::getOrderNo, keyword);
+            } else {
+                // orderNo OR employeeId IN (matchedEmpIds)
+                wrapper.and(w -> w.like(Order::getOrderNo, keyword)
+                        .or().in(Order::getEmployeeId, matchedEmpIds));
             }
-            wrapper.in(Order::getEmployeeId, matchedIds);
         }
         IPage<Order> p = orderMapper.selectPage(new Page<>(page, size), wrapper);
 
-        // 填充 employeeName(批量查询避免 N+1)
+        // 填充 employeeName 和 cardNo(批量查询避免 N+1)
         List<Long> empIds = p.getRecords().stream()
                 .map(Order::getEmployeeId)
                 .distinct()
                 .collect(Collectors.toList());
         Map<Long, String> empNameMap = new HashMap<>();
+        Map<Long, String> empCardNoMap = new HashMap<>();
         if (!empIds.isEmpty()) {
-            employeeMapper.selectBatchIds(empIds).forEach(e ->
-                    empNameMap.put(e.getId(), e.getName()));
+            employeeMapper.selectBatchIds(empIds).forEach(e -> {
+                empNameMap.put(e.getId(), e.getName());
+                empCardNoMap.put(e.getId(), e.getCardNo());
+            });
         }
-        p.getRecords().forEach(o -> o.setEmployeeName(empNameMap.getOrDefault(o.getEmployeeId(), null)));
+        p.getRecords().forEach(o -> {
+            o.setEmployeeName(empNameMap.getOrDefault(o.getEmployeeId(), null));
+            o.setCardNo(empCardNoMap.getOrDefault(o.getEmployeeId(), null));
+        });
 
         Map<String, Object> result = new HashMap<>();
         result.put("records", p.getRecords());
@@ -168,6 +171,7 @@ public class OrderController {
         return ApiResponse.success(orderService.getOrderDetail(id));
     }
 
+    @OperationLog("完成订单")
     @PutMapping("/{id}/complete")
     public ApiResponse<Void> completeOrder(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {
@@ -184,6 +188,7 @@ public class OrderController {
         return ApiResponse.success(null);
     }
 
+    @OperationLog("取消订单")
     @PutMapping("/{id}/cancel")
     public ApiResponse<Void> cancelOrder(@PathVariable Long id) {
         Order order = orderService.getOrderById(id);
@@ -197,6 +202,7 @@ public class OrderController {
         return ApiResponse.success(null);
     }
 
+    @OperationLog("取餐核销")
     @PostMapping("/pickup")
     public ApiResponse<Void> pickup(@RequestBody Map<String, String> body) {
         // 取餐码核销限流:防止暴力枚举取餐码

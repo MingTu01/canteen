@@ -3,6 +3,7 @@ package com.example.canteen.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.EmployeeVO;
 import com.example.canteen.entity.Department;
@@ -104,6 +105,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employee));
     }
 
+    @OperationLog("创建员工")
     @PostMapping
     public ApiResponse<EmployeeVO> createEmployee(@RequestBody Employee employee) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -113,6 +115,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employeeService.createEmployee(employee)));
     }
 
+    @OperationLog("更新员工")
     @PutMapping("/{id}")
     public ApiResponse<EmployeeVO> updateEmployee(@PathVariable Long id, @RequestBody Employee employee) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -123,6 +126,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employeeService.updateEmployee(employee)));
     }
 
+    @OperationLog("删除员工")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteEmployee(@PathVariable Long id) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -199,6 +203,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "amount": 100.00 } (门店管理员可不传 storeId,自动取当前门店)
      * 返回:{ "successCount": N, "totalAmount": M }
      */
+    @OperationLog("批量充值")
     @PostMapping("/batch-recharge")
     public ApiResponse<Map<String, Object>> batchRecharge(@RequestBody Map<String, Object> body) {
         if (!SecurityContext.hasAdminLevel()) {

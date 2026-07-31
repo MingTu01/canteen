@@ -133,14 +133,16 @@ const allTotal = computed(() => sumAmount(allRecords.value))
 /* 新增充值 */
 const dialogVisible = ref(false)
 const saving = ref(false)
+const DEFAULT_RECHARGE_AMOUNT = 3000
+
 const form = ref({
   employeeId: undefined as number | undefined,
-  amount: 0,
+  amount: DEFAULT_RECHARGE_AMOUNT,
   remark: '',
 })
 
 const openCreate = () => {
-  form.value = { employeeId: undefined, amount: 0, remark: '' }
+  form.value = { employeeId: undefined, amount: DEFAULT_RECHARGE_AMOUNT, remark: '' }
   dialogVisible.value = true
 }
 

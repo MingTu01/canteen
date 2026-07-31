@@ -119,6 +119,10 @@ export interface Order {
   pickupCode?: string
   createdAt?: string
   updatedAt?: string
+  /** 非数据库字段:员工卡号(列表展示用,由后端填充) */
+  cardNo?: string
+  /** 非数据库字段:员工姓名(列表展示用,由后端填充) */
+  employeeName?: string
 }
 
 export interface OrderItem {
@@ -450,6 +454,23 @@ export interface SystemHealth {
   timestamp: string
   database?: string
   databaseError?: string
+  /** JVM 内存 */
+  jvmMaxMemory?: number
+  jvmUsedMemory?: number
+  jvmFreeMemory?: number
+  jvmMemoryUsagePercent?: number
+  /** 系统级 CPU/内存 */
+  cpuUsagePercent?: number
+  processCpuUsagePercent?: number
+  systemTotalMemory?: number
+  systemUsedMemory?: number
+  systemMemoryUsagePercent?: number
+  availableProcessors?: number
+  /** 磁盘占用 */
+  diskTotal?: number
+  diskUsed?: number
+  diskFree?: number
+  diskUsagePercent?: number
 }
 
 export interface SystemVersion {

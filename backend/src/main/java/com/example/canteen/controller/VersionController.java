@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -106,6 +107,55 @@ public class VersionController {
             result.put("status", "DEGRADED");
         }
 
+        // JVM 内存
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+        double memoryUsagePercent = maxMemory > 0 ? (usedMemory * 100.0 / maxMemory) : 0;
+        result.put("jvmMaxMemory", maxMemory);
+        result.put("jvmUsedMemory", usedMemory);
+        result.put("jvmFreeMemory", freeMemory);
+        result.put("jvmMemoryUsagePercent", Math.round(memoryUsagePercent * 100) / 100.0);
+
+        // 系统内存(通过 OperatingSystemMXBean)
+        try {
+            java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
+                com.sun.management.OperatingSystemMXBean sunOsBean = (com.sun.management.OperatingSystemMXBean) osBean;
+                double cpuUsage = sunOsBean.getSystemCpuLoad() * 100;
+                double processCpuUsage = sunOsBean.getProcessCpuLoad() * 100;
+                long totalPhysicalMemory = sunOsBean.getTotalPhysicalMemorySize();
+                long freePhysicalMemory = sunOsBean.getFreePhysicalMemorySize();
+                long usedPhysicalMemory = totalPhysicalMemory - freePhysicalMemory;
+                double systemMemoryUsagePercent = totalPhysicalMemory > 0 ? (usedPhysicalMemory * 100.0 / totalPhysicalMemory) : 0;
+                result.put("cpuUsagePercent", Math.round(cpuUsage * 100) / 100.0);
+                result.put("processCpuUsagePercent", Math.round(processCpuUsage * 100) / 100.0);
+                result.put("systemTotalMemory", totalPhysicalMemory);
+                result.put("systemUsedMemory", usedPhysicalMemory);
+                result.put("systemMemoryUsagePercent", Math.round(systemMemoryUsagePercent * 100) / 100.0);
+                result.put("availableProcessors", sunOsBean.getAvailableProcessors());
+            }
+        } catch (Exception e) {
+            // 忽略系统指标获取失败
+        }
+
+        // 磁盘占用(当前工作目录所在磁盘)
+        try {
+            java.io.File disk = new java.io.File(".");
+            long diskTotal = disk.getTotalSpace();
+            long diskFree = disk.getUsableSpace();
+            long diskUsed = diskTotal - diskFree;
+            double diskUsagePercent = diskTotal > 0 ? (diskUsed * 100.0 / diskTotal) : 0;
+            result.put("diskTotal", diskTotal);
+            result.put("diskUsed", diskUsed);
+            result.put("diskFree", diskFree);
+            result.put("diskUsagePercent", Math.round(diskUsagePercent * 100) / 100.0);
+        } catch (Exception e) {
+            // 忽略磁盘信息获取失败
+        }
+
         return ApiResponse.success(result);
     }
 
@@ -163,6 +213,7 @@ public class VersionController {
      * 新增或更新配置(UPSERT)。仅超管可调用。
      * Body: { "value": "...", "description": "..."(可选) }
      */
+    @OperationLog("更新系统配置")
     @org.springframework.web.bind.annotation.PutMapping("/config/{key}")
     public ApiResponse<Void> updateConfig(@org.springframework.web.bind.annotation.PathVariable String key,
                                           @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
@@ -187,6 +238,7 @@ public class VersionController {
     }
 
     /** 批量保存配置。Body: [{key,value}, ...]。仅超管可调用。 */
+    @OperationLog("批量更新系统配置")
     @org.springframework.web.bind.annotation.PutMapping("/config")
     public ApiResponse<Void> batchUpdateConfig(@org.springframework.web.bind.annotation.RequestBody List<Map<String, Object>> items) {
         if (!com.example.canteen.security.SecurityContext.isSuperAdmin()) {

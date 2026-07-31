@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.MenuCopyDTO;
 import com.example.canteen.dto.MenuCreateDTO;
@@ -43,6 +44,7 @@ public class MenuController {
         return ApiResponse.success(menuService.getMenuDatesByMonth(storeId, year, month));
     }
 
+    @OperationLog("创建菜单")
     @PostMapping
     public ApiResponse<Menu> createMenu(@Valid @RequestBody MenuCreateDTO dto) {
         if (SecurityContext.isEmployee()) {
@@ -60,6 +62,7 @@ public class MenuController {
      * 复制菜单:把源日期所有餐次菜单复制到目标日期。
      * POST /api/menu/copy
      */
+    @OperationLog("复制菜单")
     @PostMapping("/copy")
     public ApiResponse<Map<String, Object>> copyMenu(@Valid @RequestBody MenuCopyDTO dto) {
         if (SecurityContext.isEmployee()) {
@@ -70,6 +73,7 @@ public class MenuController {
         return ApiResponse.success(Map.of("copied", copied));
     }
 
+    @OperationLog("删除菜单")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteMenu(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

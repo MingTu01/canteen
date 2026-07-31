@@ -302,6 +302,23 @@ const migrations = computed(() => {
 
 const refreshSysInfo = () => fetchSysInfo()
 
+/** 格式化字节大小 */
+const fmtBytes = (bytes?: number): string => {
+  if (bytes == null || bytes < 0) return '—'
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
+}
+
+/** 使用率对应的 ElTag 类型 */
+const usageTagType = (percent?: number): 'success' | 'warning' | 'danger' => {
+  if (percent == null) return 'success'
+  if (percent >= 90) return 'danger'
+  if (percent >= 70) return 'warning'
+  return 'success'
+}
+
 onMounted(async () => {
   await fetchStores()
   if (editingStoreId.value) await fetchStoreInfo()
@@ -482,6 +499,100 @@ onMounted(async () => {
                 </ElTag>
               </ElDescriptionsItem>
             </ElDescriptions>
+
+            <!-- 系统资源监控 -->
+            <div class="space-y-4">
+              <h3 class="text-sm font-medium text-text">系统资源监控</h3>
+              <!-- CPU 占用 -->
+              <div class="rounded-lg border border-border-light p-4">
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="text-sm font-medium text-text">CPU 占用</span>
+                  <ElTag :type="usageTagType(health?.cpuUsagePercent)" size="small">
+                    {{ health?.cpuUsagePercent != null ? health.cpuUsagePercent.toFixed(1) + '%' : '—' }}
+                  </ElTag>
+                </div>
+                <div class="h-2.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
+                  <div
+                    class="h-full rounded-full transition-all duration-500"
+                    :style="{
+                      width: Math.min(health?.cpuUsagePercent ?? 0, 100) + '%',
+                      background: (health?.cpuUsagePercent ?? 0) >= 90 ? '#ef4444' : (health?.cpuUsagePercent ?? 0) >= 70 ? '#f59e0b' : '#10b981'
+                    }"
+                  ></div>
+                </div>
+                <div class="mt-1.5 flex justify-between text-xs text-text-muted">
+                  <span>进程 CPU: {{ health?.processCpuUsagePercent != null ? health.processCpuUsagePercent.toFixed(1) + '%' : '—' }}</span>
+                  <span>核心数: {{ health?.availableProcessors ?? '—' }}</span>
+                </div>
+              </div>
+
+              <!-- 内存占用 -->
+              <div class="rounded-lg border border-border-light p-4">
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="text-sm font-medium text-text">系统内存占用</span>
+                  <ElTag :type="usageTagType(health?.systemMemoryUsagePercent)" size="small">
+                    {{ health?.systemMemoryUsagePercent != null ? health.systemMemoryUsagePercent.toFixed(1) + '%' : '—' }}
+                  </ElTag>
+                </div>
+                <div class="h-2.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
+                  <div
+                    class="h-full rounded-full transition-all duration-500"
+                    :style="{
+                      width: Math.min(health?.systemMemoryUsagePercent ?? 0, 100) + '%',
+                      background: (health?.systemMemoryUsagePercent ?? 0) >= 90 ? '#ef4444' : (health?.systemMemoryUsagePercent ?? 0) >= 70 ? '#f59e0b' : '#10b981'
+                    }"
+                  ></div>
+                </div>
+                <div class="mt-1.5 flex justify-between text-xs text-text-muted">
+                  <span>已用: {{ fmtBytes(health?.systemUsedMemory) }} / 总: {{ fmtBytes(health?.systemTotalMemory) }}</span>
+                </div>
+              </div>
+
+              <!-- JVM 内存 -->
+              <div class="rounded-lg border border-border-light p-4">
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="text-sm font-medium text-text">JVM 内存占用</span>
+                  <ElTag :type="usageTagType(health?.jvmMemoryUsagePercent)" size="small">
+                    {{ health?.jvmMemoryUsagePercent != null ? health.jvmMemoryUsagePercent.toFixed(1) + '%' : '—' }}
+                  </ElTag>
+                </div>
+                <div class="h-2.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
+                  <div
+                    class="h-full rounded-full transition-all duration-500"
+                    :style="{
+                      width: Math.min(health?.jvmMemoryUsagePercent ?? 0, 100) + '%',
+                      background: (health?.jvmMemoryUsagePercent ?? 0) >= 90 ? '#ef4444' : (health?.jvmMemoryUsagePercent ?? 0) >= 70 ? '#f59e0b' : '#10b981'
+                    }"
+                  ></div>
+                </div>
+                <div class="mt-1.5 flex justify-between text-xs text-text-muted">
+                  <span>已用: {{ fmtBytes(health?.jvmUsedMemory) }} / 最大: {{ fmtBytes(health?.jvmMaxMemory) }}</span>
+                </div>
+              </div>
+
+              <!-- 硬盘占用 -->
+              <div class="rounded-lg border border-border-light p-4">
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="text-sm font-medium text-text">硬盘占用</span>
+                  <ElTag :type="usageTagType(health?.diskUsagePercent)" size="small">
+                    {{ health?.diskUsagePercent != null ? health.diskUsagePercent.toFixed(1) + '%' : '—' }}
+                  </ElTag>
+                </div>
+                <div class="h-2.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
+                  <div
+                    class="h-full rounded-full transition-all duration-500"
+                    :style="{
+                      width: Math.min(health?.diskUsagePercent ?? 0, 100) + '%',
+                      background: (health?.diskUsagePercent ?? 0) >= 90 ? '#ef4444' : (health?.diskUsagePercent ?? 0) >= 70 ? '#f59e0b' : '#10b981'
+                    }"
+                  ></div>
+                </div>
+                <div class="mt-1.5 flex justify-between text-xs text-text-muted">
+                  <span>已用: {{ fmtBytes(health?.diskUsed) }} / 总: {{ fmtBytes(health?.diskTotal) }}</span>
+                  <span>可用: {{ fmtBytes(health?.diskFree) }}</span>
+                </div>
+              </div>
+            </div>
 
             <div v-if="migrations.length">
               <h3 class="mb-2 text-sm font-medium text-text">数据库迁移历史</h3>

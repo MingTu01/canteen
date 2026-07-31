@@ -1,6 +1,7 @@
 package com.example.canteen.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.AdminVO;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.LoginDTO;
@@ -51,12 +52,14 @@ public class AdminController {
         }
     }
 
+    @OperationLog("创建管理员")
     @PostMapping
     public ApiResponse<AdminVO> createAdmin(@RequestBody Admin admin) {
         SecurityContext.checkSuperAdmin("仅超级管理员可创建管理员账号");
         return ApiResponse.success(adminService.createAdmin(admin));
     }
 
+    @OperationLog("更新管理员")
     @PutMapping("/{id}")
     public ApiResponse<AdminVO> updateAdmin(@PathVariable Long id, @RequestBody Admin admin) {
         // 门店管理员可改本店非超管账号,超管可改任意账号(Service 层做具体校验)
@@ -64,6 +67,7 @@ public class AdminController {
         return ApiResponse.success(adminService.updateAdmin(id, admin));
     }
 
+    @OperationLog("修改密码")
     @PutMapping("/{id}/password")
     public ApiResponse<Void> changePassword(@PathVariable Long id, @RequestBody Map<String, String> body) {
         // 本人可改自己密码,或超管可改任意密码
@@ -77,6 +81,7 @@ public class AdminController {
         return ApiResponse.success(null);
     }
 
+    @OperationLog("删除管理员")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteAdmin(@PathVariable Long id) {
         SecurityContext.checkSuperAdmin("仅超级管理员可删除管理员账号");

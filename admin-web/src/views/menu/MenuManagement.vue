@@ -21,8 +21,11 @@ import {
   ElSwitch,
   ElInputNumber,
   ElTimePicker,
+  ElTag,
+  ElRadioGroup,
+  ElRadioButton,
 } from 'element-plus'
-import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings } from 'lucide-vue-next'
+import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Save, Send } from 'lucide-vue-next'
 import { todayStr } from '@/utils/date'
 import { normalizeList } from '@/utils/list'
 
@@ -195,40 +198,245 @@ const handleDelete = async (mwi: MenuWithItems) => {
   }
 }
 
-// ===== 快速复制(内联卡片) =====
-// 目标日期:默认为上方选中的 selectedDate(即"当天")
-// 源日期:被复制的日期
-// 按钮点击 = 把源日期菜单复制到目标日期
-const copyTargetDate = ref(todayStr())
-const copySourceDate = ref(todayStr())
-const copySaving = ref(false)
+// ===== 保存当天菜单 =====
+const dayMenuSaving = ref(false)
 
-const handleQuickCopy = async () => {
-  if (!copySourceDate.value || !copyTargetDate.value) {
-    ElMessage.warning('请选择源日期和目标日期')
+const handleSaveDayMenu = async () => {
+  const sid = storeId.value
+  if (!sid || !selectedDate.value) {
+    ElMessage.warning('请先选择日期')
     return
   }
-  if (copySourceDate.value === copyTargetDate.value) {
-    ElMessage.warning('源日期与目标日期不能相同')
+  if (dayMenus.value.length === 0) {
+    ElMessage.warning('当天无菜单可保存,请先发布菜单')
     return
   }
-  copySaving.value = true
+  dayMenuSaving.value = true
   try {
-    const res = await menuApi.copy({
-      storeId: storeId.value ?? 0,
-      sourceDate: copySourceDate.value,
-      targetDate: copyTargetDate.value,
-      overwrite: true,
-    })
-    ElMessage.success(`复制成功,共复制 ${res?.copied ?? 0} 个餐次`)
-    // 跳转到目标日期查看结果
-    selectedDate.value = copyTargetDate.value
+    // 重新保存每个餐次的菜单(createMenu 内部会覆盖已存在的同日同餐次菜单)
+    for (const mwi of dayMenus.value) {
+      const dishIds = (mwi.items?.map((it) => it.item?.dishId).filter(Boolean) as number[]) || []
+      if (dishIds.length > 0) {
+        await menuApi.create({
+          storeId: sid,
+          date: selectedDate.value,
+          mealType: mwi.menu.mealType,
+          dishIds,
+        })
+      }
+    }
+    ElMessage.success('当天菜单已保存')
     await fetchDayMenus()
     await fetchMenuDates()
   } catch {
     /* 拦截器提示 */
   } finally {
-    copySaving.value = false
+    dayMenuSaving.value = false
+  }
+}
+
+// ===== 批量复制菜单 =====
+const batchSourceRange = ref<[string, string] | null>(null)
+const batchTargetMode = ref<'single' | 'range'>('single')
+const batchTargetStart = ref<string>('')
+const batchTargetRange = ref<[string, string] | null>(null)
+const batchSaving = ref(false)
+
+// 冲突处理
+interface ConflictItem {
+  date: string
+  mealTypes: number[]
+  action: 'overwrite' | 'skip'
+}
+const conflictVisible = ref(false)
+const conflictList = ref<ConflictItem[]>([])
+const conflictResolving = ref(false)
+// 缓存待执行的批量复制参数(冲突对话框确认后使用)
+const pendingBatch = ref<{ sourceDates: string[]; targetDates: string[] } | null>(null)
+
+const mealLabel = (t: number) => MEAL_TYPE[t as 1 | 2 | 3]?.label || '?'
+
+/** 计算日期范围内所有日期(含首尾) */
+const getDatesInRange = (start: string, end: string): string[] => {
+  if (!start || !end) return []
+  const s = new Date(start + 'T00:00:00')
+  const e = new Date(end + 'T00:00:00')
+  if (s > e) return []
+  const dates: string[] = []
+  const cur = new Date(s)
+  while (cur <= e) {
+    dates.push(`${cur.getFullYear()}-${pad2(cur.getMonth() + 1)}-${pad2(cur.getDate())}`)
+    cur.setDate(cur.getDate() + 1)
+  }
+  return dates
+}
+
+/** 从起始日期生成 count 个连续日期 */
+const getDatesFromStart = (start: string, count: number): string[] => {
+  if (!start || count <= 0) return []
+  const dates: string[] = []
+  const cur = new Date(start + 'T00:00:00')
+  for (let i = 0; i < count; i++) {
+    dates.push(`${cur.getFullYear()}-${pad2(cur.getMonth() + 1)}-${pad2(cur.getDate())}`)
+    cur.setDate(cur.getDate() + 1)
+  }
+  return dates
+}
+
+/** 执行批量复制(跳过 skipDates 中的日期) */
+const executeBatchCopy = async (
+  sid: number,
+  sourceDates: string[],
+  targetDates: string[],
+  skipDates: Set<string>
+) => {
+  let totalCopied = 0
+  let totalSkipped = 0
+  for (let i = 0; i < sourceDates.length; i++) {
+    const src = sourceDates[i]
+    const tgt = targetDates[i]
+    if (skipDates.has(tgt)) {
+      totalSkipped++
+      continue
+    }
+    try {
+      const res = await menuApi.copy({
+        storeId: sid,
+        sourceDate: src,
+        targetDate: tgt,
+        overwrite: true,
+      })
+      totalCopied += res?.copied ?? 0
+    } catch {
+      /* 继续复制其他日期 */
+    }
+  }
+  const msg =
+    totalSkipped > 0
+      ? `批量复制完成,共复制 ${totalCopied} 个餐次,跳过 ${totalSkipped} 个日期`
+      : `批量复制完成,共复制 ${totalCopied} 个餐次`
+  ElMessage.success(msg)
+  await fetchMenuDates()
+  if (targetDates.length > 0) {
+    selectedDate.value = targetDates[0]
+    await fetchDayMenus()
+  }
+}
+
+/** 触发批量复制:校验 + 检测冲突 */
+const handleBatchCopy = async () => {
+  const sid = storeId.value
+  if (!sid) {
+    ElMessage.warning('请先选择食堂')
+    return
+  }
+  if (!batchSourceRange.value || !batchSourceRange.value[0] || !batchSourceRange.value[1]) {
+    ElMessage.warning('请选择源日期范围')
+    return
+  }
+
+  const sourceDates = getDatesInRange(batchSourceRange.value[0], batchSourceRange.value[1])
+  if (sourceDates.length === 0) {
+    ElMessage.warning('源日期范围无效')
+    return
+  }
+
+  // 计算目标日期
+  let targetDates: string[] = []
+  if (batchTargetMode.value === 'range') {
+    if (!batchTargetRange.value || !batchTargetRange.value[0] || !batchTargetRange.value[1]) {
+      ElMessage.warning('请选择目标日期范围')
+      return
+    }
+    targetDates = getDatesInRange(batchTargetRange.value[0], batchTargetRange.value[1])
+    if (targetDates.length !== sourceDates.length) {
+      ElMessage.warning(
+        `目标日期数量(${targetDates.length})与源日期数量(${sourceDates.length})不一致,请保持一致`
+      )
+      return
+    }
+  } else {
+    if (!batchTargetStart.value) {
+      ElMessage.warning('请选择目标起始日期')
+      return
+    }
+    targetDates = getDatesFromStart(batchTargetStart.value, sourceDates.length)
+  }
+
+  // 校验源/目标不能重叠
+  const sourceSet = new Set(sourceDates)
+  for (const td of targetDates) {
+    if (sourceSet.has(td)) {
+      ElMessage.warning('目标日期与源日期重叠,请重新选择')
+      return
+    }
+  }
+
+  batchSaving.value = true
+  try {
+    // 检查目标日期是否有现有菜单(冲突检测)
+    const conflicts: ConflictItem[] = []
+    for (const date of targetDates) {
+      try {
+        const raw = await menuApi.getByDate(sid, date)
+        const mealTypes = normalizeList<MenuWithItems>(raw)
+          .map((m) => m.menu.mealType)
+          .filter(Boolean) as number[]
+        if (mealTypes.length > 0) {
+          conflicts.push({ date, mealTypes, action: 'skip' })
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (conflicts.length > 0) {
+      // 显示冲突对话框,等待用户处理
+      conflictList.value = conflicts
+      pendingBatch.value = { sourceDates, targetDates }
+      conflictVisible.value = true
+      return
+    }
+
+    // 无冲突,直接复制
+    await executeBatchCopy(sid, sourceDates, targetDates, new Set())
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+/** 冲突对话框:全部覆盖 */
+const conflictAllOverwrite = () => {
+  conflictList.value.forEach((c) => (c.action = 'overwrite'))
+}
+
+/** 冲突对话框:全部跳过 */
+const conflictAllSkip = () => {
+  conflictList.value.forEach((c) => (c.action = 'skip'))
+}
+
+/** 冲突对话框:确认处理 */
+const confirmConflicts = async () => {
+  const sid = storeId.value
+  const batch = pendingBatch.value
+  if (!sid || !batch) return
+
+  const skipDates = new Set(
+    conflictList.value.filter((c) => c.action === 'skip').map((c) => c.date)
+  )
+
+  conflictResolving.value = true
+  try {
+    await executeBatchCopy(sid, batch.sourceDates, batch.targetDates, skipDates)
+    conflictVisible.value = false
+    pendingBatch.value = null
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    conflictResolving.value = false
+    batchSaving.value = false
   }
 }
 
@@ -357,8 +565,7 @@ const cellClass = (cell: CalendarCell) => {
 
 const selectDate = (ds: string) => {
   selectedDate.value = ds
-  // 同步快速复制的目标日期为选中的日期
-  copyTargetDate.value = ds
+  fetchDayMenus()
 }
 
 const prevMonth = () => {
@@ -378,14 +585,8 @@ const nextMonth = () => {
   }
 }
 
-// 选中日期变化时,同步快速复制目标日期
-watch(selectedDate, (v) => {
-  copyTargetDate.value = v
-})
-
 watch([viewYear, viewMonth], fetchMenuDates)
 onMounted(() => {
-  copyTargetDate.value = selectedDate.value
   fetchDishes()
   fetchDayMenus()
   fetchMenuDates()
@@ -397,7 +598,7 @@ onMounted(() => {
     <PageContainer title="菜单管理" description="按日期编排每日早、中、晚三餐菜品,支持月历快速切换与菜单复制。">
       <template #actions>
         <ElButton v-if="isSuperAdmin" :icon="Settings" @click="openOrderConfig">订餐配置</ElButton>
-        <ElButton type="primary" :icon="Plus" @click="openCreate()">新增菜单</ElButton>
+        <ElButton type="primary" :icon="Send" @click="openCreate()">发布菜单</ElButton>
       </template>
 
       <div
@@ -415,6 +616,8 @@ onMounted(() => {
             <div class="flex items-center gap-2">
               <CalendarDays class="h-5 w-5 text-primary" />
               <span class="text-base font-semibold text-text">{{ fmtDate(selectedDate) }}</span>
+              <ElTag v-if="dayMenus.length > 0" type="success" size="small">已发布</ElTag>
+              <ElTag v-else type="info" size="small">未发布</ElTag>
             </div>
             <span class="text-sm text-text-muted">共 {{ totalDishes }} 道菜 · {{ dayMenus.length }} 个餐次</span>
           </div>
@@ -474,7 +677,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- 右侧:月历 + 快速复制 -->
+        <!-- 右侧:月历 + 保存菜单 + 批量复制 -->
         <div class="space-y-5">
           <div class="rounded-xl border border-border bg-card p-4 shadow-sm">
             <!-- 月份导航 -->
@@ -507,7 +710,7 @@ onMounted(() => {
             <!-- 图例 -->
             <div class="mt-3 flex items-center gap-4 border-t border-border-light pt-3 text-xs text-text-muted">
               <span class="flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>已配置
+                <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>已发布
               </span>
               <span class="flex items-center gap-1.5">
                 <span class="h-3 w-3 rounded border border-primary"></span>今日
@@ -515,55 +718,133 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 快速复制卡片 -->
+          <!-- 保存当天菜单按钮 -->
+          <ElButton
+            type="success"
+            :icon="Save"
+            :loading="dayMenuSaving"
+            class="w-full"
+            @click="handleSaveDayMenu"
+          >
+            保存当天菜单（{{ selectedDate }}）
+          </ElButton>
+
+          <!-- 批量复制菜单卡片 -->
           <div class="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <div class="mb-3 text-sm font-medium text-text">快速复制</div>
+            <div class="mb-3 text-sm font-medium text-text">批量复制菜单</div>
             <div class="space-y-3">
+              <!-- 源日期范围 -->
               <div>
-                <div class="mb-1 text-xs text-text-muted">目标日期(复制到当天)</div>
+                <div class="mb-1 text-xs text-text-muted">源日期范围（被复制的日期）</div>
                 <ElDatePicker
-                  v-model="copyTargetDate"
-                  type="date"
+                  v-model="batchSourceRange"
+                  type="daterange"
                   value-format="YYYY-MM-DD"
-                  :clearable="false"
-                  placeholder="目标日期"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
                   style="width: 100%"
                   size="small"
                 />
               </div>
+
+              <!-- 目标日期模式切换 -->
               <div>
-                <div class="mb-1 text-xs text-text-muted">源日期(被复制的日期)</div>
+                <div class="mb-1 text-xs text-text-muted">目标日期</div>
+                <ElRadioGroup v-model="batchTargetMode" size="small" class="mb-2">
+                  <ElRadioButton value="single">按起始日期自动顺序粘贴</ElRadioButton>
+                  <ElRadioButton value="range">按日期范围</ElRadioButton>
+                </ElRadioGroup>
+                <!-- 单日期模式 -->
                 <ElDatePicker
-                  v-model="copySourceDate"
+                  v-if="batchTargetMode === 'single'"
+                  v-model="batchTargetStart"
                   type="date"
                   value-format="YYYY-MM-DD"
-                  :clearable="false"
-                  placeholder="源日期"
+                  placeholder="选择起始日期（自动按顺序粘贴）"
+                  style="width: 100%"
+                  size="small"
+                />
+                <!-- 范围模式 -->
+                <ElDatePicker
+                  v-else
+                  v-model="batchTargetRange"
+                  type="daterange"
+                  value-format="YYYY-MM-DD"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
                   style="width: 100%"
                   size="small"
                 />
               </div>
+
               <ElButton
                 type="primary"
                 :icon="Copy"
-                :loading="copySaving"
+                :loading="batchSaving"
                 class="w-full"
-                @click="handleQuickCopy"
+                @click="handleBatchCopy"
               >
-                复制 {{ copySourceDate }} 到 {{ copyTargetDate }}
+                批量复制
               </ElButton>
               <div class="text-xs text-text-muted">
-                将源日期的早/中/晚三餐菜单复制到目标日期(覆盖目标日期已有菜单)
+                将源日期范围的早/中/晚三餐菜单批量复制到目标日期。若目标日期已存在菜单,将按餐别提示覆盖或跳过。
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 新增/编辑菜单弹窗 -->
+      <!-- 菜单冲突处理弹窗 -->
+      <ElDialog
+        v-model="conflictVisible"
+        title="菜单冲突处理"
+        width="520px"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <div class="space-y-3">
+          <p class="text-sm text-text-secondary">
+            以下目标日期已存在菜单,请选择处理方式（覆盖或跳过）:
+          </p>
+          <div
+            v-for="c in conflictList"
+            :key="c.date"
+            class="rounded-lg border border-border-light p-3"
+          >
+            <div class="mb-2 flex items-center justify-between">
+              <span class="text-sm font-medium text-text">{{ c.date }}</span>
+              <span class="text-xs text-text-muted">
+                已存在: {{ c.mealTypes.map(mealLabel).join('、') }}
+              </span>
+            </div>
+            <ElRadioGroup v-model="c.action" size="small">
+              <ElRadioButton value="overwrite">覆盖</ElRadioButton>
+              <ElRadioButton value="skip">跳过</ElRadioButton>
+            </ElRadioGroup>
+          </div>
+        </div>
+        <template #footer>
+          <div class="flex items-center justify-between">
+            <div class="flex gap-2">
+              <ElButton size="small" @click="conflictAllOverwrite">全部覆盖</ElButton>
+              <ElButton size="small" @click="conflictAllSkip">全部跳过</ElButton>
+            </div>
+            <div class="flex gap-3">
+              <ElButton @click="conflictVisible = false">取消</ElButton>
+              <ElButton type="primary" :loading="conflictResolving" @click="confirmConflicts">
+                确认复制
+              </ElButton>
+            </div>
+          </div>
+        </template>
+      </ElDialog>
+
+      <!-- 发布/编辑菜单弹窗 -->
       <ElDialog
         v-model="dialogVisible"
-        title="新增/编辑菜单"
+        title="发布菜单"
         width="680px"
         :close-on-click-modal="false"
         append-to-body

@@ -151,14 +151,15 @@ const handleSave = async () => {
 // v-model 直接绑定 form.avatar,ImageUploader 内部已处理压缩与上传。
 
 // 充值
+const DEFAULT_RECHARGE_AMOUNT = 3000
 const rechargeVisible = ref(false)
 const rechargeLoading = ref(false)
 const rechargeEmployee = ref<Employee | null>(null)
-const rechargeAmount = ref<number>(0)
+const rechargeAmount = ref<number>(DEFAULT_RECHARGE_AMOUNT)
 
 const openRecharge = (row: Employee) => {
   rechargeEmployee.value = row
-  rechargeAmount.value = 0
+  rechargeAmount.value = DEFAULT_RECHARGE_AMOUNT
   rechargeVisible.value = true
 }
 
@@ -189,10 +190,10 @@ const confirmRecharge = async () => {
 // ===== 批量充值 =====
 const batchRechargeVisible = ref(false)
 const batchRechargeLoading = ref(false)
-const batchRechargeAmount = ref<number>(0)
+const batchRechargeAmount = ref<number>(DEFAULT_RECHARGE_AMOUNT)
 
 const openBatchRecharge = () => {
-  batchRechargeAmount.value = 0
+  batchRechargeAmount.value = DEFAULT_RECHARGE_AMOUNT
   batchRechargeVisible.value = true
 }
 

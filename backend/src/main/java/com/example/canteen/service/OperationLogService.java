@@ -25,6 +25,18 @@ public class OperationLogService {
     }
 
     public void log(String operation, String target, String detail) {
+        log(operation, target, detail, 1, null);
+    }
+
+    /**
+     * 写入操作日志(指定状态与错误信息)。
+     * @param operation 操作描述
+     * @param target    目标方法(ControllerClass.method)
+     * @param detail    参数详情
+     * @param status    1=成功,0=失败
+     * @param errorMsg  失败时的错误信息(成功时传 null)
+     */
+    public void log(String operation, String target, String detail, int status, String errorMsg) {
         try {
             OperationLog entity = new OperationLog();
             entity.setOperation(operation);
@@ -35,7 +47,8 @@ public class OperationLogService {
             entity.setMethod(target);
             entity.setParams(detail);
             entity.setIp(currentIp());
-            entity.setStatus(1);
+            entity.setStatus(status);
+            entity.setErrorMsg(errorMsg);
             operationLogMapper.insert(entity);
         } catch (Exception e) {
             log.warn("写入操作日志失败: operation={}, error={}", operation, e.getMessage());

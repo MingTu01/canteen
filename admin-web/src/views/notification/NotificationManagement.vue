@@ -26,7 +26,7 @@ import {
   ElMessage,
   ElMessageBox,
 } from 'element-plus'
-import { Plus, Pencil, Trash2, Megaphone, Image as ImageIcon } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Megaphone, Image as ImageIcon, ArrowUpCircle, ArrowDownCircle } from 'lucide-vue-next'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { normalizeList } from '@/utils/list'
 
@@ -209,6 +209,33 @@ const handleDelete = async (row: Notification) => {
   }
 }
 
+// ===== 上架/下架 =====
+const toggleStatusLoading = ref<number | null>(null)
+const handleToggleStatus = async (row: Notification) => {
+  if (!row.id) return
+  const newStatus = row.status === 1 ? 0 : 1
+  const action = newStatus === 1 ? '上架' : '下架'
+  try {
+    await ElMessageBox.confirm(`确定要${action}通知「${row.title}」吗？`, `${action}确认`, {
+      type: 'warning',
+      confirmButtonText: `确认${action}`,
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  toggleStatusLoading.value = row.id
+  try {
+    await notificationApi.toggleStatus(row.id, newStatus)
+    ElMessage.success(`${action}成功`)
+    fetchList()
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    toggleStatusLoading.value = null
+  }
+}
+
 onMounted(fetchList)
 </script>
 
@@ -310,8 +337,17 @@ onMounted(fetchList)
               <span v-else>—</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="操作" width="160" fixed="right">
+          <ElTableColumn label="操作" width="240" fixed="right">
             <template #default="{ row }">
+              <ElButton
+                link
+                :type="row.status === 1 ? 'warning' : 'success'"
+                :icon="row.status === 1 ? ArrowDownCircle : ArrowUpCircle"
+                :loading="toggleStatusLoading === row.id"
+                @click="handleToggleStatus(row as Notification)"
+              >
+                {{ row.status === 1 ? '下架' : '上架' }}
+              </ElButton>
               <ElButton link type="primary" :icon="Pencil" @click="openEdit(row as Notification)">编辑</ElButton>
               <ElButton link type="danger" :icon="Trash2" @click="handleDelete(row as Notification)">删除</ElButton>
             </template>

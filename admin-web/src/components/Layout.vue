@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElDrawer, ElDropdown, ElDropdownMenu, ElDropdownItem, ElMessage } from 'element-plus'
+import { ElDrawer, ElDropdown, ElDropdownMenu, ElDropdownItem, ElMessage, ElPopover, ElTag } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { useAppStore } from '@/stores/app'
@@ -132,6 +132,19 @@ watch(
 /* ===== 通知铃铛:未读/进行中通知计数 ===== */
 const unreadCount = ref(0)
 const notifications = ref<Notification[]>([])
+
+/** 最新通知(按时间倒序,取前 5 条) */
+const recentNotifications = computed(() => {
+  return [...notifications.value]
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 5)
+})
+
+/** 通知时间格式化 */
+const fmtNotifyTime = (t?: string) => {
+  if (!t) return ''
+  return t.replace('T', ' ').slice(0, 16)
+}
 
 const fetchUnreadCount = async () => {
   const sid = authStore.storeId
@@ -332,26 +345,69 @@ onBeforeUnmount(() => {
           </button>
 
           <!-- Notification -->
-          <button
-            class="relative rounded-lg p-2 hover:bg-bg-tertiary"
-            title="通知管理"
-            aria-label="通知"
-            @click="router.push('/notification')"
+          <ElPopover
+            placement="bottom-end"
+            :width="380"
+            trigger="click"
+            popper-class="notification-popover"
           >
-            <Bell class="h-5 w-5 text-text-secondary" />
-            <span
-              v-if="unreadCount > 0"
-              class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white ring-2 ring-card"
-              aria-live="polite"
-            >
-              {{ unreadCount > 99 ? '99+' : unreadCount }}
-            </span>
-            <span
-              v-else
-              class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-card"
-              aria-live="polite"
-            />
-          </button>
+            <template #reference>
+              <button
+                class="relative rounded-lg p-2 hover:bg-bg-tertiary"
+                title="系统通知"
+                aria-label="通知"
+              >
+                <Bell class="h-5 w-5 text-text-secondary" />
+                <span
+                  v-if="unreadCount > 0"
+                  class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white ring-2 ring-card"
+                  aria-live="polite"
+                >
+                  {{ unreadCount > 99 ? '99+' : unreadCount }}
+                </span>
+                <span
+                  v-else
+                  class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger ring-2 ring-card"
+                  aria-live="polite"
+                />
+              </button>
+            </template>
+            <div class="max-h-96 overflow-y-auto">
+              <div class="mb-2 flex items-center justify-between border-b border-border-light pb-2">
+                <span class="text-sm font-semibold text-text">系统通知</span>
+                <span v-if="unreadCount > 0" class="text-xs text-danger">{{ unreadCount }} 条进行中</span>
+              </div>
+              <div v-if="recentNotifications.length === 0" class="py-8 text-center text-sm text-text-muted">
+                暂无通知
+              </div>
+              <div v-else class="space-y-2">
+                <div
+                  v-for="n in recentNotifications"
+                  :key="n.id"
+                  class="rounded-lg border border-border-light p-3 transition-colors hover:bg-bg-tertiary"
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <span class="text-sm font-medium text-text">{{ n.title }}</span>
+                    <ElTag
+                      v-if="n.displayStatus === 'active'"
+                      type="success"
+                      size="small"
+                    >进行中</ElTag>
+                    <ElTag v-else-if="n.displayStatus === 'pending'" type="warning" size="small">待上架</ElTag>
+                    <ElTag v-else-if="n.displayStatus === 'expired'" type="info" size="small">已过期</ElTag>
+                    <ElTag v-else type="info" size="small">已下架</ElTag>
+                  </div>
+                  <p class="mt-1 line-clamp-2 text-xs text-text-secondary">{{ n.content }}</p>
+                  <div class="mt-1 text-xs text-text-muted">{{ fmtNotifyTime(n.createdAt) }}</div>
+                </div>
+              </div>
+              <div class="mt-3 border-t border-border-light pt-2 text-center">
+                <router-link to="/notification" class="text-xs text-primary hover:underline">
+                  查看全部通知 →
+                </router-link>
+              </div>
+            </div>
+          </ElPopover>
 
           <!-- User dropdown -->
           <ElDropdown trigger="click" @command="handleCommand">

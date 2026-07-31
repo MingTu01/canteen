@@ -5,12 +5,11 @@
  * 职责:门店切换 + Tab 容器 + 转发 activeStoreId 给子组件
  * 各 Tab 子组件自行管理数据加载、图表渲染、Excel 导出
  *
- * 子组件采用 lazy 挂载(ElTabPane lazy 属性),首次激活才渲染:
- *   - 挂载时 watch storeId immediate 自动 fetch
- *   - 门店切换时已挂载的子组件自动重新 fetch
- *   - 父组件 "刷新" 按钮调用当前活跃 Tab 的 refresh 方法(手动重试)
+ * 子组件挂载时 watch storeId immediate 自动 fetch;
+ * 门店切换时已挂载的子组件自动重新 fetch;
+ * 父组件 "刷新" 按钮调用当前活跃 Tab 的 refresh 方法(手动重试)
  */
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElButton, ElSelect, ElOption, ElTabs, ElTabPane } from 'element-plus'
 import { RefreshCw } from 'lucide-vue-next'
 import Layout from '@/components/Layout.vue'
@@ -29,6 +28,9 @@ const { isSuperAdmin, stores, selectedStoreId, activeStoreId, fetchStores } = us
 /* Tab 切换 */
 type TabName = 'business' | 'finance' | 'employee' | 'yoy' | 'mom' | 'congestion'
 const activeTab = ref<TabName>('business')
+
+/* 页面加载状态(超管首次拉取门店列表时) */
+const pageLoading = ref(false)
 
 /* 子组件引用(用于调用 refresh 方法) */
 const businessRef = ref<InstanceType<typeof BusinessReport> | null>(null)
@@ -63,7 +65,16 @@ const refreshActiveTab = (): void => {
 }
 
 /* 挂载时拉取门店列表(子组件 watch storeId 会自动 fetch) */
-fetchStores()
+onMounted(async () => {
+  if (isSuperAdmin.value) {
+    pageLoading.value = true
+    try {
+      await fetchStores()
+    } finally {
+      pageLoading.value = false
+    }
+  }
+})
 </script>
 
 <template>
@@ -74,7 +85,7 @@ fetchStores()
       </template>
 
       <div
-        v-if="!activeStoreId"
+        v-if="!activeStoreId && !pageLoading"
         class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700"
       >
         请先选择食堂后再查看数据。
@@ -90,6 +101,7 @@ fetchStores()
           v-model="selectedStoreId"
           placeholder="选择门店"
           style="width: 220px"
+          :loading="pageLoading"
         >
           <ElOption
             v-for="s in stores"
@@ -104,7 +116,7 @@ fetchStores()
       </div>
 
       <ElTabs v-model="activeTab">
-        <ElTabPane label="营业报表" name="business" lazy>
+        <ElTabPane label="营业报表" name="business">
           <BusinessReport ref="businessRef" :store-id="activeStoreId" />
         </ElTabPane>
         <ElTabPane label="财务对账" name="finance" lazy>

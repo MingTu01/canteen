@@ -3,6 +3,7 @@ package com.example.canteen.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.Dish;
 import com.example.canteen.exception.BusinessException;
@@ -116,6 +117,7 @@ public class DishController {
         return ApiResponse.success(dish);
     }
 
+    @OperationLog("创建菜品")
     @PostMapping
     public ApiResponse<Dish> createDish(@RequestBody Dish dish) {
         if (!SecurityContext.canManageDish()) {
@@ -125,6 +127,7 @@ public class DishController {
         return ApiResponse.success(dishService.createDish(dish));
     }
 
+    @OperationLog("更新菜品")
     @PutMapping("/{id}")
     public ApiResponse<Dish> updateDish(@PathVariable Long id, @RequestBody Dish dish) {
         if (!SecurityContext.canManageDish()) {
@@ -135,6 +138,7 @@ public class DishController {
         return ApiResponse.success(dishService.updateDish(dish));
     }
 
+    @OperationLog("删除菜品")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {

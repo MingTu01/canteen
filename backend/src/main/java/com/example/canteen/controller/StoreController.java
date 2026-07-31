@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.Admin;
 import com.example.canteen.entity.Store;
@@ -251,6 +252,7 @@ public class StoreController {
         return ApiResponse.success(result);
     }
 
+    @OperationLog("创建食堂")
     @PostMapping
     public ApiResponse<Store> createStore(@RequestBody Store store) {
         SecurityContext.checkSuperAdmin("仅超级管理员可创建食堂");
@@ -259,6 +261,7 @@ public class StoreController {
         return ApiResponse.success(storeService.createStore(store));
     }
 
+    @OperationLog("更新食堂")
     @PutMapping("/{id}")
     public ApiResponse<Store> updateStore(@PathVariable Long id, @RequestBody Store store) {
         SecurityContext.checkSuperAdmin("仅超级管理员可修改食堂");
@@ -268,6 +271,7 @@ public class StoreController {
         return ApiResponse.success(storeService.updateStore(store));
     }
 
+    @OperationLog("删除食堂")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteStore(@PathVariable Long id) {
         SecurityContext.checkSuperAdmin("仅超级管理员可删除食堂");

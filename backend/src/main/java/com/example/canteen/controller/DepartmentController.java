@@ -1,6 +1,7 @@
 package com.example.canteen.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.Department;
 import com.example.canteen.security.SecurityContext;
@@ -43,6 +44,7 @@ public class DepartmentController {
         return ApiResponse.success(dept);
     }
 
+    @OperationLog("创建部门")
     @PostMapping
     public ApiResponse<Department> createDepartment(@RequestBody Department department) {
         if (SecurityContext.isEmployee()) {
@@ -52,6 +54,7 @@ public class DepartmentController {
         return ApiResponse.success(departmentService.createDepartment(department));
     }
 
+    @OperationLog("更新部门")
     @PutMapping("/{id}")
     public ApiResponse<Department> updateDepartment(@PathVariable Long id, @RequestBody Department department) {
         if (SecurityContext.isEmployee()) {
@@ -62,6 +65,7 @@ public class DepartmentController {
         return ApiResponse.success(departmentService.updateDepartment(department));
     }
 
+    @OperationLog("删除部门")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDepartment(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

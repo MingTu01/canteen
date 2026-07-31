@@ -47,9 +47,9 @@ public class OperationLogAspect {
 
         try {
             if (thrown != null) {
-                operationLogService.log(operation, target, detail + " | error=" + thrown.getMessage());
+                operationLogService.log(operation, target, detail, 0, thrown.getMessage());
             } else {
-                operationLogService.log(operation, target, detail);
+                operationLogService.log(operation, target, detail, 1, null);
             }
         } catch (Exception e) {
             log.warn("操作日志切面写入失败: {}", e.getMessage());
