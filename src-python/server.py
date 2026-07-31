@@ -5,7 +5,7 @@
 1. serve Vue 前端的 dist 目录(静态文件)
 2. 处理 /__api__/xxx 端点(前端 → Python 的 API 调用)
 
-绑定到 127.0.0.1 的随机端口,避免冲突。
+绑定到 127.0.0.1 的固定端口(1287~1291),保证 origin 稳定。
 """
 import http.server
 import socketserver
@@ -45,17 +45,39 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
     web_dir = '.'
     bridge = None
 
+    # 只读端点(允许 GET)
+    READ_ONLY_METHODS = frozenset({'server_url', 'config'})
+
     def log_message(self, format, *args):
         pass  # 静默,不打印访问日志
 
+    def _check_origin(self):
+        """校验请求来源,防止跨站 CSRF。
+
+        仅允许同源请求(127.0.0.1)。浏览器跨站请求会被拒绝。
+        """
+        origin = self.headers.get('Origin', '')
+        referer = self.headers.get('Referer', '')
+        # 同源时 Origin 为空(同源 GET)或 http://127.0.0.1:port
+        if origin and not origin.startswith('http://127.0.0.1:'):
+            return False
+        if referer and not referer.startswith('http://127.0.0.1:'):
+            return False
+        return True
+
     def do_GET(self):
-        """处理 GET 请求:API 端点或静态文件。"""
+        """处理 GET 请求:只读 API 端点或静态文件。"""
         parsed = urllib.parse.urlparse(self.path)
 
-        # API 端点:/__api__/xxx —— 全部转发给 bridge 处理
-        # (bridge 自行判断方法是否支持,不支持的返回错误)
+        # API 端点:GET 仅允许只读方法
         if parsed.path.startswith('/__api__/'):
             method = parsed.path[len('/__api__/'):]
+            if method not in self.READ_ONLY_METHODS:
+                self._send_json(405, {'ok': False, 'error': 'GET 不支持此端点,请使用 POST'})
+                return
+            if not self._check_origin():
+                self._send_json(403, {'ok': False, 'error': '跨站请求被拒绝'})
+                return
             self._handle_api(method)
             return
 
@@ -63,11 +85,14 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_static(parsed.path)
 
     def do_POST(self):
-        """处理 POST 请求:API 端点。"""
+        """处理 POST 请求:API 端点(状态变更操作)。"""
         parsed = urllib.parse.urlparse(self.path)
 
         if parsed.path.startswith('/__api__/'):
             method = parsed.path[len('/__api__/'):]
+            if not self._check_origin():
+                self._send_json(403, {'ok': False, 'error': '跨站请求被拒绝'})
+                return
             self._handle_api(method)
         else:
             self._send_json(404, {'ok': False, 'error': 'Not Found'})
@@ -100,8 +125,7 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
-        # 允许跨域(虽然同源不需要,但保险)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        # 不设置 Access-Control-Allow-Origin,仅同源可访问(防止跨站 CSRF)
         self.end_headers()
         self.wfile.write(body)
 
@@ -119,10 +143,16 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
             path = 'index.html'
 
         file_path = os.path.join(self.web_dir, path)
-
-        # 安全检查:防止目录穿越
         file_path = os.path.normpath(file_path)
-        if not file_path.startswith(os.path.abspath(self.web_dir)):
+
+        # 安全检查:防止目录穿越(使用 commonpath 检查路径边界)
+        web_dir_abs = os.path.abspath(self.web_dir)
+        try:
+            if os.path.commonpath([file_path, web_dir_abs]) != web_dir_abs:
+                self.send_error(403)
+                return
+        except ValueError:
+            # Windows 跨盘符时 commonpath 会抛 ValueError
             self.send_error(403)
             return
 
@@ -184,7 +214,7 @@ def start_server(directory, bridge, port=0):
     Args:
         directory: Vue dist 目录
         bridge: ShellBridge 实例
-        port: 端口号,0 表示自动分配(不推荐,会导致 origin 不稳定)
+        port: 端口号,0 表示从候选端口中选首个可用
 
     Returns:
         (server, url): 服务器实例和访问 URL
@@ -194,6 +224,12 @@ def start_server(directory, bridge, port=0):
         pass
     Handler.web_dir = directory
     Handler.bridge = bridge
+
+    # 使用 ThreadingTCPServer 支持并发请求
+    # allow_reuse_address 必须作为类属性在实例化前设置
+    class ReusableServer(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
 
     # 固定端口优先:保证 origin(http://127.0.0.1:port)稳定,
     # 否则 localStorage/IndexedDB 会因端口变化而丢失(绑定配置、菜品缓存全部失效)。
@@ -209,8 +245,7 @@ def start_server(directory, bridge, port=0):
     last_error = None
     for p in candidates:
         try:
-            server = socketserver.TCPServer(('127.0.0.1', p), Handler)
-            server.allow_reuse_address = True
+            server = ReusableServer(('127.0.0.1', p), Handler)
             actual_port = p
             break
         except OSError as e:

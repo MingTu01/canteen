@@ -51,10 +51,13 @@ public class TestController {
 
     /**
      * 公开获取全部员工列表(测试模拟刷卡用)。
-     * 返回字段:id / cardNo / name / phone / storeId / storeName / departmentId
+     * 返回字段:id / cardNo / name / storeId / storeName / departmentId
+     * 注意:phone 字段仅在 dev 环境返回,生产环境不暴露 PII
      */
     @GetMapping("/employees")
     public ApiResponse<List<Map<String, Object>>> listEmployees() {
+        boolean isDev = Arrays.asList(environment.getActiveProfiles()).contains("dev");
+
         Map<Long, String> storeNameMap = storeMapper.selectList(null).stream()
                 .collect(Collectors.toMap(Store::getId, s -> s.getName() == null ? "" : s.getName(), (a, b) -> a));
 
@@ -70,7 +73,10 @@ public class TestController {
             m.put("id", e.getId());
             m.put("cardNo", e.getCardNo());
             m.put("name", e.getName());
-            m.put("phone", e.getPhone());
+            // phone 属于 PII,仅 dev 环境返回
+            if (isDev) {
+                m.put("phone", e.getPhone());
+            }
             m.put("storeId", e.getStoreId());
             m.put("storeName", storeNameMap.getOrDefault(e.getStoreId(), ""));
             m.put("departmentId", e.getDepartmentId());

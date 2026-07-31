@@ -80,8 +80,8 @@ const onPhoneSubmit = async (): Promise<void> => {
     showFailToast('请输入密码')
     return
   }
-  if (phoneForm.password.length < 6) {
-    showFailToast('密码至少 6 位')
+  if (phoneForm.password.length < 8) {
+    showFailToast('密码至少 8 位')
     return
   }
 
@@ -210,7 +210,7 @@ onMounted(() => {
             v-model="phoneForm.password"
             name="password"
             label="密码"
-            placeholder="请输入密码(至少 6 位)"
+            placeholder="请输入密码(至少 8 位)"
             :type="showPhonePassword ? 'text' : 'password'"
             maxlength="20"
             :label-align="fieldAlign"
@@ -256,8 +256,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 测试刷卡模块:点击员工模拟手机号登录(始终显示,便于部署演示) -->
-      <div class="login-page__swipe-test">
+      <!-- 测试刷卡模块:点击员工模拟手机号登录(仅 DEV 显示) -->
+      <div v-if="isDev" class="login-page__swipe-test">
         <div class="login-page__swipe-title">
           🧪 测试快速登录
           <span class="login-page__swipe-count">

@@ -7,7 +7,7 @@
  * - 左侧 DateSidebar(默认显示今天+未来10天中有订单的日期;过去日期通过日历选择)
  * - 右侧 OrderCard 列表(三餐:已订/未订两态,展示菜品明细)
  * - 取消订餐:自定义 Modal 二次确认 + 错误提示
- * - 无操作 120 秒自动返回待机
+ * - 无操作 30 秒自动返回待机
  *
  * 日期规则:
  * - sidebar 默认:今天 + 未来10天中"有订单"的日期(降序,今天在前)
@@ -18,12 +18,13 @@
  * - 后端 getOrdersByEmployee 可能未填充 items(旧版容器),前端对 items 为空的订单
  *   批量调用 GET /order/{id} 补充菜品明细(getOrderDetail 返回 {order, items})
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
 import { toDateKey, dateWindow } from '@/utils'
+import { menuInvalidated } from '@/utils/cache'
 import TopBar from '@/components/TopBar.vue'
 import DatePicker from '@/components/DatePicker.vue'
 import DateSidebar from '@/components/DateSidebar.vue'
@@ -208,6 +209,17 @@ onMounted(async () => {
     const found = defaultWindow.find((d) => availableSet.value.has(d))
     if (found) selectedDate.value = found
   }
+})
+
+/**
+ * 监听 SSE 菜单失效事件:菜单变更时重新加载订单数据。
+ * 解决"SSE menu_changed 事件无法触达 UI"问题(cache.ts 触发 menuInvalidated ref)。
+ */
+watch(menuInvalidated, (v) => {
+  if (!v || !v.date) return
+  const storeId = orderStore.employee?.storeId
+  if (v.storeId !== storeId) return // 仅本门店事件
+  fetchOrders()
 })
 </script>
 

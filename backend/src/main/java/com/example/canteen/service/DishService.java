@@ -87,6 +87,8 @@ public class DishService {
         try {
             tpl.delete(String.format(CACHE_KEY_DISHES, storeId));
             tpl.delete(String.format(CACHE_KEY_NEW, storeId));
+            // 同时清除全量菜品缓存(含已下架菜品,供终端使用)
+            tpl.delete(String.format(CACHE_KEY_DISHES, storeId) + ":all");
         } catch (Exception e) {
             log.warn("Redis 失效失败:{}", e.getMessage());
         }

@@ -27,7 +27,7 @@ onMounted(() => {
   purgeOldBrandingCache()
   syncCache()
   // 加载 Python 侧运行时配置(window_mode/card_interval/idle_timeout)
-  // 浏览器/Tauri 环境静默跳过(保留默认值)
+  // 浏览器环境静默跳过(保留默认值)
   loadRuntimeConfig().catch(() => {})
 })
 

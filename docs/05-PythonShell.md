@@ -1,6 +1,6 @@
 # 05 · Python Shell 需求文档（src-python）
 
-> 版本：V0.0.1 ｜ 更新日期：2026-07-30
+> 版本：V0.0.2 ｜ 更新日期：2026-07-31
 > 代码路径：[src-python/](file:///d:/文档/enterprise-canteen/enterprise-canteen/src-python)
 > 终端前端：详见 [04-X86终端.md](file:///d:/文档/enterprise-canteen/enterprise-canteen/docs/04-X86终端.md)
 
@@ -70,6 +70,7 @@ X86 终端的桌面壳程序，使用 **Python + PyQt5 + QWebEngineView** 加载
 │  │  - idr_read() 轮询读卡                                │   │
 │  │  - 防抖 2 秒（可配置）                                │   │
 │  │  - pyqtSignal card_read(str) → 推送给前端             │   │
+│  │  - pyqtSignal status(str) → 调试日志（详见 §5.7）     │   │
 │  └──────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
                           ↓ HTTPS
@@ -164,7 +165,7 @@ _single_instance_mutex = mutex_handle  # 防止 GC 回收
 
 ### 5.5 防抖机制
 
-- **间隔**：默认 2 秒（可配置，`card_interval`）
+- **间隔**：`config.json` 默认 `2.0` 秒（`config.py` 的 `DEFAULT_CARD_INTERVAL = 2.0`）；`card_reader.py` 的 `CardReader.__init__` 形参默认 `1.5` 秒。**运行时由 `config.json` 覆盖**（`main.py` 启动时用 `cfg['card_interval']` 传入 `CardReader`）。
 - **规则**：同一卡号在 `_card_interval` 秒内不重复触发
 - **动态生效**：`set_interval(seconds)` 由配置页修改后通过 `config_updated` 信号立即调用，无需重启读卡器
 - **最小值**：0.5 秒（`max(0.5, float(card_interval))`）
@@ -176,15 +177,36 @@ _single_instance_mutex = mutex_handle  # 防止 GC 回收
 2. pcdgetdevicenumber 读取设备号确认通信正常
 3. 循环：
    - idr_read(card_buf) 读取卡号
-   - ret == 0：解析卡号，防抖检查，蜂鸣提示，emit card_read 信号
-   - ret == 8：卡不在感应区（正常），继续轮询
+   - ret == 0：解析卡号，防抖检查，蜂鸣提示，emit card_read 信号；error_count 重置为 0
+   - ret == 8：卡不在感应区（正常），error_count 重置为 0，继续轮询
    - ret == 22/23/24：设备异常，sleep 2s 避免日志刷屏
    - 其他错误：sleep 0.5s
+   - 异常错误日志限流：error_count > 3 后不再打印（仅前 3 次才打印 `读卡异常` 日志）
    - 正常轮询间隔：100ms
-4. stop() 时 _running = False，线程退出
+4. stop() 时 _running = False，线程退出（emit status "读卡器线程退出"）
 ```
 
-### 5.7 DLL 加载顺序
+### 5.7 CardReader 信号与重启
+
+**信号**（均跨线程安全，由 Qt 自动转发到主线程）：
+
+| 信号 | 参数 | 触发场景 |
+|------|------|----------|
+| `card_read` | `str` | 读到卡号（已防抖、十进制格式） |
+| `status` | `str` | 状态/调试信息（DLL 加载、蜂鸣、设备号、错误等） |
+
+> **注意**：§3 架构图与 §5.9（卡号推送到前端）仅提及 `card_read`，实际 `CardReader` 还会 emit `status` 信号。`main.py` 中 `card_reader.status.connect(lambda msg: print(f'[CardReader] {msg}'))` 将状态信息打印到 stdout，便于调试。
+
+**`restart()` 实现**（前端设置页可调用，对应 `/__api__/restart_card_reader`）：
+
+```
+stop()          # _running = False, join(timeout=2), _dll = None
+sleep(0.5)      # 间隔 0.5 秒，确保 USB 设备释放
+start()         # 重新加载 DLL + 启动后台线程
+return self._running
+```
+
+### 5.8 DLL 加载顺序
 
 1. **PyInstaller 临时目录**（`sys._MEIPASS`，打包时内嵌）
 2. **EXE 同目录**（外部放置，便于升级 DLL 而不重打 EXE）
@@ -192,7 +214,7 @@ _single_instance_mutex = mutex_handle  # 防止 GC 回收
 
 加载 `OUR_IDR.dll` 前先加载 `IDUSB.DLL`（依赖库），并把 DLL 目录加入 `os.add_dll_directory` 和 `PATH` 环境变量。
 
-### 5.8 卡号推送到前端
+### 5.9 卡号推送到前端
 
 ```python
 def push_card_to_frontend(page, card_no):
@@ -228,8 +250,8 @@ def push_card_to_frontend(page, card_no):
 
 ### 6.3 静态文件安全
 
-- **目录穿越防护**：`os.path.normpath` 后检查是否以 `web_dir` 开头，否则返回 403
-- **MIME 类型**：根据扩展名设置 `Content-Type`（html/js/css/json/png/jpg/gif/svg/ico/woff/woff2/ttf）
+- **目录穿越防护**：`os.path.normpath` 后用 `str.startswith(web_dir)` 检查前缀，否则返回 403。**当前实现存在边界缺陷（待修复）**：`startswith` 不检查路径分隔符边界，若 `web_dir` 为 `/web`，则 `/web-evil/...` 也会通过检查。待修复为 `os.path.commonpath` 或 `startswith + os.sep` 边界判断。
+- **MIME 类型**：根据扩展名设置 `Content-Type`（html/js/css/json/png/jpg/jpeg/gif/svg/ico/woff/woff2/ttf）
 - **SPA 回退**：文件不存在时返回 `index.html`（Vue Router 接管路由）
 
 ### 6.4 Vue dist 查找顺序
@@ -254,18 +276,24 @@ def push_card_to_frontend(page, card_no):
 
 **关键**：Qt 窗口操作必须在主线程执行。HTTP 服务器在后台线程，通过 `pyqtSignal` 跨线程安全调用主线程槽函数。
 
+> **代码注释不一致（待修复）**：`bridge.py` 顶部模块 docstring 的 API 端点列表漏列了 `switch_to_fullscreen` 和 `eval_js`；`ShellBridge` 类 docstring 的信号列表也漏列了 `eval_js_requested`。实际类属性中已定义这两个信号（见上表），仅文档注释未同步。
+
 ### 7.2 API 端点
 
 | 方法 | 路径 | 请求体 | 返回 | 说明 |
 |------|------|--------|------|------|
 | GET | `/__api__/server_url` | - | `{ok, server_url}` | 获取预设服务器地址 |
 | GET | `/__api__/config` | - | `{ok, config}` | 获取完整配置 |
-| POST | `/__api__/set_config` | `{window_mode?, card_interval?, idle_timeout?, server_url?}` | `{ok, updated}` | 更新配置（字段白名单 + 类型校验） |
+| POST | `/__api__/set_config` | `{window_mode?, card_interval?, idle_timeout?, server_url?}` | `{ok, updated}` | 更新配置（字段白名单在 `write_config`，类型校验在 `bridge.handle_api` 的 `set_config` 分支） |
 | POST | `/__api__/switch_to_config` | - | `{ok}` | 切换到窗口模式 |
 | POST | `/__api__/switch_to_fullscreen` | - | `{ok}` | 切换到全屏模式 |
 | POST | `/__api__/quit` | - | `{ok}` | 退出应用 |
 | POST | `/__api__/restart_card_reader` | - | `{ok, running}` | 重启读卡器 |
 | POST | `/__api__/eval_js` | `{js}` | `{ok}` | 临时诊断（执行前端 JS） |
+
+> **安全提示**：
+> - **HTTP 方法不强制（待修复）**：上表中的 GET/POST 仅为约定，`server.py` 的 `do_GET` 和 `do_POST` 对 `/__api__/*` 不区分方法，统一转发给 `bridge.handle_api`。即 `eval_js`/`quit`/`set_config` 等端点也可被 GET 请求触发。
+> - **`eval_js` RCE 风险（待修复）**：该端点可在终端执行任意 JS，存在 RCE 风险；生产环境应禁用或加鉴权。
 
 ### 7.3 配置更新流程
 
@@ -317,16 +345,19 @@ profile.setHttpCacheType(QWebEngineProfile.NoCache)  # 禁用 HTTP 缓存
 
 QtWebEngine 内部使用 ANSI API 读取路径，无法处理含中文的路径（如 `D:\文档\...`），报 `resources not found` 和 `Couldn't mmap icu data file`。
 
-**解决方案**（必须在 `from PyQt5.QtWebEngineWidgets import *` 之前执行）：
+**解决方案**（必须在导入 `PyQt5.QtWebEngineWidgets` 之前执行）：
 
-1. 用 `GetShortPathName` 将长路径转换为 Windows 短路径名（8.3 格式），消除中文/空格
-2. 设置环境变量：
+1. **仅在打包模式下生效**：`main.py` 用 `if getattr(sys, 'frozen', False) and sys.platform == 'win32':` 包裹短路径处理逻辑；开发模式下（`sys.frozen` 不存在）直接跳过，避免影响调试。
+2. 用 `GetShortPathName` 将长路径转换为 Windows 短路径名（8.3 格式），消除中文/空格
+3. 设置环境变量：
    - `QTWEBENGINEPROCESS_PATH`：`QtWebEngineProcess.exe` 路径
    - `QTWEBENGINE_RESOURCES_PATH`：`resources/` 目录（含 `icudtl.dat` + `.pak`）
    - `QTWEBENGINE_LOCALES_PATH`：`translations/qtwebengine_locales/` 目录
-3. 写 `qt.conf` 文件：
+4. 写 `qt.conf` 文件：
    - `bin/qt.conf`：`Prefix = ..`（因为 `QtWebEngineProcess.exe` 在 `bin/` 下，而 `resources/` 在 `bin/` 的父目录 `Qt5/` 下）
    - `EXE 同目录/qt.conf`：完整路径配置
+
+> **注意**：`main.py` 使用显式导入 `from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineScript`（而非 `import *`），上述环境变量/`qt.conf` 设置仍需在该 import 之前完成。
 
 ### 8.4 `__pythonShell` 标记注入
 
@@ -336,6 +367,7 @@ marker_script.setSourceCode('window.__pythonShell = true;')
 marker_script.setInjectionPoint(QWebEngineScript.DocumentCreation)
 marker_script.setWorldId(QWebEngineScript.MainWorld)
 marker_script.setName('python-shell-marker')
+marker_script.setRunsOnSubFrames(False)  # 仅主框架注入，子框架不重复
 profile.scripts().insert(marker_script)
 ```
 
@@ -344,6 +376,8 @@ profile.scripts().insert(marker_script)
 - `switchToConfigMode`/`quitApp` 走 browser 分支失效
 
 `loadFinished` 信号触发时 Vue 早已挂载，太晚了。
+
+> **代码冗余（待移除）**：`main.py` 中除上述 `QWebEngineScript` 注入外，`TerminalWindow._init_ui` 仍保留了 `self.view.loadFinished.connect(self._on_load_finished)`，在 `_on_load_finished` 中再次通过 `runJavaScript('window.__pythonShell = true;')` 注入。该 `loadFinished` 注入是冗余的（实际生效的是 `QWebEngineScript`），待移除。
 
 ---
 
@@ -395,7 +429,7 @@ def switch_to_config_mode(self):
 | `server_url` | string | `""` | 预设后端服务器地址，绑定页面自动填入；留空则要求手动输入。**不要带末尾斜杠 `/`，不要带 `/api` 后缀** |
 | `window_mode` | string | `"fullscreen"` | `"fullscreen"`（全屏无边框）或 `"windowed"`（1280×800 窗口） |
 | `card_interval` | float | `2.0` | 读卡防抖间隔（秒），推荐 1.0~3.0 |
-| `idle_timeout` | int | `30` | 无操作自动返回待机页时间（秒），0=永不 |
+| `idle_timeout` | int | `30` | 无操作自动返回待机页时间（秒），0=永不。**注意：超时逻辑实际由前端实现**，Python 端仅在 `config.py` 中存取该值并通过 `/__api__/config` 返回给前端，自身不参与计时。 |
 
 > **注意**：管理员密码验证由后端 `/api/admin/login` 接口完成（BCrypt），**config.json 中无 `admin_password_hash` 字段**。
 
@@ -414,7 +448,7 @@ def switch_to_config_mode(self):
 | `ensure_config_json()` | 确保文件存在，首次运行生成默认配置（含注释） |
 | `read_config()` | 读取 `server_url`（向后兼容） |
 | `read_full_config()` | 读取完整配置，缺失字段用默认值填充，类型校验 |
-| `write_config(updates)` | 部分更新，字段白名单 + 类型校验 |
+| `write_config(updates)` | 部分更新，仅做**字段白名单**（`server_url`/`window_mode`/`card_interval`/`idle_timeout`）；**类型校验在 `bridge.handle_api` 的 `set_config` 分支**完成 |
 
 **注意**：`write_config` 会丢失注释（`json.dump` 不保留注释），但功能正常。如需保留注释，需手动编辑 `config.json`。
 
@@ -450,6 +484,13 @@ def switch_to_config_mode(self):
 # 使用 32 位 Python（兼容 Win7 32 位）
 C:\Python310-32\python.exe -m PyInstaller canteen-terminal.spec --clean --noconfirm
 ```
+
+**`canteen-terminal.spec` 关键配置**：
+
+- `console=True`：保留控制台窗口，便于查看 `[CardReader]`/`[Bridge]`/`[EvalJS]` 等 stdout 日志（正式部署可改 `False`，但 `main.py` 已 `reconfigure(line_buffering=True)` 行缓冲，关闭控制台后日志将不可见）。
+- `excludes=['tkinter', 'unittest', 'pydoc']`：排除不需要的大模块，减小体积（注意 `email`/`xml` 不能排除，`http.server` 依赖它们）。
+- **无 `icon=` 参数**：当前未指定 EXE 图标（spec 中 `# icon='icon.ico'` 为注释），如需自定义图标需准备 `.ico` 文件并取消注释。
+- `upx=True` + `upx_exclude`：详见 §11.4。
 
 ### 11.2 打包模式：`--onedir`（绿色目录版）
 
@@ -500,18 +541,25 @@ dist/canteen-terminal/
 
 ## 12. 启动流程
 
+> **重要**：QtWebEngine 短路径/环境变量设置（main.py 模块级代码，仅 `sys.frozen` 下执行）和 Mutex 单实例检查（main.py 模块级代码）均先于 `main()` 函数体执行，且都早于 `from PyQt5.QtWebEngineWidgets import ...`。
+
 ```
-1. 单实例检查（Windows Mutex）
+1. QtWebEngine 短路径 + 环境变量（main.py 模块级，仅 sys.frozen 下执行）
+   └─ GetShortPathName 转换 EXE 目录为 8.3 短路径（消除中文）
+   └─ 设置 QTWEBENGINEPROCESS_PATH / QTWEBENGINE_RESOURCES_PATH / QTWEBENGINE_LOCALES_PATH
+   └─ 设置 QTWEBENGINE_CHROMIUM_FLAGS（--no-sandbox 等）
+   └─ 写 bin/qt.conf（Prefix=..）和 EXE 同目录/qt.conf
+
+2. 单实例检查（Windows Mutex，main.py 模块级）
    └─ 已有实例运行 → 弹框提示 → 退出
 
-2. 确保配置文件存在（ensure_config_json）
-   └─ 首次运行生成带注释的默认 config.json
+3. 显式导入 PyQt5.QtWebEngineWidgets（必须在前两步之后）
 
-3. 读取完整配置（read_full_config）
-   └─ window_mode / card_interval / idle_timeout / server_url
-
-4. 查找 Vue 前端 dist 目录（find_web_dist）
-   └─ 未找到 → 提示 → 退出
+4. 进入 main()：
+   └─ stdout/stderr reconfigure(line_buffering=True) 行缓冲，确保 print 立即输出
+   └─ ensure_config_json（首次运行生成带注释的默认 config.json）
+   └─ read_full_config（window_mode / card_interval / idle_timeout / server_url）
+   └─ find_web_dist（未找到 → 提示 → 退出）
 
 5. 创建 QApplication
 
@@ -519,14 +567,15 @@ dist/canteen-terminal/
    └─ 清理残留锁文件（-journal/-wal/-shm/LOCK）
    └─ 禁用 HTTP 缓存（NoCache）
 
-7. 注入 __pythonShell 标记（QWebEngineScript, DocumentCreation）
+7. 注入 __pythonShell 标记（QWebEngineScript, DocumentCreation, setRunsOnSubFrames(False)）
 
-8. 创建读卡器（CardReader，传入 card_interval）
+8. 创建读卡器（CardReader，传入 card_interval；连接 status 信号 → 打印日志）
 
 9. 创建 ShellBridge
 
 10. 启动 HTTP 服务器（serve Vue dist + API 端点）
     └─ 固定端口 1287 优先，fallback 到 1288~1291
+    └─ 在 daemon 线程中运行 serve_forever（主进程退出时自动结束）
 
 11. 创建主窗口（根据 window_mode 决定全屏/窗口）
 
@@ -535,6 +584,7 @@ dist/canteen-terminal/
     └─ switch_to_fullscreen_requested → window.switch_to_fullscreen_mode
     └─ quit_requested → QApplication.quit
     └─ config_updated → 动态应用运行时参数
+    └─ eval_js_requested → on_eval_js（临时诊断，详见 §7.2 安全提示）
 
 13. 连接读卡器信号 → 推送卡号到前端
     └─ card_reader.card_read → push_card_to_frontend
@@ -556,15 +606,25 @@ dist/canteen-terminal/
 | 边界 | 策略 |
 |------|------|
 | 单实例 | Windows 命名 Mutex（`Global\CanteenTerminal_SingleInstance_v1`），防止多开导致数据丢失 |
-| HTTP 服务器 | 仅绑定 `127.0.0.1`，不对外暴露；固定端口 1287 保证 origin 稳定 |
-| 静态文件 | 目录穿越防护（`normpath` + 前缀检查） |
-| 配置文件 | `//` 注释剥离时跳过字符串内容；字段白名单 + 类型校验；写回时不含注释 |
+| HTTP 服务器 | 仅绑定 `127.0.0.1`，不对外暴露；固定端口 1287 保证 origin 稳定；运行在 daemon 线程 |
+| 静态文件 | 目录穿越防护（`normpath` + `startswith` 前缀检查，**存在边界缺陷待修复为 commonpath**） |
+| 配置文件 | `//` 注释剥离时跳过字符串内容；字段白名单在 `write_config`，类型校验在 `bridge.handle_api` 的 `set_config` 分支；写回时不含注释 |
 | 管理员密码 | **不存储在本地**，由后端 `/api/admin/login` 验证（BCrypt） |
 | 读卡器 DLL | 优先从 PyInstaller 临时目录加载（打包时内嵌），避免外部替换 |
 | Chromium 沙箱 | `--no-sandbox`（必须，否则 IndexedDB 写入失败） |
 | HTTP 缓存 | 禁用（`NoCache`），避免重新打包后加载旧前端资源 |
 | 持久化目录 | `EXE 同目录/data/`，随程序一起备份/迁移 |
 | 卡号推送 | `runJavaScript` 前转义特殊字符（`\\`、`'`、`"`），防止注入 |
+
+### 13.1 已知安全风险（待修复）
+
+> 以下风险点均在本地 `127.0.0.1` 监听范围内，但仍可被同机恶意网页或脚本利用，需在正式部署前修复。
+
+- **CORS `ACAO:*`（待修复）**：`server.py` 在所有 JSON API 响应中设置 `Access-Control-Allow-Origin: *`，任意网站可跨域访问本地 API。待修复为仅允许同源（移除该 header 或回显白名单 origin）。
+- **本地 API 无鉴权（待修复）**：所有 `/__api__/*` 端点无任何鉴权 + 无 CSRF 防护。结合上一条 `ACAO:*`，任意网站可跨域发起 CSRF：退出应用、篡改配置（`set_config`）、执行任意 JS（`eval_js`，RCE）。
+- **`eval_js` RCE 风险（待修复）**：详见 §7.2，生产环境应禁用或加鉴权。
+- **HTTP 方法不强制（待修复）**：详见 §7.2，`do_GET`/`do_POST` 对 `/__api__/*` 不区分方法。
+- **目录穿越边界缺陷（待修复）**：详见 §6.3，`startswith` 不检查路径分隔符边界。
 
 ---
 
@@ -624,6 +684,14 @@ dist/canteen-terminal/
 **原因**：手动 `hide()` 后 `showNormal()` 未恢复
 
 **解决**：不要手动 `hide()`，`setWindowFlags` 会自动重建原生窗口并保持可见
+
+### 14.7 端口释放后仍报 `Address already in use`
+
+**症状**：上次异常退出后，重启时 1287 端口无法立即绑定，fallback 到 1288+
+
+**原因**：`server.py` 在 `socketserver.TCPServer` 实例创建**之后**才设置 `server.allow_reuse_address = True`，此时套接字已经绑定，该设置是 no-op（无效）。正确做法是在类定义时设置 `class Server(socketserver.TCPServer): allow_reuse_address = True`，或在 `server_bind` 之前设置。
+
+**解决（待修复）**：将 `allow_reuse_address = True` 改为类属性，或在 `TCPServer.__init__` 之前设置。当前实现下需等待系统 TIME_WAIT 结束（通常 30~120 秒）。
 
 ---
 

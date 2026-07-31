@@ -10,7 +10,7 @@
  * - 悬浮购物车(常驻底部,点击信息区打开预览弹窗)
  * - 日期范围:从明天起 30 天(若已过今天 15:00 截止,则从后天起)
  * - 已下单餐别锁定:整块不可加菜,已订菜品框出 + "已订" 标记,日期圆点保留
- * - 无操作 120 秒自动返回待机
+ * - 无操作 30 秒自动返回待机
  */
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'

@@ -90,7 +90,7 @@ const handleInput = async (code: string) => {
   }
 }
 
-// 使用统一读卡器 composable:支持 CH375 DLL(Tauri 事件) + USB HID 键盘(降级)
+// 使用统一读卡器 composable:支持 Python Shell 读卡器 + USB HID 键盘(降级)
 // 弹窗显示时不接受刷卡
 useCardReader((cardNo) => {
   if (showError.value || scanning.value) return

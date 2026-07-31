@@ -24,7 +24,7 @@ export function logout(): Promise<{ loggedOut: boolean }> {
   return post<{ loggedOut: boolean }>('/auth/logout')
 }
 
-/** 修改密码:校验原密码,新密码至少 6 位 */
+/** 修改密码:校验原密码,新密码至少 8 位 */
 export function changePassword(oldPassword: string, newPassword: string): Promise<void> {
   return put<void>('/employee/change-password', { oldPassword, newPassword })
 }

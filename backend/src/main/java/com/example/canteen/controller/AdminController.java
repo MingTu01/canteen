@@ -59,7 +59,8 @@ public class AdminController {
 
     @PutMapping("/{id}")
     public ApiResponse<AdminVO> updateAdmin(@PathVariable Long id, @RequestBody Admin admin) {
-        SecurityContext.checkSuperAdmin("仅超级管理员可修改管理员账号");
+        // 门店管理员可改本店非超管账号,超管可改任意账号(Service 层做具体校验)
+        SecurityContext.checkStoreAdminOrAbove("仅管理员可修改管理员账号");
         return ApiResponse.success(adminService.updateAdmin(id, admin));
     }
 

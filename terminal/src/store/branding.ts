@@ -4,13 +4,13 @@ import { loadConfig } from '@/api'
 import { getServerUrl as getShellServerUrl } from '@/api/shellApi'
 
 /**
- * 获取服务器地址,优先从终端绑定配置读取,兜底从 shell(Tauri/Python)config.json 读取。
+ * 获取服务器地址,优先从终端绑定配置读取,兜底从 Python Shell config.json 读取。
  * 这样即使终端未绑定(首次启动配置页),也能预填服务器地址。
  */
 async function getServerUrl(): Promise<string> {
   const cfg = loadConfig()
   if (cfg?.serverUrl) return cfg.serverUrl
-  // 兜底:从 shell(Tauri/Python)config.json 读取(浏览器环境返回空)
+  // 兜底:从 Python Shell config.json 读取(浏览器环境返回空)
   return getShellServerUrl()
 }
 
@@ -27,7 +27,7 @@ async function getServerUrl(): Promise<string> {
  * 静态资源(logo/背景图 URL)自身带 ?v=mtime 版本号 + 后端 365d immutable 缓存,
  * 浏览器命中磁盘缓存,不会重复下载图片。
  *
- * 注意:Tauri 桌面应用的 origin 是 tauri.localhost,后端返回的相对路径
+ * 注意:Python Shell 的 origin 是 http://127.0.0.1:port,后端返回的相对路径
  * (/uploads/xxx.jpg)需要拼接服务器地址为绝对 URL,否则图片加载不了。
  */
 export interface StoreBranding {
@@ -50,7 +50,7 @@ const cacheKeyOf = (storeId: number) => `terminal_branding_${storeId}`
 
 /**
  * 将后端返回的相对路径图片 URL 拼接为服务器绝对 URL。
- * Tauri 应用的 origin 是 tauri.localhost,相对路径 /uploads/xxx.jpg 无法访问,
+ * Python Shell 的 origin 是 http://127.0.0.1:port,相对路径 /uploads/xxx.jpg 无法访问,
  * 必须拼接为 http://server:port/uploads/xxx.jpg。
  *
  * 已经是绝对 URL(http/https 开头)或 data URI 的不做处理。
@@ -122,7 +122,7 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
   }
 
   const storeId = cfg.storeId
-  // 获取服务器地址:优先绑定配置,兜底 Tauri config.json
+  // 获取服务器地址:优先绑定配置,兜底 Python Shell config.json
   const serverUrl = await getServerUrl()
 
   // 若已加载且 storeId 一致,使用后台模式静默校验

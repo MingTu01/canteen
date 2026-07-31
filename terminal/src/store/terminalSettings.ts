@@ -1,7 +1,7 @@
 /**
  * 终端运行时设置 store
  *
- * 从 Python config.json 读取(Python Shell 环境),浏览器/Tauri 环境用默认值。
+ * 从 Python config.json 读取(Python Shell 环境),浏览器环境用默认值。
  * App.vue 启动时调用 loadRuntimeConfig() 初始化。
  * Settings.vue 修改后调用 loadRuntimeConfig() 重新同步。
  *
@@ -28,7 +28,7 @@ let loaded = false
 
 /**
  * 从 Python 读取运行时配置并更新 store。
- * 浏览器/Tauri 环境静默跳过(保留默认值)。
+ * 浏览器环境静默跳过(保留默认值)。
  */
 export async function loadRuntimeConfig(): Promise<void> {
   const cfg = await getRuntimeConfig()

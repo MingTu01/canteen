@@ -31,6 +31,12 @@ const clearAuth = () => {
 /** 判断是否为登录请求:登录失败不应清状态/跳转(用户已在登录页) */
 const isLoginRequest = (url?: string) => !!url && url.includes('/admin/login')
 
+/**
+ * 401/403 并发去重标志:多个并发请求同时返回 401 时,
+ * 只允许第一个触发清理+跳转,其余直接 reject,避免重复跳转与重复清状态。
+ */
+let isRedirecting = false
+
 // 请求拦截:不再附加 Authorization 头,完全依赖 HttpOnly Cookie
 api.interceptors.request.use((config) => config)
 
@@ -49,8 +55,15 @@ api.interceptors.response.use(
     }
     // 401 未登录 / 403 无权限(会话过期或越权):清登录态并跳转登录页
     if ((data.code === 401 || data.code === 403) && !isLoginRequest(res.config.url)) {
-      clearAuth()
-      router.push('/login')
+      if (!isRedirecting) {
+        isRedirecting = true
+        clearAuth()
+        router
+          .push('/login?redirect=' + encodeURIComponent(router.currentRoute.value.fullPath))
+          .finally(() => {
+            isRedirecting = false
+          })
+      }
     }
     return Promise.reject(data)
   },
@@ -58,8 +71,15 @@ api.interceptors.response.use(
     const status = err.response?.status
     // 401 未登录 / 403 无权限(会话过期或越权):清登录态并跳转登录页,不弹错误消息
     if ((status === 401 || status === 403) && !isLoginRequest(err.config?.url)) {
-      clearAuth()
-      router.push('/login')
+      if (!isRedirecting) {
+        isRedirecting = true
+        clearAuth()
+        router
+          .push('/login?redirect=' + encodeURIComponent(router.currentRoute.value.fullPath))
+          .finally(() => {
+            isRedirecting = false
+          })
+      }
       return Promise.reject(err)
     }
     const msg = err.response?.data?.message || err.message || '网络错误'

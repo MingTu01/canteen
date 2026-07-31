@@ -1,10 +1,9 @@
 /**
  * 读卡器统一管理 composable
  *
- * 支持三种读卡器输入来源:
+ * 支持两种读卡器输入来源:
  * 1. Python Shell(ctypes 调 ICUSB.DLL,通过 window.__onCardRead 推送卡号)
- * 2. Tauri 后端(Rust FFI 调 ICUSB.DLL,发送 "card-read" 事件)
- * 3. USB HID 键盘模拟读卡器(通过 keydown 监听,Enter 结束输入)
+ * 2. USB HID 键盘模拟读卡器(通过 keydown 监听,Enter 结束输入)
  *
  * 用法:
  *   const { onCardRead } = useCardReader()
@@ -15,8 +14,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 type CardReadHandler = (cardNo: string) => void
 
 const handlers = ref<Set<CardReadHandler>>(new Set())
-let tauriListenerReady = false
-let tauriUnlisten: (() => void) | null = null
 let pythonBridgeReady = false
 
 /** 通知所有注册的 handler */
@@ -43,24 +40,6 @@ function initPythonBridge() {
     notifyHandlers(cardNo)
   }
   console.log('[CardReader] Python Shell 桥接已就绪 (window.__onCardRead)')
-}
-
-/**
- * 初始化 Tauri 事件监听(CH375 读卡器)。
- * 全局只初始化一次,多个组件共享同一个监听器。
- */
-async function initTauriListener() {
-  if (tauriListenerReady) return
-  tauriListenerReady = true
-  try {
-    const { listen } = await import('@tauri-apps/api/event')
-    tauriUnlisten = await listen<string>('card-read', (event) => {
-      notifyHandlers(event.payload)
-    })
-    console.log('[CardReader] Tauri 事件监听已启动')
-  } catch {
-    // 非 Tauri 环境(浏览器/Python Shell):忽略,Python Shell 用 __onCardRead
-  }
 }
 
 /**
@@ -116,9 +95,6 @@ export function useCardReader(
     // 初始化 Python Shell 桥接(window.__onCardRead)
     initPythonBridge()
 
-    // 初始化 Tauri 事件监听(非 Tauri 环境自动跳过)
-    initTauriListener()
-
     // 注册键盘监听(USB HID 读卡器降级)
     if (listenKeyboard) {
       window.addEventListener('keydown', onKeyPress)
@@ -138,10 +114,5 @@ export function useCardReader(
  * 全局清理(应用退出时调用)
  */
 export async function destroyCardReader() {
-  if (tauriUnlisten) {
-    tauriUnlisten()
-    tauriUnlisten = null
-  }
-  tauriListenerReady = false
   handlers.value.clear()
 }

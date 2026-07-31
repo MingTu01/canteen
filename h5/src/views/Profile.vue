@@ -154,7 +154,7 @@ const validatePassword = (): string | null => {
   const { oldPassword, newPassword, confirmPassword } = passwordForm.value
   if (!oldPassword) return '请输入旧密码'
   if (!newPassword) return '请输入新密码'
-  if (newPassword.length < 6) return '新密码至少 6 位'
+  if (newPassword.length < 8) return '新密码至少 8 位'
   if (newPassword !== confirmPassword) return '两次输入的密码不一致'
   return null
 }
@@ -386,7 +386,7 @@ const menuItems: MenuItem[] = [
             v-model="passwordForm.newPassword"
             type="password"
             label="新密码"
-            placeholder="至少6位"
+            placeholder="至少8位"
             :maxlength="32"
           />
           <van-field

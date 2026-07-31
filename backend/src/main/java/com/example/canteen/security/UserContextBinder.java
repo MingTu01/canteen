@@ -19,14 +19,15 @@ public final class UserContextBinder {
     /**
      * 按角色将上下文写入 request attribute。
      *
-     * @param request    HTTP 请求
-     * @param adminId    管理员 ID(非管理员角色可传 null)
-     * @param employeeId 员工 ID(非员工角色可传 null)
-     * @param storeId    门店 ID(所有角色都写)
-     * @param role       角色
+     * @param request     HTTP 请求
+     * @param adminId     管理员 ID(非管理员角色可传 null)
+     * @param employeeId  员工 ID(非员工角色可传 null)
+     * @param storeId     门店 ID(所有角色都写)
+     * @param role        角色
+     * @param deviceLabel 终端设备标签(仅 role=3 终端 token 写入,其他角色可传 null)
      */
     public static void bind(HttpServletRequest request, Long adminId, Long employeeId,
-                            Long storeId, Integer role) {
+                            Long storeId, Integer role, String deviceLabel) {
         // storeId 所有角色都写
         request.setAttribute(SecurityContext.ATTR_STORE_ID, storeId);
         request.setAttribute(SecurityContext.ATTR_ROLE, role);
@@ -40,7 +41,10 @@ public final class UserContextBinder {
                 || role == SecurityContext.ROLE_STORE_MANAGER)) {
             // 管理员(1/2/4/5/6)只写 adminId
             request.setAttribute(SecurityContext.ATTR_ADMIN_ID, adminId);
+        } else if (role != null && role == 3) {
+            // 终端:写 storeId(已写)+ deviceLabel,不写 adminId/employeeId
+            request.setAttribute(SecurityContext.ATTR_DEVICE_LABEL,
+                    deviceLabel == null ? "" : deviceLabel);
         }
-        // role=3(终端)只写 storeId,不写 adminId/employeeId
     }
 }

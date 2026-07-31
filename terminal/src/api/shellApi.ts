@@ -1,16 +1,15 @@
 /**
- * Shell API 统一封装 - 支持 Tauri / Python Shell / 浏览器三种环境。
+ * Shell API 统一封装 - 支持 Python Shell / 浏览器两种环境。
  *
  * 检测顺序:
- * 1. Tauri:window.__TAURI_INTERNALS__ 存在
- * 2. Python Shell:window.__pythonShell === true(Python 启动时注入)
- * 3. 浏览器:开发模式
+ * 1. Python Shell:window.__pythonShell === true(Python 启动时注入)
+ * 2. 浏览器:开发模式
  *
  * 前端 → Python 的调用通过 fetch /__api__/xxx(本地 HTTP 服务器端点)。
  * Python → 前端的卡号推送通过 window.__onCardRead(由 useCardReader.ts 监听)。
  */
 
-type ShellType = 'tauri' | 'python' | 'browser'
+type ShellType = 'python' | 'browser'
 
 /** 终端运行配置(Python config.json) */
 export interface TerminalRuntimeConfig {
@@ -28,7 +27,6 @@ export interface TerminalRuntimeConfig {
 export function detectShell(): ShellType {
   if (typeof window !== 'undefined') {
     const w = window as any
-    if (w.__TAURI_INTERNALS__ || w.__TAURI__) return 'tauri'
     if (w.__pythonShell === true) return 'python'
   }
   return 'browser'
@@ -40,14 +38,6 @@ export function detectShell(): ShellType {
  */
 export async function getServerUrl(): Promise<string> {
   const shell = detectShell()
-  if (shell === 'tauri') {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return await invoke<string>('get_server_url')
-    } catch {
-      return ''
-    }
-  }
   if (shell === 'python') {
     try {
       const res = await fetch('/__api__/server_url')
@@ -62,7 +52,7 @@ export async function getServerUrl(): Promise<string> {
 
 /**
  * 获取终端运行配置(window_mode/card_interval/idle_timeout)。
- * 浏览器/Tauri 环境返回 null(不支持)。
+ * 浏览器环境返回 null(不支持)。
  */
 export async function getRuntimeConfig(): Promise<TerminalRuntimeConfig | null> {
   const shell = detectShell()
@@ -79,7 +69,7 @@ export async function getRuntimeConfig(): Promise<TerminalRuntimeConfig | null> 
 
 /**
  * 更新终端运行配置(部分字段,写入 config.json)。
- * card_interval 立即生效;window_mode 需重启应用生效;idle_timeout 前端自行读取生效。
+ * card_interval 立即生效;window_mode 在 Python Shell 模式下立即生效;idle_timeout 前端自行读取生效。
  * @returns 是否成功
  */
 export async function setRuntimeConfig(updates: Partial<TerminalRuntimeConfig>): Promise<boolean> {
@@ -104,14 +94,7 @@ export async function setRuntimeConfig(updates: Partial<TerminalRuntimeConfig>):
  */
 export async function switchToConfigMode(): Promise<void> {
   const shell = detectShell()
-  if (shell === 'tauri') {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('switch_to_config_mode')
-    } catch (e) {
-      console.error('[shellApi] switchToConfigMode 失败:', e)
-    }
-  } else if (shell === 'python') {
+  if (shell === 'python') {
     try {
       await fetch('/__api__/switch_to_config', { method: 'POST' })
     } catch (e) {
@@ -140,14 +123,7 @@ export async function callShell(method: string): Promise<void> {
  */
 export async function quitApp(): Promise<void> {
   const shell = detectShell()
-  if (shell === 'tauri') {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('quit_app')
-    } catch (e) {
-      console.error('[shellApi] quitApp 失败:', e)
-    }
-  } else if (shell === 'python') {
+  if (shell === 'python') {
     try {
       await fetch('/__api__/quit', { method: 'POST' })
     } catch (e) {
@@ -165,14 +141,6 @@ export async function quitApp(): Promise<void> {
  */
 export async function restartCardReader(): Promise<boolean> {
   const shell = detectShell()
-  if (shell === 'tauri') {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return await invoke<boolean>('restart_card_reader')
-    } catch {
-      return false
-    }
-  }
   if (shell === 'python') {
     try {
       const res = await fetch('/__api__/restart_card_reader', { method: 'POST' })

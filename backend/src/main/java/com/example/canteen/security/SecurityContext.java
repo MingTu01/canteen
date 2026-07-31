@@ -14,6 +14,7 @@ public class SecurityContext {
     public static final String ATTR_EMPLOYEE_ID = "employeeId";
     public static final String ATTR_STORE_ID = "storeId";
     public static final String ATTR_ROLE = "role";
+    public static final String ATTR_DEVICE_LABEL = "deviceLabel";
     /** role=1 超级管理员(可跨门店);role=2 门店管理员;员工 token role=0 */
     public static final int ROLE_SUPER_ADMIN = 1;
     public static final int ROLE_STORE_ADMIN = 2;
@@ -40,6 +41,11 @@ public class SecurityContext {
 
     public static Long currentStoreId() {
         return getLong(ATTR_STORE_ID);
+    }
+
+    public static String currentDeviceLabel() {
+        Object v = currentRequest() == null ? null : currentRequest().getAttribute(ATTR_DEVICE_LABEL);
+        return v == null ? null : v.toString();
     }
 
     public static Integer currentRole() {

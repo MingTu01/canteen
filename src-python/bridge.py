@@ -9,10 +9,13 @@ API 端点:
     GET  /__api__/config              获取完整配置(window_mode/card_interval/idle_timeout/server_url)
     POST /__api__/set_config          更新配置(部分字段)
     POST /__api__/switch_to_config    切换到配置模式(取消全屏)
+    POST /__api__/switch_to_fullscreen 切换回全屏模式
     POST /__api__/quit                退出应用
     POST /__api__/restart_card_reader 重启读卡器
+    POST /__api__/eval_js             临时诊断(执行前端 JS,生产环境应禁用)
 """
 import json
+import os
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from config import read_full_config, write_config
@@ -108,8 +111,10 @@ class ShellBridge(QObject):
             return {'ok': True, 'running': running}
 
         elif method == 'eval_js':
-            # 临时诊断端点:在前端执行 JS 并返回结果(仅诊断用)
-            # body = {'js': '...'}
+            # 临时诊断端点:在前端执行 JS 并返回结果
+            # 生产环境应通过不设置 CANTEEN_DEBUG 环境变量来禁用此端点
+            if not os.environ.get('CANTEEN_DEBUG'):
+                return {'ok': False, 'error': '诊断端点已禁用(设置 CANTEEN_DEBUG=1 启用)'}
             if isinstance(body, dict) and body.get('js'):
                 self.eval_js_requested.emit(body['js'])
                 return {'ok': True}

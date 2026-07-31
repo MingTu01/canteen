@@ -109,8 +109,11 @@ public class JwtAuthenticationFilter implements Filter {
             }
 
             // 4. 写入 request attribute(按角色只写对应属性,避免角色混淆)
+            //    终端 token(role=3)额外写入 deviceLabel,供 TerminalController.refreshToken 续期时回传
+            Object deviceLabelObj = claims.get("deviceLabel");
+            String deviceLabel = deviceLabelObj == null ? null : deviceLabelObj.toString();
             UserContextBinder.bind(httpRequest, userId, userId,
-                    toLong(claims.get("storeId")), role);
+                    toLong(claims.get("storeId")), role, deviceLabel);
         } catch (Exception e) {
             log.warn("JWT 认证失败:path={}, msg={}", path, e.getMessage());
             unauthorizedResponseWriter.write(httpResponse, httpRequest,

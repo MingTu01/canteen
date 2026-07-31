@@ -72,7 +72,7 @@ const onCardClick = () => {
   scanErrorTimer = setTimeout(() => { scanError.value = '' }, 3000)
 }
 
-// 使用统一读卡器 composable:支持 CH375 DLL(Tauri 事件) + USB HID 键盘(降级)
+// 使用统一读卡器 composable:支持 Python Shell 读卡器 + USB HID 键盘(降级)
 useCardReader((cardNo) => {
   if (scanning.value || scanError.value) return
   scan(cardNo)

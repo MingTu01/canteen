@@ -300,8 +300,22 @@ public class RestoreService {
     /** SCAN 游标式删除匹配 pattern 的 key,避免 KEYS 阻塞 Redis */
     private void deleteByPattern(String pattern) {
         try {
-            Set<String> keys = redisTemplate.keys(pattern);
-            if (keys != null && !keys.isEmpty()) {
+            // 使用 SCAN 替代 KEYS,避免阻塞 Redis 主线程
+            Set<String> keys = new java.util.HashSet<>();
+            org.springframework.data.redis.core.ScanOptions options =
+                    org.springframework.data.redis.core.ScanOptions.scanOptions()
+                            .match(pattern)
+                            .count(100)
+                            .build();
+            try (org.springframework.data.redis.core.Cursor<byte[]> cursor =
+                         redisTemplate.getConnectionFactory()
+                                 .getConnection()
+                                 .scan(options)) {
+                while (cursor.hasNext()) {
+                    keys.add(new String(cursor.next()));
+                }
+            }
+            if (!keys.isEmpty()) {
                 redisTemplate.delete(keys);
                 log.debug("删除 {} 个缓存 key: {}", keys.size(), pattern);
             }

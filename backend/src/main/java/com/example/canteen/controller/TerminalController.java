@@ -138,7 +138,8 @@ public class TerminalController {
         if (store == null) {
             throw new BusinessException("食堂不存在");
         }
-        String newToken = jwtTokenProvider.refreshTerminalToken(storeId, store.getName(), "");
+        String newToken = jwtTokenProvider.refreshTerminalToken(storeId, store.getName(),
+                SecurityContext.currentDeviceLabel() != null ? SecurityContext.currentDeviceLabel() : "");
         Map<String, Object> result = new HashMap<>();
         result.put("token", newToken);
         result.put("storeId", storeId);
@@ -154,10 +155,6 @@ public class TerminalController {
     @GetMapping("/employees")
     public ApiResponse<List<Map<String, Object>>> listStoreEmployees() {
         Long storeId = SecurityContext.currentStoreId();
-        // 临时调试日志:排查浏览器端返回空数组问题(定位后移除)
-        System.out.println("[DEBUG /terminal/employees] storeId=" + storeId
-                + ", role=" + SecurityContext.currentRole()
-                + ", adminId=" + SecurityContext.currentAdminId());
         if (storeId == null) {
             throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
         }
@@ -167,8 +164,6 @@ public class TerminalController {
                         .eq(Employee::getIsDeleted, 0)
                         .orderByAsc(Employee::getId)
         );
-        System.out.println("[DEBUG /terminal/employees] query storeId=" + storeId
-                + ", found " + employees.size() + " employees");
         List<Map<String, Object>> result = employees.stream().map(e -> {
             Map<String, Object> m = new HashMap<>();
             m.put("id", e.getId());

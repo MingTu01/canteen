@@ -184,19 +184,13 @@ class TerminalWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
 
-        # 页面加载完成后注入 Python Shell 标记
-        self.view.loadFinished.connect(self._on_load_finished)
+        # window.__pythonShell 标记已通过 QWebEngineScript 在 DocumentCreation 阶段注入
+        # (见 main() 函数中的 marker_script),无需在 loadFinished 中重复注入
 
         # 加载前端
         self.view.setUrl(QUrl(self.url))
 
         print(f'[Window] 窗口已创建(模式: {"全屏" if self._is_fullscreen else "窗口"}),加载: {self.url}')
-
-    def _on_load_finished(self, ok):
-        """页面加载完成后注入 Python Shell 环境标记。"""
-        if ok:
-            self.page.runJavaScript('window.__pythonShell = true;')
-            print('[Window] 已注入 window.__pythonShell = true')
 
     def keyPressEvent(self, event: QKeyEvent):
         """键盘事件:Alt+F4 / Ctrl+Shift+Q 退出。"""

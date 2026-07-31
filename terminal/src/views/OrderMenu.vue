@@ -6,7 +6,7 @@
  * - 顶部用户信息条(头像 + 姓名 + 部门 + 余额)
  * - 中央大时钟(居中显示,与待机页一致)
  * - 三大入口:我要订餐 / 查询订餐 / 返回待机
- * - 无操作 120 秒自动返回待机
+ * - 无操作 10 秒自动返回待机
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
