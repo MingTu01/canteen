@@ -72,7 +72,7 @@ const emit = defineEmits<{ (e: 'back'): void }>()
   cursor: pointer;
   font-family: inherit;
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: 400;
   transition: background 0.15s ease;
 }
 .top-bar__back:hover {
@@ -87,7 +87,7 @@ const emit = defineEmits<{ (e: 'back'): void }>()
 .top-bar__title {
   margin: 0;
   font-size: var(--fs-xl);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
   text-align: center;
   flex: 1;

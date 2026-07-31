@@ -45,7 +45,7 @@ const sizeClass = (s: string) => ({
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-weight: 600;
+  font-weight: 700;
   border: none;
   cursor: pointer;
   transition: transform 0.12s ease, opacity 0.15s ease, background 0.15s ease;

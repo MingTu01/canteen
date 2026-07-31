@@ -182,7 +182,7 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
   border-radius: 999px;
   border: 1px solid;
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
 }
 .order-card__pill--muted {
   background: var(--doubao-muted);
@@ -191,16 +191,16 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
 }
 .order-card__name {
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
 }
 .order-card__name--muted {
   color: var(--doubao-muted-foreground);
-  font-weight: 500;
+  font-weight: 400;
 }
 .order-card__sub {
   font-size: var(--fs-sm);
   color: var(--doubao-muted-foreground);
-  font-weight: 500;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 .order-card__empty-text {
@@ -216,7 +216,7 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
   padding: 3px 10px;
   border-radius: 999px;
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 700;
 }
 .order-card__status--done {
   background: var(--doubao-success, #07c160);
@@ -243,7 +243,7 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
   color: var(--doubao-foreground);
 }
 .order-card__price {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-primary);
   font-variant-numeric: tabular-nums;
 }
@@ -268,7 +268,7 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
   border: 1.5px solid var(--doubao-destructive);
   color: var(--doubao-destructive);
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   font-family: inherit;
   transition: background 0.15s ease, transform 0.12s ease;

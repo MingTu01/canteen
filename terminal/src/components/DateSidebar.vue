@@ -8,10 +8,11 @@
  *
  * header slot 默认显示当前日期文字,可被父组件覆盖(如嵌入 DatePicker)。
  */
+import { computed } from 'vue'
 import { shortDate, relativeLabel } from '@/utils'
 import { MEAL_COLORS } from '@/composables/useMealConfig'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   dates: string[]
   selectedDate: string
   /**
@@ -19,8 +20,20 @@ withDefaults(defineProps<{
    * 返回 [1,3] 表示该日期已选早餐+晚餐,午餐未选。
    */
   mealTypesForDate?: (date: string) => number[]
+  /**
+   * 可显示的日期集合(可选)。设置后只显示该集合内的日期,
+   * 用于"无菜单日期不显示"场景。未设置时显示 dates 全部日期。
+   */
+  availableSet?: Set<string>
 }>(), {
   mealTypesForDate: () => [],
+  availableSet: undefined,
+})
+
+/** 实际渲染的日期列表:若提供 availableSet 则过滤,否则用 dates */
+const visibleDates = computed(() => {
+  if (!props.availableSet) return props.dates
+  return props.dates.filter((d) => props.availableSet!.has(d))
 })
 
 const emit = defineEmits<{
@@ -42,17 +55,21 @@ const MEAL_ORDER = [1, 2, 3]
       </slot>
     </div>
 
-    <!-- 日期列表 -->
+    <!-- 日期列表(过滤后只显示有菜单的日期) -->
     <div class="date-sidebar__list no-scrollbar">
       <button
-        v-for="d in dates"
+        v-for="d in visibleDates"
         :key="d"
         type="button"
         class="date-sidebar__item"
         :class="{ 'date-sidebar__item--active': d === selectedDate }"
         @click="emit('select', d)"
       >
-        <span class="date-sidebar__date">{{ shortDate(d) }}</span>
+        <div class="date-sidebar__date-wrap">
+          <span class="date-sidebar__date">{{ shortDate(d) }}</span>
+          <!-- 相对标签(今天/明天):固定占位,无标签时用空内容保持高度一致,避免列表跳动 -->
+          <span class="date-sidebar__rel">{{ relativeLabel(d) }}</span>
+        </div>
         <!-- 3 个餐别圆点(竖向排列在日期右侧):已点高亮(早橙/午绿/晚紫),未点灰色 -->
         <div class="date-sidebar__dots">
           <span
@@ -85,13 +102,13 @@ const MEAL_ORDER = [1, 2, 3]
 }
 .date-sidebar__cur {
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 .date-sidebar__rel {
   font-size: var(--fs-xs);
   color: var(--doubao-primary);
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .date-sidebar__list {
@@ -106,7 +123,9 @@ const MEAL_ORDER = [1, 2, 3]
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 16px 12px;
+  /* 固定高度:为相对标签(今天/明天)预留位置,避免有/无标签时列表跳动 */
+  min-height: 72px;
+  padding: 12px 12px;
   border: none;
   border-top: 1px solid var(--doubao-border);
   background: transparent;
@@ -117,14 +136,33 @@ const MEAL_ORDER = [1, 2, 3]
   background: var(--doubao-primary);
   border-top-color: transparent;
 }
+/* 日期文字 + 相对标签 垂直布局 */
+.date-sidebar__date-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 .date-sidebar__date {
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: 400;
   color: var(--doubao-muted-foreground);
+  line-height: 1.2;
 }
 .date-sidebar__item--active .date-sidebar__date {
   color: var(--doubao-primary-foreground);
-  font-weight: 600;
+  font-weight: 700;
+}
+/* 相对标签:始终占位(无内容也保持高度),避免列表跳动 */
+.date-sidebar__rel {
+  font-size: var(--fs-xs);
+  color: var(--doubao-primary);
+  font-weight: 400;
+  line-height: 1;
+  min-height: 12px;
+}
+.date-sidebar__item--active .date-sidebar__rel {
+  color: var(--doubao-primary-foreground);
 }
 
 /* 3 个餐别圆点(竖向排列在日期右侧:早橙/午绿/晚紫,已点亮,未点灰) */
@@ -132,7 +170,7 @@ const MEAL_ORDER = [1, 2, 3]
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
+  gap: 9px;
 }
 .date-sidebar__dot {
   width: 8px;
@@ -144,8 +182,8 @@ const MEAL_ORDER = [1, 2, 3]
 }
 .date-sidebar__dot--on {
   opacity: 1;
-  transform: scale(1.15);
-  box-shadow: 0 0 0 2px var(--doubao-card);
+  transform: scale(1.2);
+  box-shadow: 0 0 0 1.5px var(--doubao-card);
 }
 .date-sidebar__item--active .date-sidebar__dot {
   background: rgba(255, 255, 255, 0.4);

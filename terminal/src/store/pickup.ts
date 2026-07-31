@@ -8,6 +8,8 @@ export interface PickupEmployee {
   cardNo: string
   balance: number
   storeId: number
+  /** 头像 URL（可选） */
+  avatar?: string
 }
 
 /** 取餐流程中待取餐的订单 */

@@ -66,7 +66,7 @@ onUnmounted(() => {
 
 <template>
   <main class="menu">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.5" />
+    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.15" />
     <UserInfoBar :employee="emp" />
 
     <div class="menu__content">
@@ -108,7 +108,8 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   /* 深色背景 + 白色文字(与待机页统一) */
   background: var(--doubao-foreground);
 }
@@ -122,8 +123,10 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 64px;
-  padding: 40px 24px;
+  gap: 48px;
+  padding: 24px 24px 40px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* 中央大时钟(居中,白色) */
@@ -160,6 +163,7 @@ onUnmounted(() => {
   gap: 16px;
   width: 200px;
   height: 200px;
+  flex-shrink: 0;
   border-radius: var(--doubao-radius);
   background: rgba(255, 255, 255, 0.08);
   border: 1.5px solid rgba(255, 255, 255, 0.15);
@@ -188,7 +192,7 @@ onUnmounted(() => {
 }
 .menu__label {
   font-size: var(--fs-xl);
-  font-weight: 600;
+  font-weight: 700;
   color: #ffffff;
 }
 

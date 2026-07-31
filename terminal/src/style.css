@@ -1,13 +1,14 @@
 @import "tailwindcss";
 
 /* ============================================================
- * MiSans 全局字体(对齐 H5 项目)
- * - 只引入 Regular(font-weight 330),所有 400/500/600/700 都就近匹配 Regular
- * - 原因:MiSans 字重数值非标准(Regular=330, Medium=360),
- *   若同时引入 Medium,浏览器默认 400 会匹配 360 导致中文发粗发虚
- * - 字体文件 npm 包已做 unicode-range 分片,按需加载
+ * MiSans 全局字体
+ * - 引入 Normal(weight=305,匹配 400)和 Bold(weight=630,匹配 700)
+ * - 不引入 Medium(380):否则 400 会匹配 380(比 305 更近)导致中文发粗
+ * - npm 包字体文件已做 unicode-range 分片,按需加载
+ * - 之前误引 MiSans-Regular.min.css(不存在),导致字体从未加载,回退系统字体发虚
  * ============================================================ */
-@import 'misans/lib/Normal/MiSans-Regular.min.css';
+@import 'misans/lib/Normal/MiSans-Normal.min.css';
+@import 'misans/lib/Normal/MiSans-Bold.min.css';
 
 /* ============================================================
  * Tailwind v4 @theme:生成 --color-* 工具类(对齐 H5 variables.scss)
@@ -89,7 +90,8 @@ body {
 
 #app {
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -245,7 +247,7 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .btn-terminal {
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);
-  font-weight: 600;
+  font-weight: 700;
   border-radius: var(--doubao-radius);
   border: none;
   cursor: pointer;
@@ -267,7 +269,7 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   background: transparent;
   color: var(--doubao-primary);
   border: 1px solid var(--doubao-primary);
-  font-weight: 500;
+  font-weight: 400;
   border-radius: var(--doubao-radius);
   cursor: pointer;
   transition: transform 0.12s ease, background 0.15s ease;
@@ -283,7 +285,7 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   background: transparent;
   color: var(--doubao-destructive);
   border: 1px solid var(--doubao-destructive);
-  font-weight: 500;
+  font-weight: 400;
   border-radius: 999px;
   cursor: pointer;
   transition: transform 0.12s ease, background 0.15s ease;

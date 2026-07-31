@@ -1,6 +1,18 @@
 import { reactive, ref } from 'vue'
 import api from '@/api'
 import { loadConfig } from '@/api'
+import { getServerUrl as getShellServerUrl } from '@/api/shellApi'
+
+/**
+ * 获取服务器地址,优先从终端绑定配置读取,兜底从 shell(Tauri/Python)config.json 读取。
+ * 这样即使终端未绑定(首次启动配置页),也能预填服务器地址。
+ */
+async function getServerUrl(): Promise<string> {
+  const cfg = loadConfig()
+  if (cfg?.serverUrl) return cfg.serverUrl
+  // 兜底:从 shell(Tauri/Python)config.json 读取(浏览器环境返回空)
+  return getShellServerUrl()
+}
 
 /**
  * 食堂品牌信息 Store(终端版)。
@@ -14,6 +26,9 @@ import { loadConfig } from '@/api'
  *
  * 静态资源(logo/背景图 URL)自身带 ?v=mtime 版本号 + 后端 365d immutable 缓存,
  * 浏览器命中磁盘缓存,不会重复下载图片。
+ *
+ * 注意:Tauri 桌面应用的 origin 是 tauri.localhost,后端返回的相对路径
+ * (/uploads/xxx.jpg)需要拼接服务器地址为绝对 URL,否则图片加载不了。
  */
 export interface StoreBranding {
   id: number
@@ -32,6 +47,35 @@ interface BrandingCache {
 }
 
 const cacheKeyOf = (storeId: number) => `terminal_branding_${storeId}`
+
+/**
+ * 将后端返回的相对路径图片 URL 拼接为服务器绝对 URL。
+ * Tauri 应用的 origin 是 tauri.localhost,相对路径 /uploads/xxx.jpg 无法访问,
+ * 必须拼接为 http://server:port/uploads/xxx.jpg。
+ *
+ * 已经是绝对 URL(http/https 开头)或 data URI 的不做处理。
+ */
+function absolutizeUrl(url: string | undefined | null, serverUrl: string): string | undefined {
+  if (!url) return undefined
+  // 已经是绝对 URL 或 data URI,直接返回
+  if (/^(https?:|data:|blob:)/i.test(url)) return url
+  // 相对路径:拼接服务器地址
+  const base = serverUrl.replace(/\/$/, '')
+  return base + (url.startsWith('/') ? url : '/' + url)
+}
+
+/**
+ * 将 branding 数据中的所有图片 URL 转为绝对路径。
+ */
+function absolutizeBranding(data: StoreBranding, serverUrl: string): StoreBranding {
+  return {
+    ...data,
+    logoUrl: absolutizeUrl(data.logoUrl, serverUrl),
+    imageUrl: absolutizeUrl(data.imageUrl, serverUrl),
+    terminalBackgroundUrl: absolutizeUrl(data.terminalBackgroundUrl, serverUrl),
+    h5BannerUrl: absolutizeUrl(data.h5BannerUrl, serverUrl),
+  }
+}
 
 const readCache = (storeId: number): BrandingCache | null => {
   try {
@@ -78,14 +122,17 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
   }
 
   const storeId = cfg.storeId
+  // 获取服务器地址:优先绑定配置,兜底 Tauri config.json
+  const serverUrl = await getServerUrl()
+
   // 若已加载且 storeId 一致,使用后台模式静默校验
   const sameStore = loadedStoreId.value === storeId && brandingState.data
   const isBackground = options.background || sameStore
 
   const cache = readCache(storeId)
-  // 有缓存则先秒开(仅在前台请求时)
-  if (cache?.data && !isBackground) {
-    brandingState.data = cache.data
+  // 有缓存则先秒开(无论前台还是后台模式,确保图片立即显示)
+  if (cache?.data) {
+    brandingState.data = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
   }
 
   if (!isBackground) brandingState.loading = true
@@ -96,13 +143,13 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
 
     const res = await api.get(`/store/${storeId}/branding`, {
       headers,
-      // 接受 304 作为成功状态(axios 默认只接受 2xx)
       validateStatus: (s: number) => (s >= 200 && s < 300) || s === 304,
     })
 
     if (res.status === 304) {
-      // 数据未变,保留缓存(如果还没展示则补上)
-      if (!brandingState.data && cache?.data) brandingState.data = cache.data
+      if (!brandingState.data && cache?.data) {
+        brandingState.data = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+      }
       loadedStoreId.value = storeId
       currentEtag.value = cache?.etag || null
       return
@@ -111,15 +158,15 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
     const data = res.data?.data as StoreBranding | undefined
     const etag = res.headers['etag'] as string | undefined
     if (data) {
-      brandingState.data = data
+      const absolutized = serverUrl ? absolutizeBranding(data, serverUrl) : data
+      brandingState.data = absolutized
       loadedStoreId.value = storeId
       currentEtag.value = etag || cache?.etag || null
-      writeCache(storeId, etag || cache?.etag || null, data)
+      writeCache(storeId, etag || cache?.etag || null, absolutized)
     }
   } catch {
-    // 网络错误时回退到缓存(若有)
     if (!brandingState.data && cache?.data) {
-      brandingState.data = cache.data
+      brandingState.data = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
       loadedStoreId.value = storeId
       currentEtag.value = cache?.etag || null
     }
@@ -136,4 +183,32 @@ export function clearBranding(): void {
   brandingState.data = null
   loadedStoreId.value = null
   currentEtag.value = null
+}
+
+/**
+ * 清理旧版本缓存(含相对路径 URL 的 branding 数据)。
+ * 在应用启动时调用一次,确保旧版本(未做 absolutize 的缓存)不会残留。
+ */
+export function purgeOldBrandingCache(): void {
+  Object.keys(localStorage)
+    .filter((k) => k.startsWith('terminal_branding_'))
+    .forEach((k) => {
+      try {
+        const raw = localStorage.getItem(k)
+        if (!raw) return
+        const parsed = JSON.parse(raw)
+        const data = parsed?.data
+        if (!data) return
+        // 如果缓存中的 URL 是相对路径(以 / 开头),说明是旧版本缓存,删除
+        const hasRelativeUrl =
+          (data.logoUrl && data.logoUrl.startsWith('/')) ||
+          (data.terminalBackgroundUrl && data.terminalBackgroundUrl.startsWith('/'))
+        if (hasRelativeUrl) {
+          localStorage.removeItem(k)
+        }
+      } catch {
+        // 解析失败也删除
+        localStorage.removeItem(k)
+      }
+    })
 }

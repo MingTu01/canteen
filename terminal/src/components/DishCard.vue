@@ -136,7 +136,7 @@ const onClick = () => {
   background: rgba(255, 255, 255, 0.85);
   color: var(--doubao-muted-foreground);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .dish-card__info {
@@ -148,7 +148,7 @@ const onClick = () => {
 }
 .dish-card__name {
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: 400;
   color: var(--doubao-card-foreground);
 }
 .dish-card__price {

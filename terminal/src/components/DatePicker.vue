@@ -156,7 +156,8 @@ watch(showPicker, (open) => {
     >
       <Calendar :size="28" />
       <span class="date-picker__trigger-md">{{ triggerMd }}</span>
-      <span v-if="triggerRel" class="date-picker__trigger-rel">{{ triggerRel }}</span>
+      <!-- 相对标签始终占位,无内容时用空 span 保持高度一致,避免列表跳动 -->
+      <span class="date-picker__trigger-rel">{{ triggerRel || '\u00A0' }}</span>
     </button>
 
     <!-- 弹出月历模态 -->
@@ -258,7 +259,7 @@ watch(showPicker, (open) => {
 }
 .date-picker__trigger-rel {
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-primary);
   line-height: 1;
 }
@@ -352,7 +353,7 @@ watch(showPicker, (open) => {
   text-align: center;
   padding: 6px 0;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-muted-foreground);
 }
 
@@ -436,7 +437,7 @@ watch(showPicker, (open) => {
 }
 .date-cell__label--rel {
   color: var(--doubao-primary);
-  font-weight: 600;
+  font-weight: 700;
 }
 .date-cell--active .date-cell__label--rel {
   color: var(--doubao-primary-foreground);

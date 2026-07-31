@@ -151,7 +151,7 @@ const onOverlayClick = () => {
   align-items: center;
   justify-content: center;
   padding: 32px;
-  background: rgba(14, 17, 21, 0.55);
+  background: rgba(14, 17, 21, 0.3);
   backdrop-filter: blur(6px);
 }
 
@@ -258,7 +258,7 @@ const onOverlayClick = () => {
   border-radius: var(--doubao-radius-sm);
   border: none;
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
   font-family: inherit;
   cursor: pointer;
   transition: transform 0.12s ease, opacity 0.15s ease, background 0.15s ease;

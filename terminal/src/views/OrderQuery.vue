@@ -300,6 +300,7 @@ onMounted(async () => {
 .query__content {
   flex: 1;
   overflow-y: auto;
+  min-width: 0;
   padding: 20px 32px 80px;
 }
 .query__loading,
@@ -318,7 +319,7 @@ onMounted(async () => {
 }
 .query__empty-title {
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 .query__empty-hint {

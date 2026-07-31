@@ -218,7 +218,7 @@ const onClick = (item: MenuItem) => {
 }
 .meal-section__name {
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   padding: 4px 14px;
   border-radius: 999px;
   border: 1px solid;
@@ -232,7 +232,7 @@ const onClick = (item: MenuItem) => {
   background: var(--doubao-muted);
   color: var(--doubao-muted-foreground);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .meal-section__grid {
@@ -302,7 +302,7 @@ const onClick = (item: MenuItem) => {
 }
 .dish__name {
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: 400;
   color: var(--doubao-card-foreground);
 }
 .dish__price {
@@ -329,7 +329,7 @@ const onClick = (item: MenuItem) => {
 }
 .dish__ordered-label {
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 700;
   opacity: 0.9;
 }
 

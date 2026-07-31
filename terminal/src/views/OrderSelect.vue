@@ -357,6 +357,7 @@ watch(menuInvalidated, (v) => {
         :dates="sidebarDates"
         :selected-date="selectedDate"
         :meal-types-for-date="mealTypesFor"
+        :available-set="availableSet"
         @select="onSelectSidebar"
       >
         <template #header>
@@ -534,6 +535,7 @@ watch(menuInvalidated, (v) => {
 .select__content {
   flex: 1;
   overflow-y: auto;
+  min-width: 0;
   /* 底部 padding 防止最后菜品被悬浮购物车遮挡(购物车高约 64px + bottom 16px = 80px,留 120px 余量) */
   padding: 20px 32px 120px;
 }
@@ -553,7 +555,7 @@ watch(menuInvalidated, (v) => {
 }
 .select__empty-title {
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 .select__empty-hint {
@@ -645,7 +647,7 @@ watch(menuInvalidated, (v) => {
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   flex-shrink: 0;
   transition: opacity 0.15s ease, transform 0.12s ease;
@@ -665,7 +667,7 @@ watch(menuInvalidated, (v) => {
   align-items: center;
   justify-content: center;
   padding: 32px;
-  background: rgba(14, 17, 21, 0.55);
+  background: rgba(14, 17, 21, 0.3);
   backdrop-filter: blur(6px);
 }
 .cart-modal__panel {
@@ -744,7 +746,7 @@ watch(menuInvalidated, (v) => {
 }
 .cart-modal__date-sub {
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-muted-foreground);
 }
 
@@ -768,7 +770,7 @@ watch(menuInvalidated, (v) => {
   border-radius: 999px;
   border: 1px solid;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
 }
 .cart-modal__meal-sub {
   font-size: var(--fs-sm);
@@ -796,7 +798,7 @@ watch(menuInvalidated, (v) => {
   gap: 2px;
 }
 .cart-modal__dish-name {
-  font-weight: 500;
+  font-weight: 400;
   color: var(--doubao-foreground);
 }
 .cart-modal__dish-price {
@@ -893,7 +895,7 @@ watch(menuInvalidated, (v) => {
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);
   font-size: var(--fs-lg);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   font-family: inherit;
   transition: transform 0.12s ease, opacity 0.15s ease;

@@ -9,6 +9,8 @@ export interface Employee {
   cardNo: string
   balance: number
   storeId: number
+  /** 头像 URL（可选） */
+  avatar?: string
 }
 
 /** 购物车项(跨餐别 + 跨日期共享,记录所属餐别与日期) */

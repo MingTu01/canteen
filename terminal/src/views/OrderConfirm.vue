@@ -312,11 +312,13 @@ onMounted(() => {
 .confirm {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 .confirm__content {
   flex: 1;
   overflow-y: auto;
+  min-width: 0;
   padding: 24px;
   max-width: 720px;
   margin: 0 auto;
@@ -347,7 +349,7 @@ onMounted(() => {
 }
 .confirm__date-subtotal {
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-muted-foreground);
 }
 
@@ -372,12 +374,12 @@ onMounted(() => {
   border-radius: 999px;
   border: 1px solid;
   font-size: var(--fs-base);
-  font-weight: 600;
+  font-weight: 700;
 }
 .confirm__meal-subtotal {
   font-size: var(--fs-sm);
   color: var(--doubao-muted-foreground);
-  font-weight: 500;
+  font-weight: 400;
 }
 .confirm__items {
   display: flex;
@@ -393,7 +395,7 @@ onMounted(() => {
   padding: 4px 0;
 }
 .confirm__dish-price {
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .confirm__qty {
@@ -404,7 +406,7 @@ onMounted(() => {
   background: var(--doubao-muted);
   color: var(--doubao-secondary-foreground);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
@@ -421,7 +423,7 @@ onMounted(() => {
 }
 .confirm__balance-num {
   font-size: var(--fs-xl);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 
@@ -436,7 +438,7 @@ onMounted(() => {
 }
 .confirm__total span:first-child {
   font-size: var(--fs-xl);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 .confirm__total-num {
