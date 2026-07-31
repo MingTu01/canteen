@@ -153,9 +153,14 @@ public class SecurityContext {
      *   if (role == null || (role != ROLE_SUPER_ADMIN && role != ROLE_STORE_ADMIN)) throw;
      */
     public static void checkStoreAdminOrAbove() {
+        checkStoreAdminOrAbove("仅门店管理员或超管可访问");
+    }
+
+    /** 校验当前用户是门店管理员或超管,自定义失败消息 */
+    public static void checkStoreAdminOrAbove(String message) {
         Integer role = currentRole();
         if (role == null || (role != ROLE_SUPER_ADMIN && role != ROLE_STORE_ADMIN)) {
-            throw new SecurityException("仅门店管理员或超管可访问");
+            throw new SecurityException(message);
         }
     }
 

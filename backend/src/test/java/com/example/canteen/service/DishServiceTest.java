@@ -34,7 +34,15 @@ class DishServiceTest {
     @BeforeEach
     void setUp() {
         dishMapper = mock(DishMapper.class);
-        dishService = new DishService(dishMapper);
+        @SuppressWarnings("unchecked")
+        org.springframework.beans.factory.ObjectProvider<org.springframework.data.redis.core.RedisTemplate<String, Object>> redisProvider =
+                mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(redisProvider.getIfAvailable()).thenReturn(null);
+        @SuppressWarnings("unchecked")
+        org.springframework.beans.factory.ObjectProvider<SseService> sseProvider =
+                mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(sseProvider.getIfAvailable()).thenReturn(null);
+        dishService = new DishService(dishMapper, redisProvider, sseProvider);
 
         testDish1 = new Dish();
         testDish1.setId(1L);

@@ -34,7 +34,11 @@ class RestoreServiceTest {
     void setUp() {
         backupService = mock(BackupService.class);
         // restoreService 只用 jdbcTemplate 和 backupService,jdbcTemplate 在非法文件名场景下不会被调到
-        restoreService = new RestoreService(null, backupService);
+        // RedisTemplate mock 传入(本次 P1 修复新增 deleteByPattern 用到)
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate =
+                mock(org.springframework.data.redis.core.RedisTemplate.class);
+        restoreService = new RestoreService(null, backupService, redisTemplate);
     }
 
     @AfterEach
