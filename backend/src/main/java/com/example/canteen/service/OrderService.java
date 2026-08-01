@@ -75,19 +75,27 @@ public class OrderService {
     }
 
     /**
-     * 校验次日订单时间窗:若订单日期是今天之后的日期,则必须在"订单日期前一天 deadlineTime"之前操作。
-     * 当天订单和历史订单不受此限制。
+     * 校验订单时间窗(下单/取消共用):
+     * 业务规则:订单日期 X 的截止时间是 (X-1) deadlineTime,即"前一天 15:00 前可操作"。
+     * - 今天及之前:截止时间(昨天15:00)已过 → 拒绝
+     * - 明天:截止时间是今天15:00 → 今天15:00前允许
+     * - 后天及以后:截止时间在未来 → 允许
      * @param action "下单" 或 "取消",用于决定读哪个配置键
      */
     private void checkAdvanceOrderDeadline(LocalDate orderDate, String action) {
         LocalDate today = LocalDate.now(ZONE_SHANGHAI);
-        if (orderDate == null || !orderDate.isAfter(today)) {
-            return;
-        }
+        if (orderDate == null) return;
         String key = "取消".equals(action) ? "cancel_deadline_time" : "order_deadline_time";
         LocalTime deadline = getDeadlineTime(key);
-        LocalDateTime deadlineAt = LocalDateTime.of(orderDate.minusDays(1), deadline);
         LocalDateTime now = LocalDateTime.now(ZONE_SHANGHAI);
+
+        if (!orderDate.isAfter(today)) {
+            // 今天及之前:截止时间(前一天15:00)已过
+            throw new BusinessException("订单需在前一天 " + deadline + " 之前" + action + ",已截止");
+        }
+
+        // 未来订单:检查是否已过前一天截止时间
+        LocalDateTime deadlineAt = LocalDateTime.of(orderDate.minusDays(1), deadline);
         if (now.isAfter(deadlineAt)) {
             throw new BusinessException("次日订单需在前一天 " + deadline + " 之前" + action + ",已截止");
         }

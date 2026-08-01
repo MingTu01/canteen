@@ -194,6 +194,47 @@ public class VersionController {
         }
     }
 
+    /**
+     * 公开接口(免登录):返回订餐配置,供 H5/terminal 前端读取截止时间等规则。
+     * 只返回订餐相关的 5 个 key,不暴露其他敏感配置。
+     */
+    @GetMapping("/order-config")
+    public ApiResponse<Map<String, Object>> getOrderConfig() {
+        Map<String, Object> result = new HashMap<>();
+        // 订餐配置的 5 个 key
+        String[] orderKeys = {
+            "order_advance_days", "order_deadline_time", "cancel_deadline_time",
+            "max_order_quantity", "allow_cross_day_order"
+        };
+        try {
+            for (String key : orderKeys) {
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT config_value FROM sys_config WHERE config_key = ?", key);
+                if (!rows.isEmpty()) {
+                    Object v = rows.get(0).get("config_value");
+                    result.put(key, v != null ? v.toString() : "");
+                } else {
+                    // 默认值
+                    result.put(key, switch (key) {
+                        case "order_advance_days" -> "7";
+                        case "order_deadline_time", "cancel_deadline_time" -> "15:00";
+                        case "max_order_quantity" -> "10";
+                        case "allow_cross_day_order" -> "true";
+                        default -> "";
+                    });
+                }
+            }
+        } catch (Exception e) {
+            // DB 异常时返回默认值
+            result.put("order_advance_days", "7");
+            result.put("order_deadline_time", "15:00");
+            result.put("cancel_deadline_time", "15:00");
+            result.put("max_order_quantity", "10");
+            result.put("allow_cross_day_order", "true");
+        }
+        return ApiResponse.success(result);
+    }
+
     @GetMapping("/config/{key}")
     public ApiResponse<Map<String, Object>> getConfig(@org.springframework.web.bind.annotation.PathVariable String key) {
         com.example.canteen.security.SecurityContext.checkSuperAdmin("仅超级管理员可查看系统配置");
@@ -213,7 +254,7 @@ public class VersionController {
      * 新增或更新配置(UPSERT)。仅超管可调用。
      * Body: { "value": "...", "description": "..."(可选) }
      */
-    @OperationLog("更新系统配置")
+    @OperationLog(value = "更新系统配置", detail = "'配置项 ' + #key + ' 值 ' + #body['value']")
     @org.springframework.web.bind.annotation.PutMapping("/config/{key}")
     public ApiResponse<Void> updateConfig(@org.springframework.web.bind.annotation.PathVariable String key,
                                           @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
@@ -238,7 +279,7 @@ public class VersionController {
     }
 
     /** 批量保存配置。Body: [{key,value}, ...]。仅超管可调用。 */
-    @OperationLog("批量更新系统配置")
+    @OperationLog(value = "批量更新系统配置", detail = "'配置项数量 ' + #items.size()")
     @org.springframework.web.bind.annotation.PutMapping("/config")
     public ApiResponse<Void> batchUpdateConfig(@org.springframework.web.bind.annotation.RequestBody List<Map<String, Object>> items) {
         if (!com.example.canteen.security.SecurityContext.isSuperAdmin()) {

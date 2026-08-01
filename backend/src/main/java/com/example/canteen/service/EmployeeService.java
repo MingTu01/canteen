@@ -237,7 +237,9 @@ public class EmployeeService {
     }
 
     /**
-     * B11 软删除:不调用 deleteById,改为 is_deleted=1。
+     * B11 软删除:MyBatis Plus 全局逻辑删除配置下,deleteById 自动执行 UPDATE SET is_deleted=1。
+     * 注意:不能手动 setIsDeleted(1)+updateById,因为逻辑删除字段被全局配置托管,
+     * updateById 的 SET 子句会跳过 is_deleted 字段,导致删除无效。
      */
     public void deleteEmployee(Long id) {
         Employee employee = employeeMapper.selectById(id);
@@ -245,8 +247,7 @@ public class EmployeeService {
             throw new BusinessException("员工不存在");
         }
         SecurityContext.checkStoreAccess(employee.getStoreId());
-        employee.setIsDeleted(1);
-        employeeMapper.updateById(employee);
+        employeeMapper.deleteById(id);
     }
 
     public List<Department> getDepartmentsByStore(Long storeId) {

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import {
   ElButton,
   ElDialog,
+  ElDrawer,
   ElForm,
   ElFormItem,
   ElInput,
@@ -15,16 +16,17 @@ import {
   ElTableColumn,
   ElTag,
   ElMessage,
+  ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Plus, Pencil, Trash2, Package, ArrowDownCircle, ArrowUpCircle } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Package, ArrowUpCircle, ClipboardCheck, RotateCcw } from 'lucide-vue-next'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { materialApi } from '@/api'
-import type { Material, PageResult } from '@/api/types'
+import type { Material, PageResult, StockCount } from '@/api/types'
 
 const authStore = useAuthStore()
 const sid = computed(() => authStore.storeId || null)
@@ -99,8 +101,19 @@ const openEdit = (row: Material) => {
 }
 
 const handleSave = async () => {
+  if (!sid.value) {
+    ElMessage.warning('请先选择食堂')
+    return
+  }
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  // 新建时库存始终为 0(库存统一通过采购入库)
+  if (!isEdit.value) {
+    form.value.stockQty = 0
+  } else {
+    // 编辑时不修改库存
+    form.value.stockQty = undefined
+  }
   dialogLoading.value = true
   try {
     if (isEdit.value && form.value.id) {
@@ -121,6 +134,15 @@ const handleSave = async () => {
 
 const handleDelete = async (id: number) => {
   try {
+    await ElMessageBox.confirm('确定要删除这条食材吗？', '删除确认', {
+      type: 'warning',
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
     await materialApi.delete(id)
     ElMessage.success('删除成功')
     fetchList()
@@ -129,23 +151,21 @@ const handleDelete = async (id: number) => {
   }
 }
 
-// 入库/出库弹窗
+// 出库弹窗
 const stockDialogVisible = ref(false)
 const stockDialogLoading = ref(false)
-const stockMode = ref<'inbound' | 'outbound'>('inbound')
 const stockTarget = ref<Material | null>(null)
 const stockQty = ref<number>(1)
 const stockRemark = ref('')
 
-const openStock = (row: Material, mode: 'inbound' | 'outbound') => {
+const openOutbound = (row: Material) => {
   stockTarget.value = row
-  stockMode.value = mode
   stockQty.value = 1
   stockRemark.value = ''
   stockDialogVisible.value = true
 }
 
-const handleStockSubmit = async () => {
+const handleOutboundSubmit = async () => {
   if (!stockTarget.value?.id) return
   if (!stockQty.value || stockQty.value <= 0) {
     ElMessage.warning('数量必须大于 0')
@@ -153,19 +173,134 @@ const handleStockSubmit = async () => {
   }
   stockDialogLoading.value = true
   try {
-    if (stockMode.value === 'inbound') {
-      await materialApi.inbound(stockTarget.value.id, stockQty.value, stockRemark.value || undefined)
-      ElMessage.success('入库成功')
-    } else {
-      await materialApi.outbound(stockTarget.value.id, stockQty.value, stockRemark.value || undefined)
-      ElMessage.success('出库成功')
-    }
+    await materialApi.outbound(stockTarget.value.id, stockQty.value, stockRemark.value || undefined)
+    ElMessage.success('出库成功')
     stockDialogVisible.value = false
     fetchList()
   } catch {
     /* 错误已由拦截器统一提示 */
   } finally {
     stockDialogLoading.value = false
+  }
+}
+
+// ==================== 库存盘点 ====================
+
+// 盘点弹窗
+const stocktakeDialogVisible = ref(false)
+const stocktakeLoading = ref(false)
+const stocktakeTarget = ref<Material | null>(null)
+const stocktakeQty = ref<number>(0)
+const stocktakeRemark = ref('')
+
+const openStocktake = (row: Material) => {
+  stocktakeTarget.value = row
+  stocktakeQty.value = row.stockQty ?? 0
+  stocktakeRemark.value = ''
+  stocktakeDialogVisible.value = true
+}
+
+const stocktakeDiff = computed(() => {
+  if (!stocktakeTarget.value) return 0
+  return (stocktakeQty.value ?? 0) - (stocktakeTarget.value.stockQty ?? 0)
+})
+
+const handleStocktakeSubmit = async () => {
+  if (!stocktakeTarget.value?.id) return
+  if (stocktakeQty.value == null || stocktakeQty.value < 0) {
+    ElMessage.warning('盘点数量不能为负')
+    return
+  }
+  stocktakeLoading.value = true
+  try {
+    await materialApi.stocktake(stocktakeTarget.value.id, stocktakeQty.value, stocktakeRemark.value || undefined)
+    if (stocktakeDiff.value === 0) {
+      ElMessage.success('盘点完成,库存无差异')
+    } else {
+      ElMessage.success('盘点记录已创建,请在盘点记录中查看差异')
+    }
+    stocktakeDialogVisible.value = false
+    fetchList()
+  } catch {
+    /* 错误已由拦截器统一提示 */
+  } finally {
+    stocktakeLoading.value = false
+  }
+}
+
+// 盘点记录抽屉
+const stocktakeDrawerVisible = ref(false)
+const stocktakeRecords = ref<StockCount[]>([])
+const stocktakeLoading2 = ref(false)
+const stocktakeStatusFilter = ref<number | undefined>(undefined)
+const stocktakePage = ref(1)
+const stocktakeSize = ref(10)
+const stocktakeTotal = ref(0)
+
+const fetchStocktakeList = async () => {
+  const sidVal = sid.value
+  if (!sidVal) return
+  stocktakeLoading2.value = true
+  try {
+    const res = await materialApi.stocktakeList(sidVal, stocktakePage.value, stocktakeSize.value, stocktakeStatusFilter.value)
+    const data = res as unknown as PageResult<StockCount>
+    stocktakeRecords.value = data.records ?? []
+    stocktakeTotal.value = data.total ?? 0
+  } catch {
+    stocktakeRecords.value = []
+  } finally {
+    stocktakeLoading2.value = false
+  }
+}
+
+const openStocktakeDrawer = () => {
+  stocktakeDrawerVisible.value = true
+  stocktakePage.value = 1
+  stocktakeStatusFilter.value = undefined
+  fetchStocktakeList()
+}
+
+const handleResolveStockCount = async (record: StockCount) => {
+  if (!record.id) return
+  try {
+    await ElMessageBox.confirm(
+      `确认恢复"${record.materialName}"的库存为盘点数量 ${record.countedQty} 吗?`,
+      '恢复差异确认',
+      { type: 'warning', confirmButtonText: '确认恢复', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await materialApi.resolveStockCount(record.id)
+    ElMessage.success('差异已恢复')
+    fetchStocktakeList()
+    fetchList()
+  } catch {
+    /* 错误已由拦截器统一提示 */
+  }
+}
+
+const handleResolveAll = async () => {
+  const sidVal = sid.value
+  if (!sidVal) return
+  try {
+    await ElMessageBox.confirm(
+      '确认一次性恢复所有待处理盘点差异吗?此操作将把所有待处理记录的库存调整为盘点数量。',
+      '批量恢复确认',
+      { type: 'warning', confirmButtonText: '确认批量恢复', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const res = await materialApi.resolveAllStockCount(sidVal)
+    const data = res as unknown as { resolvedCount: number }
+    ElMessage.success(`已恢复 ${data.resolvedCount ?? 0} 条差异`)
+    fetchStocktakeList()
+    fetchList()
+  } catch {
+    /* 错误已由拦截器统一提示 */
   }
 }
 
@@ -191,9 +326,10 @@ onMounted(fetchList)
 
 <template>
   <Layout>
-    <PageContainer title="库存食材管理" description="维护食材档案、库存数量与预警线,支持入库/出库操作">
+    <PageContainer title="库存管理" description="维护食材档案与库存,支持出库与盘点操作">
       <template #actions>
-        <ElButton type="primary" :icon="Plus" @click="openAdd">新增食材</ElButton>
+        <ElButton type="primary" :icon="Plus" :disabled="!sid" @click="openAdd">新增食材</ElButton>
+        <ElButton type="info" :icon="ClipboardCheck" :disabled="!sid" @click="openStocktakeDrawer">盘点记录</ElButton>
       </template>
 
       <div
@@ -265,8 +401,8 @@ onMounted(fetchList)
           </ElTableColumn>
           <ElTableColumn label="操作" width="280" fixed="right">
             <template #default="{ row }">
-              <ElButton size="small" type="success" :icon="ArrowDownCircle" @click="openStock(row as Material, 'inbound')">入库</ElButton>
-              <ElButton size="small" type="warning" :icon="ArrowUpCircle" @click="openStock(row as Material, 'outbound')">出库</ElButton>
+              <ElButton size="small" type="warning" :icon="ArrowUpCircle" @click="openOutbound(row as Material)">出库</ElButton>
+              <ElButton size="small" type="info" :icon="ClipboardCheck" @click="openStocktake(row as Material)">盘点</ElButton>
               <ElButton size="small" :icon="Pencil" @click="openEdit(row as Material)">编辑</ElButton>
               <ElButton size="small" type="danger" :icon="Trash2" @click="handleDelete(row.id)" />
             </template>
@@ -327,14 +463,13 @@ onMounted(fetchList)
               <ElOption label="升" value="升" />
             </ElSelect>
           </ElFormItem>
-          <ElFormItem label="初始库存">
-            <ElInputNumber v-model="form.stockQty" :min="0" :precision="2" :step="1" controls-position="right" class="w-full" />
-            <p class="mt-1 text-xs text-text-muted">新建食材的初始库存数量</p>
-          </ElFormItem>
           <ElFormItem label="预警线">
             <ElInputNumber v-model="form.minStock" :min="0" :precision="2" :step="1" controls-position="right" class="w-full" />
             <p class="mt-1 text-xs text-text-muted">库存低于此值时显示红色预警标签</p>
           </ElFormItem>
+          <div v-if="!isEdit" class="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-600">
+            新建食材库存初始为 0,库存通过采购管理入库自动增加
+          </div>
         </ElForm>
         <template #footer>
           <ElButton @click="dialogVisible = false">取消</ElButton>
@@ -342,10 +477,10 @@ onMounted(fetchList)
         </template>
       </ElDialog>
 
-      <!-- 入库/出库弹窗 -->
+      <!-- 出库弹窗 -->
       <ElDialog
         v-model="stockDialogVisible"
-        :title="stockMode === 'inbound' ? '入库' : '出库'"
+        title="出库"
         width="420px"
         :close-on-click-modal="false"
         append-to-body
@@ -356,7 +491,7 @@ onMounted(fetchList)
             <span class="font-medium text-text">{{ stockTarget?.name }}</span>
             <span class="ml-2 text-xs text-text-muted">当前库存 {{ stockTarget?.stockQty ?? 0 }} {{ stockTarget?.unit || '' }}</span>
           </ElFormItem>
-          <ElFormItem label="数量">
+          <ElFormItem label="出库数量">
             <ElInputNumber v-model="stockQty" :min="0.01" :precision="2" :step="1" controls-position="right" class="w-full" />
           </ElFormItem>
           <ElFormItem label="备注">
@@ -365,15 +500,147 @@ onMounted(fetchList)
         </ElForm>
         <template #footer>
           <ElButton @click="stockDialogVisible = false">取消</ElButton>
-          <ElButton
-            :type="stockMode === 'inbound' ? 'success' : 'warning'"
-            :loading="stockDialogLoading"
-            @click="handleStockSubmit"
-          >
-            确定
-          </ElButton>
+          <ElButton type="warning" :loading="stockDialogLoading" @click="handleOutboundSubmit">确定</ElButton>
         </template>
       </ElDialog>
+
+      <!-- 盘点弹窗 -->
+      <ElDialog
+        v-model="stocktakeDialogVisible"
+        title="库存盘点"
+        width="480px"
+        :close-on-click-modal="false"
+        append-to-body
+        destroy-on-close
+      >
+        <ElForm label-width="100px">
+          <ElFormItem label="食材">
+            <span class="font-medium text-text">{{ stocktakeTarget?.name }}</span>
+          </ElFormItem>
+          <ElFormItem label="系统库存">
+            <span class="tabular-nums text-text-secondary">{{ stocktakeTarget?.stockQty ?? 0 }} {{ stocktakeTarget?.unit || '' }}</span>
+          </ElFormItem>
+          <ElFormItem label="实际盘点数">
+            <ElInputNumber v-model="stocktakeQty" :min="0" :precision="2" :step="1" controls-position="right" class="w-full" />
+          </ElFormItem>
+          <ElFormItem label="差异">
+            <span
+              class="tabular-nums font-medium"
+              :class="stocktakeDiff > 0 ? 'text-success' : stocktakeDiff < 0 ? 'text-danger' : 'text-text-muted'"
+            >
+              {{ stocktakeDiff > 0 ? '+' : '' }}{{ stocktakeDiff }} {{ stocktakeTarget?.unit || '' }}
+              <span v-if="stocktakeDiff > 0" class="ml-1 text-xs">(盘盈)</span>
+              <span v-else-if="stocktakeDiff < 0" class="ml-1 text-xs">(盘亏)</span>
+              <span v-else class="ml-1 text-xs">(一致)</span>
+            </span>
+          </ElFormItem>
+          <ElFormItem label="备注">
+            <ElInput v-model="stocktakeRemark" type="textarea" :rows="2" placeholder="备注信息(选填)" maxlength="200" />
+          </ElFormItem>
+        </ElForm>
+        <template #footer>
+          <ElButton @click="stocktakeDialogVisible = false">取消</ElButton>
+          <ElButton type="primary" :loading="stocktakeLoading" @click="handleStocktakeSubmit">确认盘点</ElButton>
+        </template>
+      </ElDialog>
+
+      <!-- 盘点记录抽屉 -->
+      <ElDrawer
+        v-model="stocktakeDrawerVisible"
+        title="盘点记录"
+        size="800px"
+        :close-on-click-modal="false"
+        append-to-body
+        destroy-on-close
+      >
+        <div class="mb-4 flex items-center justify-between">
+          <ElSelect
+            v-model="stocktakeStatusFilter"
+            placeholder="全部状态"
+            clearable
+            style="width: 140px"
+            @change="() => { stocktakePage = 1; fetchStocktakeList() }"
+          >
+            <ElOption label="待处理" :value="1" />
+            <ElOption label="已处理" :value="2" />
+          </ElSelect>
+          <ElButton type="warning" :icon="RotateCcw" @click="handleResolveAll">批量恢复差异</ElButton>
+        </div>
+
+        <ElTable
+          v-loading="stocktakeLoading2"
+          :data="stocktakeRecords"
+          style="width: 100%"
+          :show-overflow-tooltip="true"
+          row-key="id"
+        >
+          <ElTableColumn label="食材" min-width="140">
+            <template #default="{ row }">
+              <span class="font-medium text-text">{{ row.materialName || '—' }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="系统库存" width="110" align="right">
+            <template #default="{ row }">
+              <span class="tabular-nums text-text-secondary">{{ row.systemQty ?? 0 }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="盘点数量" width="110" align="right">
+            <template #default="{ row }">
+              <span class="tabular-nums font-medium text-text">{{ row.countedQty ?? 0 }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="差异" width="120" align="right">
+            <template #default="{ row }">
+              <span
+                class="tabular-nums font-medium"
+                :class="(row.difference ?? 0) > 0 ? 'text-success' : (row.difference ?? 0) < 0 ? 'text-danger' : 'text-text-muted'"
+              >
+                {{ (row.difference ?? 0) > 0 ? '+' : '' }}{{ row.difference ?? 0 }}
+              </span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="状态" width="100" align="center">
+            <template #default="{ row }">
+              <ElTag v-if="row.status === 1" type="warning" size="small" effect="light" round>待处理</ElTag>
+              <ElTag v-else type="success" size="small" effect="light" round>已处理</ElTag>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="时间" width="170">
+            <template #default="{ row }">
+              <span class="text-xs text-text-muted">{{ row.createdAt || '—' }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="操作" width="110" fixed="right">
+            <template #default="{ row }">
+              <ElButton
+                v-if="row.status === 1"
+                size="small"
+                type="warning"
+                :icon="RotateCcw"
+                @click="handleResolveStockCount(row as StockCount)"
+              >恢复</ElButton>
+              <span v-else class="text-xs text-text-muted">—</span>
+            </template>
+          </ElTableColumn>
+          <template #empty>
+            <EmptyState description="暂无盘点记录" />
+          </template>
+        </ElTable>
+
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs text-text-muted">共 {{ stocktakeTotal }} 条</span>
+          <ElPagination
+            v-model:current-page="stocktakePage"
+            v-model:page-size="stocktakeSize"
+            :page-sizes="[10, 20, 50]"
+            :total="stocktakeTotal"
+            layout="total, sizes, prev, pager, next"
+            background
+            @current-change="fetchStocktakeList"
+            @size-change="(s: number) => { stocktakeSize = s; stocktakePage = 1; fetchStocktakeList() }"
+          />
+        </div>
+      </ElDrawer>
     </PageContainer>
   </Layout>
 </template>

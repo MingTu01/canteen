@@ -44,7 +44,7 @@ public class DepartmentController {
         return ApiResponse.success(dept);
     }
 
-    @OperationLog("创建部门")
+    @OperationLog(value = "创建部门", detail = "'部门 ' + #department.name")
     @PostMapping
     public ApiResponse<Department> createDepartment(@RequestBody Department department) {
         if (SecurityContext.isEmployee()) {
@@ -54,7 +54,7 @@ public class DepartmentController {
         return ApiResponse.success(departmentService.createDepartment(department));
     }
 
-    @OperationLog("更新部门")
+    @OperationLog(value = "更新部门", detail = "'部门ID ' + #id + ' 名称 ' + #department.name")
     @PutMapping("/{id}")
     public ApiResponse<Department> updateDepartment(@PathVariable Long id, @RequestBody Department department) {
         if (SecurityContext.isEmployee()) {
@@ -65,7 +65,7 @@ public class DepartmentController {
         return ApiResponse.success(departmentService.updateDepartment(department));
     }
 
-    @OperationLog("删除部门")
+    @OperationLog(value = "删除部门", detail = "'部门ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDepartment(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

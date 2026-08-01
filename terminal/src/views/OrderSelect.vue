@@ -29,6 +29,7 @@ import {
 } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
 import { useMealConfig } from '@/composables/useMealConfig'
+import { useOrderConfig } from '@/composables/useOrderConfig'
 import { formatMoney } from '@/composables/useFormat'
 import { toDateKey, dateWindow, parseDateKey, relativeLabel, pad2 } from '@/utils'
 import { mealTypeLabel } from '@/utils'
@@ -42,24 +43,28 @@ import MealSection from '@/components/MealSection.vue'
 const router = useRouter()
 
 /**
- * 可订餐日期范围(规则:不显示今天,从明天起;若已过今天 15:00 截止,则从后天起)。
- * 后端 checkAdvanceOrderDeadline 默认 15:00 截止次日订单。
+ * 可订餐日期范围(规则:不显示今天,从明天起;若已过今天截止时间,则从后天起)。
+ * 截止时间由后端 order-config 驱动(默认 15:00),通过 isOrderableByDeadline 判定。
+ * 配置加载后 config 变化会自动重算起始日期与日期窗口。
  */
-const ORDER_DEADLINE_HOUR = 15
+const { loadConfig, isOrderableByDeadline } = useOrderConfig()
 const now = new Date()
-const todayDeadline = new Date(now.getFullYear(), now.getMonth(), now.getDate(), ORDER_DEADLINE_HOUR, 0, 0)
-const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-if (now < todayDeadline) {
-  startDate.setDate(startDate.getDate() + 1) // 明天起
-} else {
-  startDate.setDate(startDate.getDate() + 2) // 后天起
-}
-const startDateKey = toDateKey(startDate)
+const startDateKey = computed(() => {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  if (isOrderableByDeadline(toDateKey(tomorrow), now)) {
+    return toDateKey(tomorrow) // 明天起
+  }
+  const dayAfter = new Date(today)
+  dayAfter.setDate(dayAfter.getDate() + 2)
+  return toDateKey(dayAfter) // 后天起
+})
 /** 未来 30 天可订餐日期 */
-const allDates = dateWindow(startDateKey, 30, 1)
+const allDates = computed(() => dateWindow(startDateKey.value, 30, 1))
 
 /** 左侧 DateSidebar 窗口(7 天,可上下翻页) */
-const windowStart = ref(startDateKey)
+const windowStart = ref(startDateKey.value)
 const sidebarDates = computed(() => dateWindow(windowStart.value, 7, 1))
 
 /** menuCache: 日期 -> 转换后的菜单数组 [{id, mealType, menuItems}] */
@@ -111,7 +116,7 @@ const loadMenu = async (date: string) => {
 /** 并发加载 30 天菜单 */
 const loadAllMenus = async () => {
   // 限制并发 5 个,避免一次性发 30 个请求
-  const queue = [...allDates]
+  const queue = [...allDates.value]
   const concurrency = 5
   const workers = Array.from({ length: concurrency }, async () => {
     while (queue.length) {
@@ -172,7 +177,7 @@ const fillMissingOrderItems = async (orderList: any[]) => {
 /** 有菜单的日期集合 */
 const availableSet = computed(() => {
   const s = new Set<string>()
-  for (const d of allDates) {
+  for (const d of allDates.value) {
     const list = menuCache.value[d]
     if (list && list.length > 0) s.add(d)
   }
@@ -308,15 +313,17 @@ onMounted(async () => {
     router.replace('/order')
     return
   }
+  // 先加载订餐截止配置(驱动可订餐日期范围)
+  await loadConfig()
   // 默认选中可订餐起始日期
-  if (!orderStore.selectedDate || !allDates.includes(orderStore.selectedDate)) {
-    orderStore.selectedDate = startDateKey
+  if (!orderStore.selectedDate || !allDates.value.includes(orderStore.selectedDate)) {
+    orderStore.selectedDate = startDateKey.value
   }
   // 并发加载菜单和已下单订单
   await Promise.all([loadAllMenus(), fetchOrderedOrders()])
   // 起始日期无菜单,自动选中第一个有菜单的日期
   if (!availableSet.value.has(orderStore.selectedDate)) {
-    const first = allDates.find((d) => availableSet.value.has(d))
+    const first = allDates.value.find((d) => availableSet.value.has(d))
     if (first) orderStore.selectedDate = first
   }
 })

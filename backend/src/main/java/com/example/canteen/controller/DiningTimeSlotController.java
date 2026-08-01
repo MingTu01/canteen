@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.DiningTimeSlot;
 import com.example.canteen.security.SecurityContext;
@@ -23,6 +24,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.getTimeSlotsByStore(storeId));
     }
 
+    @OperationLog(value = "创建就餐时段", detail = "'门店ID ' + #timeSlot.storeId + ' 名称 ' + #timeSlot.name")
     @PostMapping
     public ApiResponse<DiningTimeSlot> createTimeSlot(@RequestBody DiningTimeSlot timeSlot) {
         if (SecurityContext.isEmployee()) {
@@ -32,6 +34,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.createTimeSlot(timeSlot));
     }
 
+    @OperationLog(value = "更新就餐时段", detail = "'时段ID ' + #id + ' 名称 ' + #timeSlot.name")
     @PutMapping("/{id}")
     public ApiResponse<DiningTimeSlot> updateTimeSlot(@PathVariable Long id, @RequestBody DiningTimeSlot timeSlot) {
         if (SecurityContext.isEmployee()) {
@@ -41,6 +44,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.updateTimeSlot(timeSlot));
     }
 
+    @OperationLog(value = "删除就餐时段", detail = "'时段ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteTimeSlot(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

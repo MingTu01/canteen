@@ -50,21 +50,7 @@ public class AuthController {
     }
 
     private String extractToken(HttpServletRequest request) {
-        // Cookie
-        Cookie[] cookies = request.getCookies();
-        if (cookies != null) {
-            for (Cookie c : cookies) {
-                if (AuthCookieUtil.COOKIE_NAME.equals(c.getName())
-                        && c.getValue() != null && !c.getValue().isBlank()) {
-                    return c.getValue();
-                }
-            }
-        }
-        // Authorization 头
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            return authHeader.substring(7);
-        }
-        return null;
+        // 使用 TokenExtractor 统一提取(检查所有端的 Cookie + Authorization 头)
+        return com.example.canteen.security.TokenExtractor.extractToken(request);
     }
 }

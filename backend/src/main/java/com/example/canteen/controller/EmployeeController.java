@@ -105,7 +105,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employee));
     }
 
-    @OperationLog("创建员工")
+    @OperationLog(value = "创建员工", detail = "'员工 ' + #employee.name + ' 工号 ' + #employee.cardNo")
     @PostMapping
     public ApiResponse<EmployeeVO> createEmployee(@RequestBody Employee employee) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -115,7 +115,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employeeService.createEmployee(employee)));
     }
 
-    @OperationLog("更新员工")
+    @OperationLog(value = "更新员工", detail = "'员工ID ' + #id + ' 姓名 ' + #employee.name")
     @PutMapping("/{id}")
     public ApiResponse<EmployeeVO> updateEmployee(@PathVariable Long id, @RequestBody Employee employee) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -126,7 +126,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employeeService.updateEmployee(employee)));
     }
 
-    @OperationLog("删除员工")
+    @OperationLog(value = "删除员工", detail = "'员工ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteEmployee(@PathVariable Long id) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -151,6 +151,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "employees": [ {cardNo,name,departmentName,balance,password,status}, ... ] }
      * 返回:{ "success": N, "failed": M, "errors": [{row,cardNo,name,reason}] }
      */
+    @OperationLog(value = "批量导入员工", detail = "'门店ID ' + #body['storeId'] + ' 行数 ' + #body['employees'].size()")
     @PostMapping("/batch")
     public ApiResponse<Map<String, Object>> batchImport(@RequestBody Map<String, Object> body) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -203,7 +204,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "amount": 100.00 } (门店管理员可不传 storeId,自动取当前门店)
      * 返回:{ "successCount": N, "totalAmount": M }
      */
-    @OperationLog("批量充值")
+    @OperationLog(value = "批量充值", detail = "'门店ID ' + #body['storeId'] + ' 金额 ' + #body['amount']")
     @PostMapping("/batch-recharge")
     public ApiResponse<Map<String, Object>> batchRecharge(@RequestBody Map<String, Object> body) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -340,6 +341,7 @@ public class EmployeeController {
      * @param storeId 门店 ID(超管需显式传;门店管理员可不传,自动取当前门店)
      * @param file    图片文件(前端已 canvas 压缩到 300x300 / JPEG 0.8)
      */
+    @OperationLog(value = "上传员工头像", detail = "'卡号 ' + #cardNo + ' 门店ID ' + #storeId")
     @PostMapping("/{cardNo}/avatar")
     public ApiResponse<Map<String, Object>> uploadAvatar(@PathVariable String cardNo,
                                                          @RequestParam(required = false) Long storeId,

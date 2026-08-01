@@ -16,5 +16,8 @@ export const menuApi = {
   /** 发布某日菜单:将当天所有菜单设为已发布 */
   publish: (storeId: number, date: string) =>
     api.post<{ published: number }>('/menu/publish', null, { params: { storeId, date } }).then((r) => r.data),
+  /** 批量发布所有未发布菜单 */
+  batchPublish: (storeId: number) =>
+    api.post<{ published: number; daysPublished: number }>('/menu/batch-publish', null, { params: { storeId } }).then((r) => r.data),
   delete: (id: number) => api.delete<void>(`/menu/${id}`).then((r) => r.data),
 }

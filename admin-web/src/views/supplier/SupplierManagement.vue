@@ -88,7 +88,12 @@ const {
       keyword: search.keyword || undefined,
     })
   },
-  create: (data) => supplierApi.create(data),
+  create: (data) => {
+    if (!data.storeId || data.storeId === 0) {
+      return Promise.reject(new Error('请先选择食堂'))
+    }
+    return supplierApi.create(data)
+  },
   update: (id, data) => supplierApi.update(id, data),
   remove: (id) => supplierApi.delete(id),
 })
@@ -106,7 +111,12 @@ onMounted(fetchList)
   <Layout>
     <PageContainer title="供应商管理" description="维护食堂供应商档案、联系人及合作状态">
       <template #actions>
-        <ElButton type="primary" :icon="Plus" @click="handleCreate">新增供应商</ElButton>
+        <ElButton
+          type="primary"
+          :icon="Plus"
+          :disabled="!sid"
+          @click="handleCreate"
+        >新增供应商</ElButton>
       </template>
 
       <div

@@ -25,6 +25,10 @@ public class JwtTokenProvider {
     @Value("${jwt.expiration}")
     private Long expiration;
 
+    /** 员工 token 过期时间(默认 30 天),H5 长期登录不失效 */
+    @Value("${jwt.employee-expiration:2592000000}")
+    private Long employeeExpiration;
+
     /** 终端 token 过期时间(默认 365 天),远长于管理员 token(24h),避免 7x24 终端频繁失绑 */
     @Value("${jwt.terminal-expiration:31536000000}")
     private Long terminalExpiration;
@@ -67,7 +71,7 @@ public class JwtTokenProvider {
                 .subject(employee.getCardNo())
                 .id(UUID.randomUUID().toString())
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + expiration))
+                .expiration(new Date(System.currentTimeMillis() + employeeExpiration))
                 .signWith(secretKey)
                 .compact();
     }
@@ -135,5 +139,42 @@ public class JwtTokenProvider {
      */
     public String refreshTerminalToken(Long storeId, String storeName, String deviceLabel) {
         return generateTerminalToken(storeId, storeName, deviceLabel);
+    }
+
+    /**
+     * 滑动续期:用当前有效 token 的 claims 换取新 token。
+     * 新 token 的过期时间根据 role 重新计算(admin 24h / employee 30d / terminal 365d)。
+     * 用于 JwtAuthenticationFilter 中自动续期,避免活跃用户被登出。
+     */
+    public String renewToken(Map<String, Object> oldClaims) {
+        Integer role = oldClaims.get("role") instanceof Number n ? n.intValue() : null;
+        long ttl = switch (role == null ? -1 : role) {
+            case 0 -> employeeExpiration;   // 员工
+            case 3 -> terminalExpiration;   // 终端
+            default -> expiration;           // 管理员(1=超管, 2=门店管理员)
+        };
+        // 复用原 claims,但更新 jti/iat/exp
+        Map<String, Object> claims = new HashMap<>(oldClaims);
+        claims.remove("exp");
+        claims.remove("iat");
+        claims.remove("jti");
+        String subject = oldClaims.get("sub") == null ? "renewed" : oldClaims.get("sub").toString();
+        return Jwts.builder()
+                .claims(claims)
+                .subject(subject)
+                .id(UUID.randomUUID().toString())
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + ttl))
+                .signWith(secretKey)
+                .compact();
+    }
+
+    /** 获取指定 role 的 token TTL(毫秒),供 Filter 判断是否需要续期 */
+    public long getTtlByRole(Integer role) {
+        return switch (role == null ? -1 : role) {
+            case 0 -> employeeExpiration;
+            case 3 -> terminalExpiration;
+            default -> expiration;
+        };
     }
 }

@@ -8,7 +8,7 @@
  *
  * 内置:3 个 echarts 图表 + Excel 导出
  */
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import {
   ElRadioGroup,
   ElRadioButton,
@@ -309,7 +309,13 @@ const handleExport = (): void => {
   ElMessage.success('导出成功')
 }
 
-watch(() => props.storeId, fetchReport, { immediate: true })
+// 门店切换时重新拉取(不使用 immediate,改用 onMounted 触发首次加载,确保 DOM 已就绪)
+watch(() => props.storeId, fetchReport)
+
+// 挂载后触发首次加载(DOM ref 已绑定,ECharts 可正常初始化)
+onMounted(() => {
+  fetchReport()
+})
 
 defineExpose({ refresh: fetchReport })
 </script>

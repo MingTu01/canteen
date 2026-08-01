@@ -69,7 +69,7 @@ public class EmployeeAuthController {
             return ApiResponse.error(401, result.getErrorMessage());
         }
         rateLimiter.recordSuccess(cardNo);
-        authCookieUtil.setAuthCookie(httpResponse, result.getToken(), httpRequest);
+        authCookieUtil.setEmployeeCookie(httpResponse, result.getToken(), httpRequest);
         Map<String, Object> data = new HashMap<>();
         data.put("token", result.getToken());
         data.put("employee", EmployeeVO.from(result.getEmployee()));
@@ -101,7 +101,7 @@ public class EmployeeAuthController {
             return ApiResponse.error(401, result.getErrorMessage());
         }
         rateLimiter.recordSuccess(lockKey);
-        authCookieUtil.setAuthCookie(httpResponse, result.getToken(), httpRequest);
+        authCookieUtil.setEmployeeCookie(httpResponse, result.getToken(), httpRequest);
         Map<String, Object> data = new HashMap<>();
         data.put("token", result.getToken());
         data.put("employee", EmployeeVO.from(result.getEmployee()));

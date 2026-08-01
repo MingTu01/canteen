@@ -26,6 +26,7 @@ public class WhitelistMatcher {
             "/api/system/health",
             "/api/system/version",
             "/api/system/time",
+            "/api/system/order-config",
             "/api/auth/logout",
             "/api/test/employees",
             // SSE subscribe 改用一次性 ticket 认证(由 SseController 内部校验 ticket),

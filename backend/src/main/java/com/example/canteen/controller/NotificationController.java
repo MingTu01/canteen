@@ -24,7 +24,7 @@ public class NotificationController {
         return ApiResponse.success(notificationService.getNotificationsByStore(storeId));
     }
 
-    @OperationLog("创建通知")
+    @OperationLog(value = "创建通知", detail = "'标题 ' + #notification.title")
     @PostMapping
     public ApiResponse<Notification> createNotification(@RequestBody Notification notification) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -34,7 +34,7 @@ public class NotificationController {
         return ApiResponse.success(notificationService.createNotification(notification));
     }
 
-    @OperationLog("更新通知")
+    @OperationLog(value = "更新通知", detail = "'通知ID ' + #id + ' 标题 ' + #notification.title")
     @PutMapping("/{id}")
     public ApiResponse<Notification> updateNotification(@PathVariable Long id, @RequestBody Notification notification) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -48,7 +48,7 @@ public class NotificationController {
      * 上架/下架通知(仅修改 status 字段)
      * PUT /api/notification/{id}/status
      */
-    @OperationLog("通知上下架")
+    @OperationLog(value = "通知上下架", detail = "'通知ID ' + #id + ' 状态 ' + (#status == 1 ? '上架' : '下架')")
     @PutMapping("/{id}/status")
     public ApiResponse<Notification> toggleStatus(@PathVariable Long id, @RequestParam Integer status) {
         if (SecurityContext.currentRole() == null) {
@@ -63,7 +63,7 @@ public class NotificationController {
         return ApiResponse.success(notificationService.updateNotification(notification));
     }
 
-    @OperationLog("删除通知")
+    @OperationLog(value = "删除通知", detail = "'通知ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteNotification(@PathVariable Long id) {
         if (!SecurityContext.hasAdminLevel()) {

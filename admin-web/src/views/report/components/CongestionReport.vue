@@ -6,7 +6,7 @@
  * 数据来源:reportApi.hourly / reportApi.peak
  * 依赖:storeId(来自父组件)
  */
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { ElDatePicker, ElRadioGroup, ElRadioButton, ElTable, ElTableColumn } from 'element-plus'
 import EmptyState from '@/components/EmptyState.vue'
 import { useEcharts } from '@/composables/useEcharts'
@@ -155,7 +155,11 @@ const onModeChange = (): void => {
   fetchCongestion()
 }
 
-watch(() => props.storeId, fetchCongestion, { immediate: true })
+watch(() => props.storeId, fetchCongestion)
+
+onMounted(() => {
+  fetchCongestion()
+})
 
 defineExpose({ refresh: fetchCongestion })
 </script>

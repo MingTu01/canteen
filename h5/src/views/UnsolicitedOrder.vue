@@ -8,7 +8,7 @@
  * - 提示需经打菜人员确认菜品后下单
  * - 下单时带 orderSource=1,后端绕过截止时间和防重复校验
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showSuccessToast, showFailToast, showConfirmDialog } from 'vant'
 import { ArrowLeft, Plus, Minus, ShoppingCart, AlertCircle } from 'lucide-vue-next'
@@ -17,6 +17,7 @@ import { getMenuByDate, getDiningTimes } from '@/api/menu'
 import { createOrder } from '@/api/order'
 import { fetchServerTime, type ServerTime } from '@/composables/useServerTime'
 import { parseTimeToMinutes, formatDateStr } from '@/utils/date'
+import { getCachedImage } from '@/utils/imageCache'
 import { formatMoney, formatMealType } from '@/composables/useFormat'
 import type { MenuWithItems, Dish, DiningTimeSlot } from '@/api/types'
 
@@ -73,6 +74,40 @@ const currentDishes = computed<Dish[]>(() => {
     .map((iv) => iv.dish)
     .filter((d): d is Dish => !!d)
 })
+
+// ============ 菜品图片 ============
+/** 加载失败的菜品图片(dishId 集合),触发 v-if 回退到 emoji 占位 */
+const erroredImages = ref(new Set<number>())
+
+/** 菜品图片缓存(dishId → 缓存后的 blob URL 或原 URL),异步填充 */
+const dishImageCache = ref<Map<number, string>>(new Map())
+
+/** 预加载当前餐别菜品图片到缓存(懒加载:首次 fetch 后缓存,后续命中缓存直接返回 blob URL) */
+watch(currentDishes, async (dishes) => {
+  const map = new Map(dishImageCache.value)
+  const promises: Promise<void>[] = []
+  for (const dish of dishes) {
+    if (!dish.id || map.has(dish.id)) continue
+    const raw = dish.image || dish.imageUrl
+    if (!raw) continue
+    // 完整 URL 或 data URL 直接使用,不走 IndexedDB 缓存
+    if (/^(https?:)?\/\//.test(raw) || raw.startsWith('data:')) {
+      map.set(dish.id, raw)
+      continue
+    }
+    promises.push(
+      getCachedImage(raw).then((url) => { map.set(dish.id, url) }),
+    )
+  }
+  await Promise.all(promises)
+  dishImageCache.value = map
+}, { immediate: true })
+
+/** 获取菜品图片地址(优先 image 字段,回退 imageUrl;走本地缓存);已失败的返回空串触发 emoji 占位 */
+const getDishImg = (dish: any): string => {
+  if (erroredImages.value.has(dish.id)) return ''
+  return dishImageCache.value.get(dish.id) || ''
+}
 
 // ============ 购物车操作 ============
 const addToCart = (dish: Dish) => {
@@ -281,11 +316,11 @@ onUnmounted(() => {
           <div v-for="dish in currentDishes" :key="dish.id" class="unsolicited__dish">
             <div class="unsolicited__dish-img-wrap">
               <img
-                v-if="dish.imageUrl"
-                :src="dish.imageUrl"
+                v-if="getDishImg(dish) && !erroredImages.has(dish.id)"
+                :src="getDishImg(dish)"
                 :alt="dish.name"
                 class="unsolicited__dish-img"
-                @error="(e) => ((e.target as HTMLImageElement).style.display = 'none')"
+                @error="() => erroredImages.add(dish.id)"
               />
               <div v-else class="unsolicited__dish-img-placeholder">🍽️</div>
             </div>

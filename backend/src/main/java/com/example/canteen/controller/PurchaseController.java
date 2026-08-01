@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.PurchaseCreateDTO;
@@ -53,6 +54,7 @@ public class PurchaseController {
         return ApiResponse.success(purchaseService.getPurchaseDetail(id));
     }
 
+    @OperationLog(value = "创建采购单", detail = "'门店ID ' + #dto.purchase.storeId + ' 供应商ID ' + #dto.purchase.supplierId")
     @PostMapping
     public ApiResponse<Purchase> createPurchase(@RequestBody PurchaseCreateDTO dto) {
         if (!SecurityContext.canManageProcurement()) {
@@ -65,6 +67,7 @@ public class PurchaseController {
         return ApiResponse.success(purchaseService.createPurchase(dto));
     }
 
+    @OperationLog(value = "更新采购状态", detail = "'采购单ID ' + #id + ' 状态 ' + #status")
     @PutMapping("/{id}/status")
     public ApiResponse<Purchase> updateStatus(@PathVariable Long id,
                                               @RequestParam int status) {
@@ -74,6 +77,7 @@ public class PurchaseController {
         return ApiResponse.success(purchaseService.updateStatus(id, status));
     }
 
+    @OperationLog(value = "删除采购单", detail = "'采购单ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deletePurchase(@PathVariable Long id) {
         if (!SecurityContext.canManageProcurement()) {

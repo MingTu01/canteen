@@ -26,6 +26,14 @@ const clearAuth = () => {
   } catch {
     /* Pinia 未初始化时忽略 */
   }
+  // 调用后端 logout 清除所有端的 Cookie(admin_token/employee_token/terminal_token/auth_token)
+  // 避免 admin_token 丢失后 TokenExtractor 回退到 employee_token 导致持续 403
+  // logout 接口在白名单中,无需有效 token 即可调用
+  try {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {})
+  } catch {
+    /* 忽略网络错误 */
+  }
 }
 
 /** 判断是否为登录请求:登录失败不应清状态/跳转(用户已在登录页) */
@@ -49,11 +57,11 @@ api.interceptors.response.use(
     }
     const data = res.data
     if (data.code === 200) return data
-    // 401/403 不弹重复消息(下面会跳转登录页,错误提示对用户无意义)
+    // 401/403 不弹重复消息(下面会跳转登录页)
     if (data.code !== 401 && data.code !== 403) {
       ElMessage.error(data.message || '请求失败')
     }
-    // 401 未登录 / 403 无权限(会话过期或越权):清登录态并跳转登录页
+    // 401 未登录 / 403 无权限(token 失效或被覆盖):清登录态并跳转登录页
     if ((data.code === 401 || data.code === 403) && !isLoginRequest(res.config.url)) {
       if (!isRedirecting) {
         isRedirecting = true
@@ -69,7 +77,7 @@ api.interceptors.response.use(
   },
   (err) => {
     const status = err.response?.status
-    // 401 未登录 / 403 无权限(会话过期或越权):清登录态并跳转登录页,不弹错误消息
+    // 401 未登录 / 403 无权限:清登录态并跳转登录页
     if ((status === 401 || status === 403) && !isLoginRequest(err.config?.url)) {
       if (!isRedirecting) {
         isRedirecting = true

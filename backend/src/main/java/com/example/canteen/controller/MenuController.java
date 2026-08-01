@@ -87,6 +87,22 @@ public class MenuController {
     }
 
     /**
+     * 批量发布菜单:将指定日期范围内所有菜单设为已发布。
+     * POST /api/menu/batch-publish?storeId=1
+     * 无需选择日期,直接发布该门店所有未发布的菜单。
+     */
+    @OperationLog(value = "批量发布菜单", detail = "'门店ID ' + #storeId")
+    @PostMapping("/batch-publish")
+    public ApiResponse<Map<String, Object>> batchPublishMenu(@RequestParam Long storeId) {
+        if (SecurityContext.isEmployee()) {
+            throw new com.example.canteen.exception.SecurityException("员工无权执行此操作");
+        }
+        SecurityContext.checkStoreAccess(storeId);
+        Map<String, Object> result = menuService.publishAllUnpublished(storeId);
+        return ApiResponse.success(result);
+    }
+
+    /**
      * 复制菜单:把源日期所有餐次菜单复制到目标日期。
      * POST /api/menu/copy
      */

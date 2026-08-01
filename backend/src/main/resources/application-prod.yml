@@ -54,6 +54,8 @@ mybatis-plus:
 jwt:
   secret: ${JWT_SECRET}
   expiration: ${JWT_EXPIRATION:86400000}
+  # 员工 token 过期时间(默认 30 天)
+  employee-expiration: ${JWT_EMPLOYEE_EXPIRATION:2592000000}
   # 终端 token 过期时间(默认 365 天)
   terminal-expiration: ${JWT_TERMINAL_EXPIRATION:31536000000}
 

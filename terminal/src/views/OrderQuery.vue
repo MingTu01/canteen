@@ -23,6 +23,7 @@ import { useRouter } from 'vue-router'
 import api from '@/api'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
+import { useOrderConfig } from '@/composables/useOrderConfig'
 import { toDateKey, dateWindow } from '@/utils'
 import { menuInvalidated } from '@/utils/cache'
 import TopBar from '@/components/TopBar.vue'
@@ -90,6 +91,18 @@ const orderFor = (date: string, mealType: number) =>
   activeOrders.value.find((o) => o.date === date && o.mealType === mealType)
 
 const mealTypes = [1, 2, 3]
+
+/**
+ * 订餐截止配置:驱动取消按钮可见性。
+ * 过截止时间(cancel_deadline_time)的次日订单,隐藏取消按钮。
+ */
+const { loadConfig, isCancellableByDeadline } = useOrderConfig()
+
+/** 订单是否仍可取消(按截止配置判定;无日期视为可取消) */
+const orderCancellable = (order: any) => {
+  if (!order?.date) return true
+  return isCancellableByDeadline(order.date, new Date())
+}
 
 /**
  * sidebar 日期列表:
@@ -202,6 +215,8 @@ onMounted(async () => {
     router.replace('/order')
     return
   }
+  // 先加载订餐截止配置(驱动取消按钮可见性)
+  await loadConfig()
   selectedDate.value = today
   await fetchOrders()
   // 今日无订单,自动选中默认窗口内最近的有订单日期
@@ -267,6 +282,7 @@ watch(menuInvalidated, (v) => {
             :meal-type="t"
             :order="orderFor(selectedDate, t) || null"
             :canceling="canceling === orderFor(selectedDate, t)?.id"
+            :cancellable="orderCancellable(orderFor(selectedDate, t))"
             @cancel="onCancelClick"
           />
         </template>

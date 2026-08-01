@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.DailyClose;
 import com.example.canteen.exception.BusinessException;
@@ -45,6 +46,7 @@ public class DailyCloseController {
     }
 
     /** 确认日终对账:记录到 daily_close 表 */
+    @OperationLog(value = "日终对账确认", detail = "'门店ID ' + #storeId + ' 日期 ' + #date")
     @PostMapping("/confirm")
     public ApiResponse<DailyClose> confirm(
             @RequestParam Long storeId,

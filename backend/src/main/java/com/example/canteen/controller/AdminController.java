@@ -43,7 +43,7 @@ public class AdminController {
             // 登录成功后写入 auth_token Cookie(HttpOnly + SameSite=Strict)
             Object tokenObj = result.get("token");
             if (tokenObj instanceof String token) {
-                authCookieUtil.setAuthCookie(httpResponse, token, httpRequest);
+                authCookieUtil.setAdminCookie(httpResponse, token, httpRequest);
             }
             return ApiResponse.success(result);
         } catch (SecurityException e) {
@@ -52,14 +52,14 @@ public class AdminController {
         }
     }
 
-    @OperationLog("创建管理员")
+    @OperationLog(value = "创建管理员", detail = "'账号 ' + #admin.username + ' 姓名 ' + #admin.name")
     @PostMapping
     public ApiResponse<AdminVO> createAdmin(@RequestBody Admin admin) {
         SecurityContext.checkSuperAdmin("仅超级管理员可创建管理员账号");
         return ApiResponse.success(adminService.createAdmin(admin));
     }
 
-    @OperationLog("更新管理员")
+    @OperationLog(value = "更新管理员", detail = "'管理员ID ' + #id + ' 账号 ' + #admin.username")
     @PutMapping("/{id}")
     public ApiResponse<AdminVO> updateAdmin(@PathVariable Long id, @RequestBody Admin admin) {
         // 门店管理员可改本店非超管账号,超管可改任意账号(Service 层做具体校验)
@@ -67,7 +67,7 @@ public class AdminController {
         return ApiResponse.success(adminService.updateAdmin(id, admin));
     }
 
-    @OperationLog("修改密码")
+    @OperationLog(value = "修改密码", detail = "'管理员ID ' + #id")
     @PutMapping("/{id}/password")
     public ApiResponse<Void> changePassword(@PathVariable Long id, @RequestBody Map<String, String> body) {
         // 本人可改自己密码,或超管可改任意密码
@@ -81,7 +81,7 @@ public class AdminController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog("删除管理员")
+    @OperationLog(value = "删除管理员", detail = "'管理员ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteAdmin(@PathVariable Long id) {
         SecurityContext.checkSuperAdmin("仅超级管理员可删除管理员账号");

@@ -24,15 +24,13 @@ import {
 import EmptyState from '@/components/EmptyState.vue'
 import {
   formatDateStr,
-  parseTimeToMinutes,
-  nowMinutes,
   compareDate,
-  addDays,
   numericDateLabel,
   relativeDateLabel,
   formatGroupDate,
 } from '@/utils/date'
 import { getCachedImage } from '@/utils/imageCache'
+import { useOrderConfig } from '@/composables/useOrderConfig'
 import type {
   MenuWithItems,
   MenuItemView,
@@ -48,6 +46,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const cartStore = useCartStore()
 const { formatMoney, formatMealType, formatMealTypeShort } = useFormat()
+const { loadConfig, isOrderableByDeadline } = useOrderConfig()
 
 // ============ 状态 ============
 /**
@@ -111,47 +110,19 @@ const mealDotColor = mealDotColorFn
 // numericDateLabel / relativeDateLabel / formatGroupDate)已抽出到 @/utils/date,
 // 这里仅保留依赖响应式状态的日期判断函数。
 
-/** 次日订单截止时间(15点):15点后禁止订明天的餐,从后天起可订 */
-const ORDER_DEADLINE_HOUR = 15
-
-/** 判断指定日期+餐别是否可订餐(当前时间 < 餐别 endTime) */
-const isMealOrderable = (date: string, mealType: number): boolean => {
-  const today = formatDateStr(new Date())
-  const cmp = compareDate(date, today)
-  if (cmp > 0) {
-    // 未来日期:仅"明天"受 15 点截止限制,后天及以后不受限
-    if (date === addDays(today, 1)) {
-      const now = new Date()
-      const deadline = new Date(now.getFullYear(), now.getMonth(), now.getDate(), ORDER_DEADLINE_HOUR, 0, 0)
-      if (now >= deadline) return false // 已过 15 点,明天不可订
-    }
-    return true
-  }
-  if (cmp < 0) return false
-  // 今天:检查是否过了 endTime
-  const slot = diningTimes.value.find((s) => s.mealType === mealType)
-  if (!slot || !slot.endTime) return true // 无时段配置,默认允许
-  return nowMinutes() < parseTimeToMinutes(slot.endTime)
+/** 判断指定日期+餐别是否可订餐 */
+const isMealOrderable = (date: string, _mealType: number): boolean => {
+  // 用配置驱动的截止时间判断:
+  // - 今天及之前:截止时间(昨天15:00)已过 → 不可订
+  // - 明天:截止时间是今天15:00 → 15:00前可订
+  // - 后天及以后:可订(在提前天数内)
+  return isOrderableByDeadline(date, new Date())
 }
 
-/** 判断指定日期是否可订餐(至少一个餐别未过点) */
+/** 判断指定日期是否可订餐 */
 const isDateOrderable = (date: string): boolean => {
   if (!menuDates.value.has(date)) return false
-  const today = formatDateStr(new Date())
-  const cmp = compareDate(date, today)
-  if (cmp < 0) return false
-  if (cmp > 0) {
-    // 仅"明天"受 15 点截止限制
-    if (date === addDays(today, 1)) {
-      const now = new Date()
-      const deadline = new Date(now.getFullYear(), now.getMonth(), now.getDate(), ORDER_DEADLINE_HOUR, 0, 0)
-      if (now >= deadline) return false
-    }
-    return true
-  }
-  // 今天:检查是否所有餐别都过点
-  const mealTypes = [1, 2, 3]
-  return mealTypes.some((mt) => isMealOrderable(date, mt))
+  return isOrderableByDeadline(date, new Date())
 }
 
 // ============ 日期选择竖列(只显示可订餐日期) ============
@@ -813,6 +784,8 @@ const categoryEmoji = (category?: string): string => {
 
 // ============ 生命周期 ============
 onMounted(async () => {
+  // 加载后端订餐配置(截止时间、提前天数等),供 isOrderableByDeadline 使用
+  await loadConfig()
   await Promise.all([loadDiningTimes(), loadMenuDates(), fetchOrderedOrders()])
   // 如果当前 selectedDate 不可订餐,自动切到第一个可订餐日期
   if (dateList.value.length > 0 && !isDateOrderable(cartStore.selectedDate)) {

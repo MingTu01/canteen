@@ -151,7 +151,7 @@ const routes: RouteRecordRaw[] = [
     path: '/material',
     name: 'MaterialManagement',
     component: () => import('@/views/material/MaterialManagement.vue'),
-    meta: { requiresAuth: true, title: '库存食材', icon: 'Package', roles: [1, 2, 5, 6] },
+    meta: { requiresAuth: true, title: '库存管理', icon: 'Package', roles: [1, 2, 5, 6] },
   },
   {
     path: '/feedback',

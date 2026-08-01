@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.Supplier;
@@ -63,6 +64,7 @@ public class SupplierController {
         return ApiResponse.success(supplier);
     }
 
+    @OperationLog(value = "创建供应商", detail = "'供应商 ' + #supplier.name")
     @PostMapping
     public ApiResponse<Supplier> createSupplier(@RequestBody Supplier supplier) {
         if (!SecurityContext.canManageProcurement()) {
@@ -72,6 +74,7 @@ public class SupplierController {
         return ApiResponse.success(supplierService.createSupplier(supplier));
     }
 
+    @OperationLog(value = "更新供应商", detail = "'供应商ID ' + #id + ' 名称 ' + #supplier.name")
     @PutMapping("/{id}")
     public ApiResponse<Supplier> updateSupplier(@PathVariable Long id, @RequestBody Supplier supplier) {
         if (!SecurityContext.canManageProcurement()) {
@@ -81,6 +84,7 @@ public class SupplierController {
         return ApiResponse.success(supplierService.updateSupplier(supplier));
     }
 
+    @OperationLog(value = "删除供应商", detail = "'供应商ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteSupplier(@PathVariable Long id) {
         if (!SecurityContext.canManageProcurement()) {

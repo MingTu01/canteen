@@ -28,7 +28,6 @@ import {
   Trash2,
   ArrowUpCircle,
   ArrowDownCircle,
-  Layers,
   Archive,
   RotateCcw,
 } from 'lucide-vue-next'
@@ -40,8 +39,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { useCrud } from '@/composables/useCrud'
 import { useAuthStore } from '@/stores/auth'
-import { dishApi, dishCategoryApi } from '@/api'
-import type { Dish, DishCategory } from '@/api/types'
+import { dishApi } from '@/api'
+import type { Dish } from '@/api/types'
 import { COMMON_STATUS, MEAL_TYPE } from '@/constants/dict'
 
 const authStore = useAuthStore()
@@ -65,25 +64,10 @@ const mealTypeTags = (s?: string) => {
 }
 
 const keyword = ref('')
-const categoryFilter = ref('')
+const mealTypeFilter = ref<number | ''>('')
 const page = ref(1)
 const size = ref(10)
 const total = ref(0)
-
-// 菜品分类列表(按当前食堂加载,用于筛选与编辑表单)
-const categories = ref<DishCategory[]>([])
-const loadCategories = async () => {
-  const sidVal = sid.value
-  if (!sidVal) {
-    categories.value = []
-    return
-  }
-  try {
-    categories.value = await dishCategoryApi.list(sidVal)
-  } catch {
-    categories.value = []
-  }
-}
 
 const { list: dishes, loading, fetchList, handleDelete, dialogVisible, dialogLoading, isEdit } = useCrud<Dish>({
   list: async () => {
@@ -94,7 +78,7 @@ const { list: dishes, loading, fetchList, handleDelete, dialogVisible, dialogLoa
       page: page.value,
       size: size.value,
       keyword: keyword.value,
-      category: categoryFilter.value || undefined,
+      mealType: mealTypeFilter.value || undefined,
     })
     total.value = res.total ?? res.records.length
     return res.records
@@ -110,7 +94,6 @@ const defaultDish = (): Dish => ({
   storeId: sid.value ?? 0,
   name: '',
   price: 0,
-  category: '',
   mealTypes: '1,2,3',
   image: '',
   stock: null,
@@ -224,41 +207,6 @@ const handleBatchStatus = async (status: number) => {
   }
 }
 
-// 批量修改分类
-const batchCategoryDialogVisible = ref(false)
-const batchCategoryValue = ref('')
-const batchCategoryLoading = ref(false)
-
-const openBatchCategory = () => {
-  batchCategoryValue.value = ''
-  batchCategoryDialogVisible.value = true
-}
-
-const handleBatchCategoryConfirm = async () => {
-  const sidVal = sid.value
-  if (!sidVal || selectedIds.value.length === 0) return
-  if (!batchCategoryValue.value) {
-    ElMessage.warning('请选择分类')
-    return
-  }
-  batchCategoryLoading.value = true
-  try {
-    await dishApi.batchUpdateCategory({
-      dishIds: selectedIds.value,
-      category: batchCategoryValue.value,
-      storeId: sidVal,
-    })
-    ElMessage.success('批量修改分类成功')
-    batchCategoryDialogVisible.value = false
-    clearSelection()
-    fetchList()
-  } catch {
-    /* 错误已由拦截器统一提示 */
-  } finally {
-    batchCategoryLoading.value = false
-  }
-}
-
 const handleBatchDelete = async () => {
   const sidVal = sid.value
   if (!sidVal || selectedIds.value.length === 0) return
@@ -367,7 +315,7 @@ const handleSearch = () => {
 
 const handleReset = () => {
   keyword.value = ''
-  categoryFilter.value = ''
+  mealTypeFilter.value = ''
   page.value = 1
   fetchList()
 }
@@ -377,15 +325,13 @@ const handlePageChange = (p: number) => {
   fetchList()
 }
 
-// 食堂切换时重新加载分类与菜品列表
+// 食堂切换时重新加载菜品列表
 watch(sid, () => {
-  loadCategories()
   page.value = 1
   fetchList()
 })
 
 onMounted(() => {
-  loadCategories()
   fetchList()
 })
 </script>
@@ -415,18 +361,18 @@ onMounted(() => {
           @keyup.enter="handleSearch"
         />
         <ElSelect
-          v-model="categoryFilter"
-          placeholder="全部分类"
+          v-model="mealTypeFilter"
+          placeholder="全部餐次"
           clearable
           style="width: 180px"
-          aria-label="筛选菜品分类"
+          aria-label="筛选餐次"
           @change="handleSearch"
         >
           <ElOption
-            v-for="c in categories"
-            :key="c.id"
-            :label="c.name"
-            :value="c.name"
+            v-for="opt in mealTypeOptions"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
           />
         </ElSelect>
       </SearchBar>
@@ -439,7 +385,6 @@ onMounted(() => {
           <span class="text-sm text-blue-700">已选 {{ selectedDishes.length }} 项</span>
           <ElButton size="small" type="success" :icon="ArrowUpCircle" @click="handleBatchStatus(1)">批量上架</ElButton>
           <ElButton size="small" type="warning" :icon="ArrowDownCircle" @click="handleBatchStatus(0)">批量下架</ElButton>
-          <ElButton size="small" :icon="Layers" @click="openBatchCategory">批量修改分类</ElButton>
           <ElButton size="small" type="danger" :icon="Trash2" @click="handleBatchDelete">批量删除</ElButton>
           <ElButton size="small" text @click="clearSelection">取消选择</ElButton>
         </div>
@@ -473,12 +418,6 @@ onMounted(() => {
             </template>
           </ElTableColumn>
           <ElTableColumn prop="name" label="名称" min-width="160" />
-          <ElTableColumn label="分类" width="120" align="center">
-            <template #default="{ row }">
-              <ElTag v-if="row.category" size="small" type="info">{{ row.category }}</ElTag>
-              <span v-else class="text-text-muted">-</span>
-            </template>
-          </ElTableColumn>
           <ElTableColumn label="适用餐次" width="200" align="center">
             <template #default="{ row }">
               <div class="flex flex-wrap justify-center gap-1">
@@ -565,22 +504,6 @@ onMounted(() => {
           <ElFormItem label="名称" prop="name">
             <ElInput v-model="form.name" placeholder="请输入菜品名称" aria-required="true" />
           </ElFormItem>
-          <ElFormItem label="分类">
-            <ElSelect
-              v-model="form.category"
-              placeholder="请选择分类"
-              clearable
-              filterable
-              class="w-full"
-            >
-              <ElOption
-                v-for="c in categories"
-                :key="c.id"
-                :label="c.name"
-                :value="c.name"
-              />
-            </ElSelect>
-          </ElFormItem>
           <ElFormItem label="价格" prop="price">
             <ElInputNumber v-model="form.price" :min="0" :precision="2" :step="0.5" class="w-full" aria-required="true" />
           </ElFormItem>
@@ -620,38 +543,6 @@ onMounted(() => {
         </template>
       </ElDialog>
 
-      <!-- 批量修改分类弹窗 -->
-      <ElDialog
-        v-model="batchCategoryDialogVisible"
-        title="批量修改分类"
-        width="420px"
-        :close-on-click-modal="false"
-        append-to-body
-        destroy-on-close
-      >
-        <div class="mb-2 text-sm text-text-muted">
-          将对选中的 {{ selectedDishes.length }} 个菜品应用新分类。
-        </div>
-        <ElSelect
-          v-model="batchCategoryValue"
-          placeholder="请选择分类"
-          clearable
-          filterable
-          class="w-full"
-        >
-          <ElOption
-            v-for="c in categories"
-            :key="c.id"
-            :label="c.name"
-            :value="c.name"
-          />
-        </ElSelect>
-        <template #footer>
-          <ElButton @click="batchCategoryDialogVisible = false">取消</ElButton>
-          <ElButton type="primary" :loading="batchCategoryLoading" @click="handleBatchCategoryConfirm">确定</ElButton>
-        </template>
-      </ElDialog>
-
       <!-- 回收站弹窗 -->
       <ElDialog
         v-model="trashDialogVisible"
@@ -687,12 +578,6 @@ onMounted(() => {
             </template>
           </ElTableColumn>
           <ElTableColumn prop="name" label="名称" min-width="140" />
-          <ElTableColumn label="分类" width="100" align="center">
-            <template #default="{ row }">
-              <ElTag v-if="row.category" size="small" type="info">{{ row.category }}</ElTag>
-              <span v-else class="text-text-muted">-</span>
-            </template>
-          </ElTableColumn>
           <ElTableColumn label="价格" width="100" align="right">
             <template #default="{ row }">
               <span class="font-medium tabular-nums text-text">¥{{ row.price }}</span>

@@ -13,6 +13,7 @@ import {
   formatDate,
   formatDateTime,
 } from '@/composables/useFormat'
+import { useOrderConfig } from '@/composables/useOrderConfig'
 import type { OrderDetail, OrderItem } from '@/api/types'
 
 defineOptions({ name: 'OrderDetail' })
@@ -20,6 +21,7 @@ defineOptions({ name: 'OrderDetail' })
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const { loadConfig, isCancellableByDeadline } = useOrderConfig()
 
 const detail = ref<OrderDetail | null>(null)
 const loading = ref(false)
@@ -47,6 +49,12 @@ const isCancelled = computed<boolean>(() => order.value?.status === 3)
 
 /** 是否待取餐 */
 const isPending = computed<boolean>(() => order.value?.status === 1)
+
+/** 是否在取消截止时间内(过截止时间不允许取消) */
+const canCancel = computed<boolean>(() => {
+  if (!order.value?.date) return false
+  return isCancellableByDeadline(order.value.date, new Date())
+})
 
 /** 生成二维码 */
 const genQrcode = async (text: string): Promise<void> => {
@@ -80,6 +88,7 @@ const loadDetail = async (): Promise<void> => {
 }
 
 onMounted(() => {
+  loadConfig()
   loadDetail()
 })
 
@@ -281,7 +290,7 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
       <!-- 底部操作栏 -->
       <van-action-bar>
         <van-action-bar-button
-          v-if="isPending"
+          v-if="isPending && canCancel"
           type="danger"
           plain
           text="取消订单"

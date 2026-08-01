@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.exception.SecurityException;
@@ -53,6 +54,7 @@ public class BackupController {
      * Body(可选): { "type": "full" | "store", "storeId": 1 }
      * 超管不传 type 默认 full;门店管理员默认 store(本门店)。
      */
+    @OperationLog(value = "创建备份", detail = "'类型 ' + (#body == null ? 'full' : #body['type'])")
     @PostMapping("/create")
     public ApiResponse<Map<String, Object>> createBackup(@RequestBody(required = false) Map<String, Object> body) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -68,6 +70,7 @@ public class BackupController {
     }
 
     /** 恢复备份。 */
+    @OperationLog(value = "恢复备份", detail = "'备份文件 ' + #backupName")
     @PostMapping("/restore/{backupName}")
     public ApiResponse<Map<String, Object>> restoreBackup(@PathVariable String backupName) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -77,6 +80,7 @@ public class BackupController {
     }
 
     /** 删除备份。 */
+    @OperationLog(value = "删除备份", detail = "'备份文件 ' + #backupName")
     @DeleteMapping("/{backupName}")
     public ApiResponse<Void> deleteBackup(@PathVariable String backupName) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -106,6 +110,7 @@ public class BackupController {
      * 导入(上传)备份文件。
      * 参数:file=备份文件;restore=true|false(是否立即恢复,默认 false)。
      */
+    @OperationLog(value = "导入备份", detail = "'文件名 ' + #file.originalFilename + ' 立即恢复 ' + #restore")
     @PostMapping("/import")
     public ApiResponse<Map<String, Object>> importBackup(
             @RequestParam("file") MultipartFile file,

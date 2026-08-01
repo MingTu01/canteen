@@ -1,4 +1,10 @@
-# 本地快速构建:直接用已构建好的 jar,跳过 Maven 下载
+# =============================================================================
+# 后端运行时基础镜像
+# =============================================================================
+# 仅安装系统依赖(tzdata/curl),不含业务代码
+# 业务 jar 通过卷映射挂入(docker-compose.yml: ./deploy/backend/app.jar:/app/app.jar)
+# 此镜像只需在首次部署时构建一次,后续更新后端代码无需重建镜像
+# =============================================================================
 FROM eclipse-temurin:25-jre
 LABEL maintainer="Enterprise Canteen System"
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl && \
@@ -6,9 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl && 
     echo "Asia/Shanghai" > /etc/timezone && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY target/enterprise-canteen-0.0.1.jar app.jar
 RUN mkdir -p /app/uploads
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8080/api/system/health || exit 1
+# app.jar 由卷映射提供,不 COPY 进镜像
 ENTRYPOINT ["java", "-Xms256m", "-Xmx512m", "-Duser.timezone=Asia/Shanghai", "-jar", "app.jar"]

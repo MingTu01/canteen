@@ -25,8 +25,8 @@ import SearchBar from '@/components/SearchBar.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
-import { purchaseApi, supplierApi } from '@/api'
-import type { Purchase, PurchaseItem, Supplier, PurchaseDetail, PageResult } from '@/api/types'
+import { purchaseApi, supplierApi, materialApi } from '@/api'
+import type { Purchase, PurchaseItem, Supplier, PurchaseDetail, Material, PageResult } from '@/api/types'
 
 const authStore = useAuthStore()
 const sid = computed(() => authStore.storeId || null)
@@ -89,6 +89,39 @@ const loadSuppliers = async () => {
   }
 }
 
+// 食材列表(用于采购明细下拉,入库时自动增加对应食材库存)
+const materials = ref<Material[]>([])
+const loadMaterials = async () => {
+  const sidVal = sid.value
+  if (!sidVal) {
+    materials.value = []
+    return
+  }
+  try {
+    const res = await materialApi.list({ storeId: sidVal, page: 1, size: 500 })
+    const data = res as unknown as PageResult<Material>
+    materials.value = data.records ?? []
+  } catch {
+    materials.value = []
+  }
+}
+
+/** 选择/输入食材时:已有食材填充 materialId+name+unit;新食材清空 materialId 只保留 name */
+const onMaterialSelect = (row: PurchaseItem, val: number | string) => {
+  if (typeof val === 'number') {
+    const m = materials.value.find((it) => it.id === val)
+    if (m) {
+      row.materialId = m.id
+      row.materialName = m.name
+      row.unit = m.unit || '公斤'
+      return
+    }
+  }
+  // 新食材:val 是用户输入的名称字符串
+  row.materialId = undefined
+  row.materialName = String(val)
+}
+
 // 创建弹窗
 const createDialogVisible = ref(false)
 const createLoading = ref(false)
@@ -108,6 +141,7 @@ const rules: FormRules = {
 }
 
 const defaultItem = (): PurchaseItem => ({
+  materialId: undefined,
   materialName: '',
   unit: '公斤',
   quantity: 1,
@@ -131,14 +165,23 @@ const openCreate = () => {
   items.value = [defaultItem()]
   createDialogVisible.value = true
   loadSuppliers()
+  loadMaterials()
 }
 
 const handleCreate = async () => {
+  if (!sid.value) {
+    ElMessage.warning('请先选择食堂')
+    return
+  }
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  const validItems = items.value.filter((it) => it.materialName?.trim())
+  if (!form.value.supplierId || Number(form.value.supplierId) <= 0) {
+    ElMessage.warning('请选择供应商')
+    return
+  }
+  const validItems = items.value.filter((it) => it.materialId || it.materialName)
   if (validItems.length === 0) {
-    ElMessage.warning('请至少添加一条采购明细')
+    ElMessage.warning('请至少添加一条采购明细并选择或输入食材')
     return
   }
   for (const it of validItems) {
@@ -274,7 +317,12 @@ onMounted(fetchList)
   <Layout>
     <PageContainer title="采购管理" description="记录采购单、供应商与明细,支持入库/取消操作">
       <template #actions>
-        <ElButton type="primary" :icon="Plus" @click="openCreate">新增采购单</ElButton>
+        <ElButton
+          type="primary"
+          :icon="Plus"
+          :disabled="!sid"
+          @click="openCreate"
+        >新增采购单</ElButton>
       </template>
 
       <div
@@ -437,9 +485,25 @@ onMounted(fetchList)
           </div>
           <ElTable :data="items" border style="width: 100%" size="small">
             <ElTableColumn label="序号" type="index" width="55" align="center" />
-            <ElTableColumn label="食材名称" min-width="160">
+            <ElTableColumn label="食材" min-width="200">
               <template #default="{ row }">
-                <ElInput v-model="row.materialName" placeholder="如:大米" size="small" />
+                <ElSelect
+                  v-model="row.materialId"
+                  placeholder="选择或输入新食材"
+                  filterable
+                  allow-create
+                  default-first-option
+                  size="small"
+                  class="w-full"
+                  @change="(val: number | string) => onMaterialSelect(row as PurchaseItem, val)"
+                >
+                  <ElOption
+                    v-for="m in materials"
+                    :key="m.id"
+                    :label="m.name + (m.category ? ' (' + m.category + ')' : '')"
+                    :value="m.id as number"
+                  />
+                </ElSelect>
               </template>
             </ElTableColumn>
             <ElTableColumn label="单位" width="110">

@@ -13,6 +13,7 @@ import {
   formatDate,
 } from '@/composables/useFormat'
 import { mealBadgeStyle } from '@/composables/useMealConfig'
+import { useOrderConfig } from '@/composables/useOrderConfig'
 import { toChineseDate } from '@/utils/date'
 import type { Order } from '@/api/types'
 
@@ -20,6 +21,7 @@ defineOptions({ name: 'Orders' })
 
 const router = useRouter()
 const authStore = useAuthStore()
+const { loadConfig, isCancellableByDeadline } = useOrderConfig()
 
 const orders = ref<Order[]>([])
 const loading = ref(false)
@@ -181,12 +183,14 @@ const groupedOrders = computed<DateGroup[]>(() => {
       }
 
       const allPending = mealOrders.every((o) => o.status === 1)
+      // 还需检查是否在取消截止时间内(未来日期的订单受 cancel_deadline_time 限制)
+      const deadlineCancellable = isCancellableByDeadline(dateStr, new Date())
       meals.push({
         mealType: mt,
         mealName: formatMealTypeShort(mt),
         mealFullName: formatMealType(mt),
         rows,
-        cancellable: allPending,
+        cancellable: allPending && deadlineCancellable,
         subtotal: Math.round(subtotal * 100) / 100,
       })
     }
@@ -347,6 +351,8 @@ const onCancelMeal = (meal: MealGroup): void => {
 // ============ 生命周期 ============
 // Orders 未启用 keep-alive,每次进入都是全新挂载,保证每次进入都重新加载 + 滚到今天
 onMounted(() => {
+  // 加载后端订餐配置(取消截止时间等),供 isCancellableByDeadline 使用
+  loadConfig()
   // 入口:加载订单 → 滚到今天(过去日期在上方隐藏,今天在第一屏可见)
   loadOrders().then(() => scrollToToday())
 })

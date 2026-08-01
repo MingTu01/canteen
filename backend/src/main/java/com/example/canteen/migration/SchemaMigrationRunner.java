@@ -173,6 +173,27 @@ public class SchemaMigrationRunner {
             "ALTER TABLE store ADD COLUMN IF NOT EXISTS lunch_end VARCHAR(8)",
             "ALTER TABLE store ADD COLUMN IF NOT EXISTS dinner_start VARCHAR(8)",
             "ALTER TABLE store ADD COLUMN IF NOT EXISTS dinner_end VARCHAR(8)"
+        }),
+        new Migration("1.5.0", "add material_id to purchase_item for stock linkage", new String[] {
+            "ALTER TABLE purchase_item ADD COLUMN material_id BIGINT"
+        }),
+        new Migration("1.5.1", "add stock_count table for inventory stocktaking", new String[] {
+            "CREATE TABLE IF NOT EXISTS stock_count (" +
+            "  id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+            "  store_id BIGINT, " +
+            "  material_id BIGINT, " +
+            "  material_name VARCHAR(100), " +
+            "  system_qty DECIMAL(10,2), " +
+            "  counted_qty DECIMAL(10,2), " +
+            "  difference DECIMAL(10,2), " +
+            "  status INT DEFAULT 1, " +
+            "  operator_id BIGINT, " +
+            "  remark VARCHAR(500), " +
+            "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "  resolved_at TIMESTAMP" +
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_stock_count_store_status ON stock_count(store_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_stock_count_material ON stock_count(material_id)"
         })
     };
 }

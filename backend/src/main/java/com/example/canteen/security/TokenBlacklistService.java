@@ -90,10 +90,10 @@ public class TokenBlacklistService {
                     Integer.class, jti);
             return count != null && count > 0;
         } catch (Exception e) {
-            // 失败关闭:查询异常时视为已注销,拒绝请求。
-            // 代价是 DB 故障时所有请求被拒,但更安全(避免已注销 token 因 DB 不可用而复活)。
-            log.warn("黑名单查询失败,为安全起见拒绝请求: jti={}", jti, e);
-            return true;
+            // 失败开放:查询异常时视为未注销,放行请求。
+            // DB 抖动不应导致全站用户被踢登录;已注销 token 的 jti 在 DB 恢复后仍会被拦截。
+            log.warn("黑名单查询失败,放行请求(避免 DB 抖动踢出全站用户): jti={}", jti);
+            return false;
         }
     }
 

@@ -36,21 +36,25 @@ public class JwtAuthenticationFilter implements Filter {
     private final PasswordFreshnessValidator passwordFreshnessValidator;
     private final UnauthorizedResponseWriter unauthorizedResponseWriter;
     private final LoginRateLimiter rateLimiter;
+    private final AuthCookieUtil authCookieUtil;
 
-    public static final String COOKIE_NAME = "auth_token";
+    /** 旧版兼容 Cookie 名(实际 Cookie 管理已迁移到 AuthCookieUtil 各端独立名称) */
+    public static final String COOKIE_NAME = AuthCookieUtil.LEGACY_COOKIE_NAME;
 
     public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider,
                                    TokenBlacklistService tokenBlacklistService,
                                    WhitelistMatcher whitelistMatcher,
                                    PasswordFreshnessValidator passwordFreshnessValidator,
                                    UnauthorizedResponseWriter unauthorizedResponseWriter,
-                                   LoginRateLimiter rateLimiter) {
+                                   LoginRateLimiter rateLimiter,
+                                   AuthCookieUtil authCookieUtil) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.tokenBlacklistService = tokenBlacklistService;
         this.whitelistMatcher = whitelistMatcher;
         this.passwordFreshnessValidator = passwordFreshnessValidator;
         this.unauthorizedResponseWriter = unauthorizedResponseWriter;
         this.rateLimiter = rateLimiter;
+        this.authCookieUtil = authCookieUtil;
     }
 
     @Override
@@ -114,6 +118,30 @@ public class JwtAuthenticationFilter implements Filter {
             String deviceLabel = deviceLabelObj == null ? null : deviceLabelObj.toString();
             UserContextBinder.bind(httpRequest, userId, userId,
                     toLong(claims.get("storeId")), role, deviceLabel);
+
+            // 5. 滑动续期:token 剩余时间不足 1/4 时自动签发新 token 并刷新 cookie
+            //    这样活跃用户不会被登出(admin 24h / employee 30d / terminal 365d)
+            try {
+                Object expObj = claims.get("exp");
+                Date exp = null;
+                if (expObj instanceof Date d) {
+                    exp = d;
+                } else if (expObj instanceof Number n) {
+                    exp = new Date(n.longValue());
+                }
+                if (exp != null) {
+                    long remainingMs = exp.getTime() - System.currentTimeMillis();
+                    long ttlMs = jwtTokenProvider.getTtlByRole(role);
+                    // 剩余不足 1/4 TTL 时续期(避免每次请求都续期)
+                    if (remainingMs > 0 && remainingMs < ttlMs / 4) {
+                        String newToken = jwtTokenProvider.renewToken(claims);
+                        authCookieUtil.setCookieByRole(httpResponse, newToken, httpRequest, role);
+                    }
+                }
+            } catch (Exception renewEx) {
+                // 续期失败不影响当前请求,下次请求会再尝试
+                log.debug("Token 滑动续期失败: {}", renewEx.getMessage());
+            }
         } catch (Exception e) {
             log.warn("JWT 认证失败:path={}, msg={}", path, e.getMessage());
             unauthorizedResponseWriter.write(httpResponse, httpRequest,

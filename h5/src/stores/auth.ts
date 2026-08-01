@@ -10,7 +10,7 @@ import type { Employee } from '@/api/types'
  * 鉴权策略(与 admin-web / terminal 一致):
  * - token 由后端写入 HttpOnly Cookie,前端不存储。
  * - localStorage 缓存 employee 信息(刷新页面后恢复用户信息)。
- * - sessionStorage 缓存 isLoggedIn 标志(关闭浏览器标签后失效,需重新登录)。
+ * - localStorage 缓存 isLoggedIn 标志(只要不手动退出就保持登录,配合后端滑动续期实现永不失效)。
  *
  * 注:手动持久化,不依赖 pinia-plugin-persistedstate。
  */
@@ -28,10 +28,10 @@ const readEmployee = (): Employee | null => {
   }
 }
 
-/** 从 sessionStorage 读取登录标志 */
+/** 从 localStorage 读取登录标志(只要不手动退出就保持登录) */
 const readLoggedIn = (): boolean => {
   try {
-    return sessionStorage.getItem(LOGGED_IN_STORAGE_KEY) === '1'
+    return localStorage.getItem(LOGGED_IN_STORAGE_KEY) === '1'
   } catch {
     return false
   }
@@ -64,9 +64,9 @@ export const useAuthStore = defineStore('auth', () => {
   const persistLoggedIn = (flag: boolean) => {
     try {
       if (flag) {
-        sessionStorage.setItem(LOGGED_IN_STORAGE_KEY, '1')
+        localStorage.setItem(LOGGED_IN_STORAGE_KEY, '1')
       } else {
-        sessionStorage.removeItem(LOGGED_IN_STORAGE_KEY)
+        localStorage.removeItem(LOGGED_IN_STORAGE_KEY)
       }
     } catch {
       /* 忽略 */

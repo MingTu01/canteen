@@ -6,7 +6,7 @@
  * 数据来源:reportApi.finance
  * 依赖:storeId(来自父组件)
  */
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { ElDatePicker } from 'element-plus'
 import { Wallet, DollarSign, RotateCcw, ArrowDownUp } from 'lucide-vue-next'
 import StatCard from '@/components/StatCard.vue'
@@ -50,7 +50,11 @@ const fetchFinance = async (): Promise<void> => {
 }
 
 /* storeId 变化或挂载时自动 fetch */
-watch(() => props.storeId, fetchFinance, { immediate: true })
+watch(() => props.storeId, fetchFinance)
+
+onMounted(() => {
+  fetchFinance()
+})
 
 /* 暴露刷新方法供父组件 "刷新" 按钮调用 */
 defineExpose({ refresh: fetchFinance })

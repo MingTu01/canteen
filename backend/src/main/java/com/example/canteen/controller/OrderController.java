@@ -45,7 +45,7 @@ public class OrderController {
         this.rateLimiter = rateLimiter;
     }
 
-    @OperationLog("创建订单")
+    @OperationLog(value = "创建订单", detail = "'员工ID ' + #dto.employeeId + ' 餐次 ' + #dto.mealType + ' 日期 ' + #dto.date")
     @PostMapping
     public ApiResponse<Order> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
         // 多租户:订单只能创建到当前用户有权限的门店
@@ -171,7 +171,7 @@ public class OrderController {
         return ApiResponse.success(orderService.getOrderDetail(id));
     }
 
-    @OperationLog("完成订单")
+    @OperationLog(value = "完成订单", detail = "'订单ID ' + #id")
     @PutMapping("/{id}/complete")
     public ApiResponse<Void> completeOrder(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {
@@ -188,7 +188,7 @@ public class OrderController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog("取消订单")
+    @OperationLog(value = "取消订单", detail = "'订单ID ' + #id")
     @PutMapping("/{id}/cancel")
     public ApiResponse<Void> cancelOrder(@PathVariable Long id) {
         Order order = orderService.getOrderById(id);
@@ -202,7 +202,7 @@ public class OrderController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog("取餐核销")
+    @OperationLog(value = "取餐核销", detail = "'取餐码 ' + #body['pickupCode']")
     @PostMapping("/pickup")
     public ApiResponse<Void> pickup(@RequestBody Map<String, String> body) {
         // 取餐码核销限流:防止暴力枚举取餐码

@@ -30,13 +30,17 @@ interface Order {
   items?: OrderItem[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   mealType: number
   /** 订单数据,null 时渲染"未订餐"态 */
   order?: Order | null
   /** 是否正在取消该订单(禁用按钮) */
   canceling?: boolean
-}>()
+  /** 是否允许取消(由订餐截止配置驱动;过期订单隐藏取消按钮) */
+  cancellable?: boolean
+}>(), {
+  cancellable: true,
+})
 
 const emit = defineEmits<{ (e: 'cancel', order: Order): void }>()
 
@@ -105,8 +109,8 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
       <div class="order-card__no-items">暂无菜品明细</div>
     </div>
 
-    <!-- 取消按钮(仅待取餐 status=1 显示) -->
-    <div v-if="!isCompleted" class="order-card__footer">
+    <!-- 取消按钮(仅待取餐 status=1 且未过截止时间显示) -->
+    <div v-if="!isCompleted && cancellable" class="order-card__footer">
       <button
         class="order-card__cancel btn-press"
         :disabled="canceling"

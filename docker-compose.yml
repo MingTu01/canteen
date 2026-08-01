@@ -1,5 +1,25 @@
-# 全局默认:所有服务日志轮转,避免 Docker json-file 日志无限增长撑爆 40GB 系统盘
-# 单文件最大 50MB,最多保留 3 份(每服务约 150MB 上限)
+# =============================================================================
+# 企业智慧食堂系统 - 生产部署编排(卷映射模式)
+# =============================================================================
+# 设计要点:
+#   1. 所有服务使用官方基础镜像,不打包业务代码 → 更新时无需重建镜像
+#   2. 业务产物(jar/dist/nginx.conf)通过卷映射挂入容器 → 替换文件 + 重启即可
+#   3. 持久化数据(MySQL/Redis/uploads/backup)全部映射到宿主机
+#   4. 日志轮转 50m × 3,避免 Docker json-file 撑爆磁盘
+# =============================================================================
+#
+# 目录结构(由 deploy.sh / scripts/build.sh 自动创建):
+#   deploy/
+#   ├── backend/app.jar                 # 后端产物
+#   ├── admin-web/{html,nginx.conf}     # 管理后台产物
+#   ├── h5/{html,nginx.conf}            # H5 产物
+#   └── terminal/{html,nginx.conf}      # 终端产物
+#
+# 更新流程(不重建镜像):
+#   ./scripts/build.sh   # 重新构建产物到 deploy/
+#   docker compose restart backend admin-web h5 terminal
+# =============================================================================
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -7,7 +27,7 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-  # MySQL 数据库
+  # ---------- MySQL 数据库 ----------
   mysql:
     image: mysql:8.0
     container_name: canteen-mysql
@@ -38,7 +58,7 @@ services:
     networks:
       - canteen-net
 
-  # Redis 缓存
+  # ---------- Redis 缓存 ----------
   redis:
     image: redis:7-alpine
     container_name: canteen-redis
@@ -57,11 +77,15 @@ services:
     networks:
       - canteen-net
 
-  # 后端 Spring Boot
+  # ---------- 后端 Spring Boot ----------
+  # 使用基础 JRE 镜像,app.jar 通过卷映射挂入
+  # 更新后端:./scripts/build.sh backend && docker compose restart backend
   backend:
+    # 运行时基础镜像:仅含 JRE + curl,首次部署构建一次,后续更新无需重建
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.runtime
+    image: canteen-backend-runtime:latest
     container_name: canteen-backend
     restart: always
     logging: *default-logging
@@ -74,43 +98,45 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/canteen?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-canteen2026}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: canteen
+      DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-canteen2026}
       DB_ALLOW_PUBLIC_KEY: "true"
       DB_USESSL: "false"
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PORT: 6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:-canteen-jwt-secret-key-2026-please-change-in-production}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      JWT_EMPLOYEE_EXPIRATION: ${JWT_EMPLOYEE_EXPIRATION:-2592000000}
       JWT_TERMINAL_EXPIRATION: ${JWT_TERMINAL_EXPIRATION:-31536000000}
-      # 备份目录:与下方 ./backup:/app/backup 挂载对齐(BackupService 读取 BACKUP_DIR 环境变量)
       BACKUP_DIR: /app/backup
       TZ: Asia/Shanghai
-      # 显式激活生产 profile:启用 application-prod.yml,排除 @Profile("dev") 的 TestController
       SPRING_PROFILES_ACTIVE: prod
     ports:
-      # 绑定 0.0.0.0 让局域网内的 X86 终端设备可以访问后端 API
-      # (终端 Tauri 应用通过 http://<服务器IP>:8080 调用)
+      # 绑定 0.0.0.0 让局域网 X86 终端可访问
       - "8080:8080"
     healthcheck:
-      # 容器内仅安装 curl(无 wget),使用 curl 健康检查白名单接口 /api/system/health
       test: ["CMD-SHELL", "curl -fs -o /dev/null http://localhost:8080/api/system/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 60s
     volumes:
+      # 业务产物:jar 通过卷映射,更新只需替换文件 + 重启
+      - ./deploy/backend/app.jar:/app/app.jar:ro
+      # 持久化目录
       - ./backup:/app/backup
-      # 上传文件持久化:FileController 写入 ./uploads/(容器内 /app/uploads/),
-      # 必须挂载到主机,否则容器重启/重建后所有上传的图片丢失
       - ./uploads:/app/uploads
     networks:
       - canteen-net
 
-  # 管理后台前端
+  # ---------- 管理后台前端 ----------
+  # 使用基础 nginx 镜像,dist + nginx.conf 通过卷映射挂入
+  # 更新前端:./scripts/build.sh admin-web && docker compose restart admin-web
   admin-web:
-    build:
-      context: ./admin-web
-      dockerfile: Dockerfile
+    image: nginx:alpine
     container_name: canteen-admin
     restart: always
     logging: *default-logging
@@ -119,14 +145,15 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
+    volumes:
+      - ./deploy/admin-web/html:/usr/share/nginx/html:ro
+      - ./deploy/admin-web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - canteen-net
 
-  # H5 订餐端(后续接入公众号)
+  # ---------- H5 订餐端 ----------
   h5:
-    build:
-      context: ./h5
-      dockerfile: Dockerfile
+    image: nginx:alpine
     container_name: canteen-h5
     restart: always
     logging: *default-logging
@@ -135,14 +162,15 @@ services:
         condition: service_healthy
     ports:
       - "81:80"
+    volumes:
+      - ./deploy/h5/html:/usr/share/nginx/html:ro
+      - ./deploy/h5/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - canteen-net
 
-  # X86终端
+  # ---------- X86 终端前端 ----------
   terminal:
-    build:
-      context: ./terminal
-      dockerfile: Dockerfile
+    image: nginx:alpine
     container_name: canteen-terminal
     restart: always
     logging: *default-logging
@@ -151,6 +179,9 @@ services:
         condition: service_healthy
     ports:
       - "82:80"
+    volumes:
+      - ./deploy/terminal/html:/usr/share/nginx/html:ro
+      - ./deploy/terminal/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - canteen-net
 

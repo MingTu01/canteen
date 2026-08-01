@@ -72,7 +72,7 @@ const menuItems: MenuItem[] = [
   { path: '/notification', name: '通知管理', icon: Megaphone, roles: [1, 2, 6] },
   { path: '/supplier', name: '供应商管理', icon: Truck, roles: [1, 2, 5, 6] },
   { path: '/purchase', name: '采购管理', icon: ShoppingCart, roles: [1, 2, 5, 6] },
-  { path: '/material', name: '库存食材', icon: Package, roles: [1, 2, 5, 6] },
+  { path: '/material', name: '库存管理', icon: Package, roles: [1, 2, 5, 6] },
   { path: '/feedback', name: '反馈评价', icon: MessageSquare, roles: [1, 2, 6] },
   { path: '/group-order', name: '团体订餐', icon: Users, roles: [1, 2, 6] },
   { path: '/report', name: '报表统计', icon: BarChart3, roles: [1, 2, 4, 6] },

@@ -98,6 +98,7 @@ export interface DishCategory {
 export interface DishQuery extends PageQuery {
   storeId: number
   category?: string
+  mealType?: number
   status?: number
   isNew?: number
 }
@@ -680,6 +681,8 @@ export interface Purchase {
 export interface PurchaseItem {
   id?: number
   purchaseId?: number
+  /** 关联食材ID(入库时自动增加该食材库存) */
+  materialId?: number
   materialName: string
   unit?: string
   quantity: number
@@ -723,6 +726,23 @@ export interface MaterialQuery extends PageQuery {
   storeId: number
   /** true=仅显示预警 */
   lowStock?: boolean
+}
+
+/** 库存盘点记录 */
+export interface StockCount {
+  id?: number
+  storeId?: number
+  materialId?: number
+  materialName?: string
+  systemQty?: number
+  countedQty?: number
+  difference?: number
+  /** 1=待处理 2=已处理 */
+  status?: number
+  operatorId?: number
+  remark?: string
+  createdAt?: string
+  resolvedAt?: string
 }
 
 /* ============================================================

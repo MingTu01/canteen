@@ -6,11 +6,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.canteen.dto.PurchaseCreateDTO;
 import com.example.canteen.dto.PurchaseDetailDTO;
 import com.example.canteen.entity.Admin;
+import com.example.canteen.entity.Material;
 import com.example.canteen.entity.Purchase;
 import com.example.canteen.entity.PurchaseItem;
 import com.example.canteen.entity.Supplier;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.mapper.AdminMapper;
+import com.example.canteen.mapper.MaterialMapper;
 import com.example.canteen.mapper.PurchaseItemMapper;
 import com.example.canteen.mapper.PurchaseMapper;
 import com.example.canteen.mapper.SupplierMapper;
@@ -38,15 +40,18 @@ public class PurchaseService {
     private final PurchaseItemMapper purchaseItemMapper;
     private final SupplierMapper supplierMapper;
     private final AdminMapper adminMapper;
+    private final MaterialMapper materialMapper;
 
     public PurchaseService(PurchaseMapper purchaseMapper,
                            PurchaseItemMapper purchaseItemMapper,
                            SupplierMapper supplierMapper,
-                           AdminMapper adminMapper) {
+                           AdminMapper adminMapper,
+                           MaterialMapper materialMapper) {
         this.purchaseMapper = purchaseMapper;
         this.purchaseItemMapper = purchaseItemMapper;
         this.supplierMapper = supplierMapper;
         this.adminMapper = adminMapper;
+        this.materialMapper = materialMapper;
     }
 
     /**
@@ -192,9 +197,10 @@ public class PurchaseService {
 
     /**
      * 更新采购单状态(入库/取消)
-     * - 入库:仅待入库可入库
+     * - 入库:仅待入库可入库,入库时自动增加对应食材库存
      * - 取消:仅待入库可取消
      */
+    @Transactional
     public Purchase updateStatus(Long id, int targetStatus) {
         Purchase existing = purchaseMapper.selectById(id);
         if (existing == null) {
@@ -207,6 +213,39 @@ public class PurchaseService {
         if (targetStatus != STATUS_INBOUND && targetStatus != STATUS_CANCELLED) {
             throw new BusinessException("非法的目标状态");
         }
+
+        // 入库:自动增加对应食材库存;若明细无 materialId(新物品),则创建新库存记录
+        if (targetStatus == STATUS_INBOUND) {
+            List<PurchaseItem> items = purchaseItemMapper.selectList(
+                    new LambdaQueryWrapper<PurchaseItem>()
+                            .eq(PurchaseItem::getPurchaseId, id));
+            for (PurchaseItem item : items) {
+                if (item.getMaterialId() != null) {
+                    // 已有食材:增加库存
+                    Material material = materialMapper.selectById(item.getMaterialId());
+                    if (material != null && material.getStoreId().equals(existing.getStoreId())) {
+                        BigDecimal currentStock = material.getStockQty() == null
+                                ? BigDecimal.ZERO : material.getStockQty();
+                        material.setStockQty(currentStock.add(item.getQuantity()));
+                        materialMapper.updateById(material);
+                    }
+                } else if (item.getMaterialName() != null && !item.getMaterialName().isBlank()) {
+                    // 新物品:创建库存记录,初始库存 = 采购数量
+                    Material newMaterial = new Material();
+                    newMaterial.setStoreId(existing.getStoreId());
+                    newMaterial.setName(item.getMaterialName());
+                    newMaterial.setUnit(item.getUnit() != null ? item.getUnit() : "公斤");
+                    newMaterial.setStockQty(item.getQuantity());
+                    newMaterial.setMinStock(BigDecimal.ZERO);
+                    newMaterial.setCategory("其他");
+                    materialMapper.insert(newMaterial);
+                    // 回填 materialId 到采购明细
+                    item.setMaterialId(newMaterial.getId());
+                    purchaseItemMapper.updateById(item);
+                }
+            }
+        }
+
         existing.setStatus(targetStatus);
         purchaseMapper.updateById(existing);
         return existing;

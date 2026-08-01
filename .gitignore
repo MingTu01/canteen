@@ -45,6 +45,9 @@ _*.py
 _*.sql
 canteen-mysqldump-err.log
 
+# 构建产物输出目录(由 scripts/build.sh 生成,卷映射到容器)
+deploy/
+
 # Python Shell 运行时数据(IndexedDB/Local Storage/缓存等)
 src-python/data/
 src-python/build/

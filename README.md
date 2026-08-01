@@ -1,8 +1,24 @@
 # 企业智慧食堂预定餐系统
 
-> 版本：V0.0.1 ｜ 更新日期：2026-07-30
+> 版本：V1.0 ｜ 更新日期：2026-08-01
 
 集团级企业智慧食堂预定餐系统，支持多门店数据隔离、多端适配（管理后台、H5 订餐端、X86 终端），采用企业级架构标准。
+
+## 快速部署（生产环境）
+
+```bash
+# 国内推荐使用 GitHub 加速器克隆（任选其一）
+git clone https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+cd /opt/canteen
+
+# 一键部署（自动安装 Docker + 国内源 + 构建 + 启动）
+chmod +x deploy.sh
+sudo ./deploy.sh
+```
+
+部署完成后访问 `http://服务器IP`，默认账号 `admin / 123456`。
+
+> 详细部署与更新流程见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 ## 技术栈
 
@@ -32,7 +48,7 @@ canteen/
 │   │   ├── config/             # 配置类
 │   │   └── migration/          # SchemaMigrationRunner 增量补丁
 │   ├── src/main/resources/
-│   │   ├── db/migration/       # Flyway 迁移脚本 V1~V13
+│   │   ├── db/migration/       # Flyway 迁移脚本 V1~V14
 │   │   ├── mapper/             # MyBatis XML
 │   │   ├── application.yml     # 主配置
 │   │   ├── application-dev.yml # H2 dev profile
@@ -40,35 +56,22 @@ canteen/
 │   │   ├── schema-h2.sql       # H2 dev 建表脚本
 │   │   └── version.json        # 版本信息
 │   ├── src/test/               # 单元测试
-│   ├── Dockerfile
+│   ├── Dockerfile              # 完整构建镜像（备用方案）
+│   ├── Dockerfile.runtime      # 运行时基础镜像（卷映射模式用）
 │   └── pom.xml
 ├── admin-web/                  # 管理后台 (Vue 3)
 ├── h5/                         # H5 订餐端
 ├── terminal/                   # X86 终端前端 (Vue 3)
 ├── src-python/                 # X86 终端桌面壳 (Python + PyQt5)
-│   ├── main.py                 # 主入口（QApplication + 窗口 + Mutex 单实例）
-│   ├── config.py               # config.json 读写（支持 // 注释）
-│   ├── server.py               # 本地 HTTP 服务器（静态文件 + /__api__/* 端点）
-│   ├── bridge.py               # Shell 桥接（pyqtSignal 跨线程通信）
-│   ├── card_reader.py          # 读卡器集成（ctypes 调 OUR_IDR.dll）
-│   ├── canteen-terminal.spec   # PyInstaller 打包配置
-│   ├── OUR_IDR.dll             # 读卡器 SDK
-│   ├── IDUSB.DLL               # 读卡器依赖库
-│   └── config.json             # 终端配置（首次运行自动生成）
 ├── scripts/                    # 运维脚本
+│   ├── build.sh                # 构建产物脚本（Docker 容器中构建）
+│   ├── update.sh               # 更新脚本（pull + build + restart）
 │   ├── backup.sh               # 数据库备份
 │   ├── restore.sh              # 数据库恢复
-│   ├── cron_backup.sh          # 定时备份入口
-│   ├── upgrade.sh              # 一键升级
-│   └── seed-dev.sql            # 本机开发测试数据
+│   └── cron_backup.sh          # 定时备份入口
 ├── docs/                       # 需求文档（各端完整说明）
-│   ├── 01-后端服务.md
-│   ├── 02-管理后台.md
-│   ├── 03-H5订餐端.md
-│   ├── 04-X86终端.md
-│   └── 05-PythonShell.md
-├── docker-compose.yml          # Docker 编排（含日志轮转）
-├── deploy.sh                   # 一键部署
+├── docker-compose.yml          # Docker 编排（卷映射模式，更新无需重建镜像）
+├── deploy.sh                   # 一键部署（含 Docker 安装 + 国内源）
 ├── DEPLOYMENT.md               # 部署方案与更新流程
 ├── .env.example                # 环境变量模板
 └── .gitignore
@@ -91,18 +94,35 @@ canteen/
 ### 一键部署（生产环境）
 
 ```bash
-# 1. 克隆项目
-git clone <仓库地址> /opt/canteen
+# 1. 克隆项目（国内使用 GitHub 加速器）
+git clone https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
-# 2. 配置环境变量
-cp .env.example .env
-vim .env   # 修改数据库密码与 JWT 密钥
-
-# 3. 部署（Flyway 自动建表,初始仅有默认超管 admin/123456）
+# 2. 一键部署（自动安装 Docker + 配置国内源 + 构建 + 启动）
 chmod +x deploy.sh
-./deploy.sh
+sudo ./deploy.sh
 ```
+
+部署脚本会自动完成：Docker 安装 → 镜像加速器配置 → 环境变量生成 → 构建产物 → 启动服务 → 健康检查。
+
+> 已安装 Docker 的服务器可使用 `./deploy.sh --skip-env` 跳过环境安装。
+
+### 更新服务（不重建镜像）
+
+```bash
+cd /opt/canteen
+
+# 更新全部
+./scripts/update.sh
+
+# 仅更新后端
+./scripts/update.sh backend
+
+# 仅更新前端
+./scripts/update.sh admin-web    # 或 h5 / terminal
+```
+
+更新脚本自动完成：`git pull` → 在 Docker 容器中构建产物 → 重启对应服务。**全程不涉及镜像重建**。
 
 ### 本机开发（恢复测试数据）
 
@@ -216,6 +236,9 @@ docker compose ps                        # 服务状态
 docker compose logs -f backend           # 后端日志
 docker compose restart backend          # 重启后端
 docker compose down                      # 停止全部
-docker compose up -d --build backend     # 重建后端
-./scripts/upgrade.sh                     # 一键升级
+./scripts/build.sh backend              # 重新构建后端产物
+./scripts/build.sh admin-web            # 重新构建管理后台产物
+./scripts/update.sh                     # 一键更新（pull + build + restart）
+./scripts/backup.sh                     # 数据备份
+./scripts/restore.sh backup/<file>      # 数据恢复
 ```

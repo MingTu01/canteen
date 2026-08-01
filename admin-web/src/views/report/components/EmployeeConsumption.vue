@@ -6,7 +6,7 @@
  * 数据来源:reportApi.employeeConsumption
  * 依赖:storeId(来自父组件)
  */
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { ElDatePicker, ElTable, ElTableColumn } from 'element-plus'
 import { Users } from 'lucide-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
@@ -47,7 +47,11 @@ const fetchEmployeeConsumption = async (): Promise<void> => {
   }
 }
 
-watch(() => props.storeId, fetchEmployeeConsumption, { immediate: true })
+watch(() => props.storeId, fetchEmployeeConsumption)
+
+onMounted(() => {
+  fetchEmployeeConsumption()
+})
 
 defineExpose({ refresh: fetchEmployeeConsumption })
 </script>

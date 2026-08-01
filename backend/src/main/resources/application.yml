@@ -74,8 +74,10 @@ mybatis-plus:
 # C2 JWT 密钥与过期时间环境变量化(未配置 JWT_SECRET 即启动失败,避免使用默认密钥)
 jwt:
   secret: ${JWT_SECRET}
-  # 管理员/员工 token 过期时间(24 小时)
+  # 管理员 token 过期时间(24 小时)
   expiration: ${JWT_EXPIRATION:86400000}
+  # 员工 token 过期时间(默认 30 天,H5 长期登录不失效)
+  employee-expiration: ${JWT_EMPLOYEE_EXPIRATION:2592000000}
   # 终端 token 过期时间(默认 365 天,避免 7x24 终端频繁失绑)
   terminal-expiration: ${JWT_TERMINAL_EXPIRATION:31536000000}
 

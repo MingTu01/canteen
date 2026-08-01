@@ -279,6 +279,82 @@ public class MenuService {
         return count;
     }
 
+    /**
+     * 批量发布日期范围内所有菜单。
+     * @return {published: 发布餐次数, skipped: 无菜单跳过天数, days: 实际发布天数}
+     */
+    @Transactional
+    public Map<String, Object> batchPublishMenu(Long storeId, LocalDate startDate, LocalDate endDate) {
+        SecurityContext.checkStoreAccess(storeId);
+        if (startDate.isAfter(endDate)) {
+            throw new BusinessException("开始日期不能晚于结束日期");
+        }
+        int publishedCount = 0;
+        int daysPublished = 0;
+        int daysSkipped = 0;
+        LocalDate cur = startDate;
+        while (!cur.isAfter(endDate)) {
+            List<Menu> menus = menuMapper.selectByStoreDate(storeId, cur);
+            if (menus == null || menus.isEmpty()) {
+                daysSkipped++;
+            } else {
+                int dayCount = 0;
+                for (Menu menu : menus) {
+                    if (menu.getPublished() == null || menu.getPublished() == 0) {
+                        menu.setPublished(1);
+                        menuMapper.updateById(menu);
+                        publishedCount++;
+                        dayCount++;
+                    }
+                }
+                if (dayCount > 0) {
+                    daysPublished++;
+                }
+                cacheEvictMenu(storeId, cur);
+                broadcastMenuChanged(storeId, cur, null);
+            }
+            cur = cur.plusDays(1);
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("published", publishedCount);
+        result.put("daysPublished", daysPublished);
+        result.put("daysSkipped", daysSkipped);
+        return result;
+    }
+
+    /**
+     * 发布该门店所有未发布的菜单(无需指定日期范围)。
+     */
+    @Transactional
+    public Map<String, Object> publishAllUnpublished(Long storeId) {
+        SecurityContext.checkStoreAccess(storeId);
+        // 查询该门店所有未发布的菜单(published=0 或 published IS NULL)
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Menu> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Menu>()
+                        .eq(Menu::getStoreId, storeId)
+                        .and(w -> w.eq(Menu::getPublished, 0).or().isNull(Menu::getPublished));
+        List<Menu> unpublished = menuMapper.selectList(wrapper);
+        int publishedCount = 0;
+        java.util.Set<LocalDate> publishedDates = new java.util.HashSet<>();
+        for (Menu menu : unpublished) {
+            menu.setPublished(1);
+            menuMapper.updateById(menu);
+            publishedCount++;
+            if (menu.getDate() != null) {
+                publishedDates.add(menu.getDate());
+            }
+        }
+        // 清缓存 + 广播
+        for (LocalDate date : publishedDates) {
+            cacheEvictMenu(storeId, date);
+            broadcastMenuChanged(storeId, date, null);
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("published", publishedCount);
+        result.put("daysPublished", publishedDates.size());
+        return result;
+    }
+
     @Transactional
     public int copyMenu(MenuCopyDTO dto) {
         Long storeId = dto.getStoreId();

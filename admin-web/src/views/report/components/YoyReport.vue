@@ -6,7 +6,7 @@
  * 数据来源:reportApi.yoy
  * 依赖:storeId(来自父组件)
  */
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { ElDatePicker, ElTable, ElTableColumn } from 'element-plus'
 import EmptyState from '@/components/EmptyState.vue'
 import { useEcharts } from '@/composables/useEcharts'
@@ -76,7 +76,11 @@ const fetchYoy = async (): Promise<void> => {
   }
 }
 
-watch(() => props.storeId, fetchYoy, { immediate: true })
+watch(() => props.storeId, fetchYoy)
+
+onMounted(() => {
+  fetchYoy()
+})
 
 defineExpose({ refresh: fetchYoy })
 

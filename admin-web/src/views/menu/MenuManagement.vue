@@ -25,7 +25,7 @@ import {
   ElRadioGroup,
   ElRadioButton,
 } from 'element-plus'
-import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Save, Send } from 'lucide-vue-next'
+import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Send } from 'lucide-vue-next'
 import { todayStr } from '@/utils/date'
 import { normalizeList } from '@/utils/list'
 
@@ -174,7 +174,7 @@ const handleSave = async () => {
       mealType: form.value.mealType,
       dishIds: form.value.dishIds,
     })
-    ElMessage.success('菜单发布成功')
+    ElMessage.success('菜品添加成功')
     dialogVisible.value = false
     await fetchDayMenus()
     await fetchMenuDates()
@@ -202,43 +202,6 @@ const handleDelete = async (mwi: MenuWithItems) => {
     await fetchMenuDates()
   } catch {
     /* 拦截器提示 */
-  }
-}
-
-// ===== 保存当天菜单 =====
-const dayMenuSaving = ref(false)
-
-const handleSaveDayMenu = async () => {
-  const sid = storeId.value
-  if (!sid || !selectedDate.value) {
-    ElMessage.warning('请先选择日期')
-    return
-  }
-  if (dayMenus.value.length === 0) {
-    ElMessage.warning('当天无菜单可保存,请先发布菜单')
-    return
-  }
-  dayMenuSaving.value = true
-  try {
-    // 重新保存每个餐次的菜单(createMenu 内部会覆盖已存在的同日同餐次菜单)
-    for (const mwi of dayMenus.value) {
-      const dishIds = (mwi.items?.map((it) => it.item?.dishId).filter(Boolean) as number[]) || []
-      if (dishIds.length > 0) {
-        await menuApi.create({
-          storeId: sid,
-          date: selectedDate.value,
-          mealType: mwi.menu.mealType,
-          dishIds,
-        })
-      }
-    }
-    ElMessage.success('当天菜单已保存')
-    await fetchDayMenus()
-    await fetchMenuDates()
-  } catch {
-    /* 拦截器提示 */
-  } finally {
-    dayMenuSaving.value = false
   }
 }
 
@@ -284,6 +247,32 @@ const handlePublish = async () => {
     /* 拦截器提示 */
   } finally {
     publishing.value = false
+  }
+}
+
+// ===== 批量发布菜单 =====
+const openBatchPublish = async () => {
+  const sid = storeId.value
+  if (!sid) {
+    ElMessage.warning('请先选择食堂')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '确定要发布所有未发布的菜单吗？发布后员工端将可以看到并点菜。',
+      '批量发布确认',
+      { type: 'warning', confirmButtonText: '确认发布', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const res = await menuApi.batchPublish(sid)
+    ElMessage.success(`批量发布完成,共发布 ${res?.published ?? 0} 个餐次,涉及 ${res?.daysPublished ?? 0} 天`)
+    await fetchDayMenus()
+    await fetchMenuDates()
+  } catch {
+    /* 拦截器提示 */
   }
 }
 
@@ -654,7 +643,7 @@ onMounted(() => {
     <PageContainer title="菜单管理" description="按日期编排每日早、中、晚三餐菜品,支持月历快速切换与菜单复制。">
       <template #actions>
         <ElButton v-if="isSuperAdmin" :icon="Settings" @click="openOrderConfig">订餐配置</ElButton>
-        <ElButton type="primary" :icon="Send" @click="openCreate()">发布菜单</ElButton>
+        <ElButton type="primary" :icon="Send" @click="openBatchPublish">批量发布</ElButton>
       </template>
 
       <div
@@ -789,17 +778,6 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 保存当天菜单按钮 -->
-          <ElButton
-            type="success"
-            :icon="Save"
-            :loading="dayMenuSaving"
-            class="w-full"
-            @click="handleSaveDayMenu"
-          >
-            保存当天菜单（{{ selectedDate }}）
-          </ElButton>
-
           <!-- 批量复制菜单卡片 -->
           <div class="rounded-xl border border-border bg-card p-4 shadow-sm">
             <div class="mb-3 text-sm font-medium text-text">批量复制菜单</div>
@@ -912,10 +890,10 @@ onMounted(() => {
         </template>
       </ElDialog>
 
-      <!-- 发布/编辑菜单弹窗 -->
+      <!-- 添加菜品弹窗 -->
       <ElDialog
         v-model="dialogVisible"
-        title="发布菜单"
+        title="添加菜品"
         width="680px"
         :close-on-click-modal="false"
         append-to-body
@@ -956,7 +934,7 @@ onMounted(() => {
         <template #footer>
           <div class="flex justify-end gap-3">
             <ElButton @click="dialogVisible = false">取消</ElButton>
-            <ElButton type="primary" :loading="saving" @click="handleSave">发布菜单</ElButton>
+            <ElButton type="primary" :loading="saving" @click="handleSave">添加</ElButton>
           </div>
         </template>
       </ElDialog>

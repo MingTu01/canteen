@@ -1,4 +1,4 @@
-import { reactive, ref, shallowRef } from 'vue'
+import { reactive, ref } from 'vue'
 import type { Reactive, Ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -123,9 +123,11 @@ export function useCrud<
   const dialogLoading = ref(false)
   const isEdit = ref(false)
   const formRef = ref<FormInstance>()
-  const form: Ref<T> = shallowRef(
+  // 使用 ref(深度响应式)而非 shallowRef:表单 v-model 需要响应式更新对象内部属性,
+  // shallowRef 对属性变化不触发更新,会导致输入卡顿 + 表单校验读到旧值
+  const form: Ref<T> = ref(
     (config.defaultForm?.() ?? ({} as T)) as T
-  )
+  ) as Ref<T>
 
   const handleCreate = (): void => {
     isEdit.value = false
@@ -171,6 +173,10 @@ export function useCrud<
   const handleDelete = async (id: number): Promise<void> => {
     const { remove, confirmDelete = true } = config
     if (!remove) return
+    if (id == null || (typeof id === 'number' && isNaN(id))) {
+      ElMessage.error('无法删除:记录ID无效')
+      return
+    }
 
     if (confirmDelete) {
       try {
@@ -192,8 +198,9 @@ export function useCrud<
       await remove(id)
       ElMessage.success('删除成功')
       fetchList()
-    } catch {
-      /* 错误已由 axios 拦截器统一提示 */
+    } catch (e) {
+      // 错误已由 axios 拦截器统一提示
+      console.error('删除失败:', e)
     }
   }
 

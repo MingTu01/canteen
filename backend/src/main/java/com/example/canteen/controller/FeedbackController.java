@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.annotation.OperationLog;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.entity.Feedback;
@@ -79,12 +80,14 @@ public class FeedbackController {
     }
 
     /** 创建(H5 端员工提交) */
+    @OperationLog(value = "创建反馈", detail = "'员工ID ' + #feedback.employeeId + ' 分类 ' + #feedback.category")
     @PostMapping
     public ApiResponse<Feedback> create(@RequestBody Feedback feedback) {
         return ApiResponse.success(feedbackService.createFeedback(feedback));
     }
 
     /** 管理员回复 */
+    @OperationLog(value = "回复反馈", detail = "'反馈ID ' + #id + ' 回复 ' + #body['reply']")
     @PutMapping("/{id}/reply")
     public ApiResponse<Feedback> reply(@PathVariable Long id, @RequestBody Map<String, String> body) {
         if (SecurityContext.isEmployee()) {
@@ -96,6 +99,7 @@ public class FeedbackController {
     }
 
     /** 更新状态(标记已处理/已忽略) */
+    @OperationLog(value = "更新反馈状态", detail = "'反馈ID ' + #id + ' 状态 ' + #body['status']")
     @PutMapping("/{id}/status")
     public ApiResponse<Feedback> updateStatus(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
         if (SecurityContext.isEmployee()) {
@@ -109,6 +113,7 @@ public class FeedbackController {
     }
 
     /** 删除 */
+    @OperationLog(value = "删除反馈", detail = "'反馈ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

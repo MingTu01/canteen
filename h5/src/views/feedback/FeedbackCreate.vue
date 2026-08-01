@@ -53,8 +53,8 @@ const rateText = computed(() => {
   }
 })
 
-/** 内容长度校验:至少 10 字 */
-const contentValid = computed(() => form.content.trim().length >= 10)
+/** 内容长度校验:至少 1 字 */
+const contentValid = computed(() => form.content.trim().length >= 1)
 const canSubmit = computed(() => form.rating > 0 && contentValid.value)
 
 // ============ 关联订单选择 ============
@@ -116,7 +116,7 @@ const onSubmit = async (): Promise<void> => {
     return
   }
   if (!contentValid.value) {
-    showFailToast('反馈内容至少 10 字')
+    showFailToast('请输入反馈内容')
     return
   }
   loading.value = true
@@ -224,7 +224,7 @@ const onBack = (): void => {
       <div class="card feedback-create__section">
         <div class="feedback-create__section-title">
           反馈内容
-          <span class="feedback-create__section-hint">(至少 10 字)</span>
+          <span class="feedback-create__section-hint">(至少 1 字)</span>
         </div>
         <van-field
           v-model="form.content"

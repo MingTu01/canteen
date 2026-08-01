@@ -6,7 +6,7 @@
  * 数据来源:reportApi.mom
  * 依赖:storeId(来自父组件)
  */
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { ElDatePicker, ElTable, ElTableColumn } from 'element-plus'
 import EmptyState from '@/components/EmptyState.vue'
 import { useEcharts } from '@/composables/useEcharts'
@@ -77,7 +77,11 @@ const fetchMom = async (): Promise<void> => {
   }
 }
 
-watch(() => props.storeId, fetchMom, { immediate: true })
+watch(() => props.storeId, fetchMom)
+
+onMounted(() => {
+  fetchMom()
+})
 
 defineExpose({ refresh: fetchMom })
 

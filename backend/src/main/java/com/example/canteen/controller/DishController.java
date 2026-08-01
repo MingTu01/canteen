@@ -55,7 +55,8 @@ public class DishController {
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "10") int size,
                                                             @RequestParam(required = false) String keyword,
-                                                            @RequestParam(required = false) String category) {
+                                                            @RequestParam(required = false) String category,
+                                                            @RequestParam(required = false) Integer mealType) {
         SecurityContext.checkStoreAccess(storeId);
         LambdaQueryWrapper<Dish> wrapper = new LambdaQueryWrapper<Dish>()
                 .eq(Dish::getStoreId, storeId)
@@ -66,6 +67,10 @@ public class DishController {
         }
         if (category != null && !category.isBlank()) {
             wrapper.eq(Dish::getCategory, category);
+        }
+        if (mealType != null) {
+            // mealTypes 是逗号分隔的字符串(如 "1,2,3"),用 FIND_IN_SET 过滤
+            wrapper.apply("FIND_IN_SET({0}, meal_types) > 0", mealType);
         }
         IPage<Dish> p = dishMapper.selectPage(new Page<>(page, size), wrapper);
         Map<String, Object> result = new HashMap<>();
@@ -117,7 +122,7 @@ public class DishController {
         return ApiResponse.success(dish);
     }
 
-    @OperationLog("创建菜品")
+    @OperationLog(value = "创建菜品", detail = "'菜品 ' + #dish.name + ' 价格 ' + #dish.price")
     @PostMapping
     public ApiResponse<Dish> createDish(@RequestBody Dish dish) {
         if (!SecurityContext.canManageDish()) {
@@ -127,7 +132,7 @@ public class DishController {
         return ApiResponse.success(dishService.createDish(dish));
     }
 
-    @OperationLog("更新菜品")
+    @OperationLog(value = "更新菜品", detail = "'菜品ID ' + #id + ' 名称 ' + #dish.name")
     @PutMapping("/{id}")
     public ApiResponse<Dish> updateDish(@PathVariable Long id, @RequestBody Dish dish) {
         if (!SecurityContext.canManageDish()) {
@@ -138,7 +143,7 @@ public class DishController {
         return ApiResponse.success(dishService.updateDish(dish));
     }
 
-    @OperationLog("删除菜品")
+    @OperationLog(value = "删除菜品", detail = "'菜品ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
@@ -153,6 +158,7 @@ public class DishController {
         return ApiResponse.success(null);
     }
 
+    @OperationLog(value = "菜品上下架", detail = "'菜品ID ' + #id")
     @PutMapping("/{id}/toggle-status")
     public ApiResponse<Void> toggleStatus(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
@@ -169,6 +175,7 @@ public class DishController {
 
     // ==================== 批量操作 ====================
 
+    @OperationLog(value = "批量修改菜品状态", detail = "'菜品数量 ' + #req.dishIds.size() + ' 状态 ' + (#req.status == 1 ? '上架' : '下架')")
     @PutMapping("/batch/status")
     public ApiResponse<Map<String, Object>> batchUpdateStatus(@RequestBody BatchStatusRequest req) {
         if (!SecurityContext.canManageDish()) {
@@ -183,6 +190,7 @@ public class DishController {
         return ApiResponse.success(result);
     }
 
+    @OperationLog(value = "批量修改菜品分类", detail = "'菜品数量 ' + #req.dishIds.size() + ' 分类 ' + #req.category")
     @PutMapping("/batch/category")
     public ApiResponse<Map<String, Object>> batchUpdateCategory(@RequestBody BatchCategoryRequest req) {
         if (!SecurityContext.canManageDish()) {
@@ -194,6 +202,7 @@ public class DishController {
         return ApiResponse.success(result);
     }
 
+    @OperationLog(value = "批量删除菜品", detail = "'菜品数量 ' + #req.dishIds.size()")
     @DeleteMapping("/batch")
     public ApiResponse<Map<String, Object>> batchDelete(@RequestBody BatchDeleteRequest req) {
         if (!SecurityContext.canManageDish()) {
@@ -221,6 +230,7 @@ public class DishController {
         return ApiResponse.success(result);
     }
 
+    @OperationLog(value = "恢复菜品", detail = "'菜品ID ' + #id")
     @PutMapping("/{id}/restore")
     public ApiResponse<Void> restoreDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
@@ -230,6 +240,7 @@ public class DishController {
         return ApiResponse.success(null);
     }
 
+    @OperationLog(value = "彻底删除菜品", detail = "'菜品ID ' + #id")
     @DeleteMapping("/{id}/purge")
     public ApiResponse<Void> purgeDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
