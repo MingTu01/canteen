@@ -175,7 +175,7 @@ const startSerialCardRead = async () => {
     cardReading.value = true
 
     const decoder = new TextDecoderStream()
-    const readableStreamClosed = serialPort.readable.pipeTo(decoder.writable)
+    serialPort.readable.pipeTo(decoder.writable)
     serialReader = decoder.readable.getReader()
 
     // 后台读取循环

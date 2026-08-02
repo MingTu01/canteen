@@ -38,14 +38,111 @@ warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
 error() { echo -e "${RED}[错误]${NC} $1"; }
 step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
 
-# 获取当前版本号
+# 获取当前系统版本号(从 VERSIONS.json 读取)
 get_version() {
-    if [ -f "$PROJECT_DIR/backend/src/main/resources/version.json" ]; then
-        grep -m1 '"version"' "$PROJECT_DIR/backend/src/main/resources/version.json" 2>/dev/null \
+    if [ -f "$PROJECT_DIR/VERSIONS.json" ]; then
+        python3 -c "import json; print(json.load(open('$PROJECT_DIR/VERSIONS.json'))['system']['version'])" 2>/dev/null || \
+        grep -A1 '"system"' "$PROJECT_DIR/VERSIONS.json" 2>/dev/null | grep '"version"' \
             | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "unknown"
     else
         echo "unknown"
     fi
+}
+
+# 获取指定模块版本号
+get_module_version() {
+    local module="$1"
+    local versions_file="$PROJECT_DIR/VERSIONS.json"
+    if [ ! -f "$versions_file" ]; then
+        echo "unknown"
+        return
+    fi
+    python3 -c "import json; print(json.load(open('$versions_file')).get('$module',{}).get('version','unknown'))" 2>/dev/null || \
+    echo "unknown"
+}
+
+# 显示升级前版本信息(本地当前版本 + 远程最新版本 + git 提交差异)
+show_version_diff() {
+    echo ""
+    echo -e "${CYAN}---------- 版本对比 ----------${NC}"
+
+    # 本地当前版本
+    local be_local hw_local h5_local
+    be_local=$(get_module_version backend)
+    hw_local=$(get_module_version admin-web)
+    h5_local=$(get_module_version h5)
+
+    echo "  [本地当前版本]"
+    echo "    后端: v${be_local}    管理后台: v${hw_local}    H5: v${h5_local}"
+    echo ""
+
+    # 获取本地最新 commit
+    local local_commit=""
+    if [ -d "$PROJECT_DIR/.git" ]; then
+        local_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null | cut -c1-12)
+    fi
+
+    # 获取远程最新 commit 和版本号
+    local remote_commit="" remote_be="" remote_hw="" remote_h5=""
+    if [ -d "$PROJECT_DIR/.git" ]; then
+        info "检查远程仓库最新版本..."
+        # 获取远程 main 分支最新 commit(不修改本地代码)
+        remote_commit=$(git -C "$PROJECT_DIR" ls-remote origin main 2>/dev/null | awk '{print $1}' | cut -c1-12)
+
+        if [ -n "$remote_commit" ] && [ "$remote_commit" != "$local_commit" ]; then
+            echo ""
+            echo "  [远程最新版本] commit: ${remote_commit}"
+            # 显示本地与远程之间的提交差异
+            echo ""
+            echo "  [待更新提交] (本地 ${local_commit} → 远程 ${remote_commit})"
+            # 获取远程 commit 但本地没有的提交列表
+            git -C "$PROJECT_DIR" fetch origin main 2>/dev/null
+            local new_commits
+            new_commits=$(git -C "$PROJECT_DIR" log --oneline HEAD..origin/main 2>/dev/null)
+            if [ -n "$new_commits" ]; then
+                echo "$new_commits" | head -20 | while read -r line; do
+                    echo "    $line"
+                done
+                local total
+                total=$(echo "$new_commits" | wc -l)
+                if [ "$total" -gt 20 ]; then
+                    echo "    ...(共 $total 条提交,仅显示前 20 条)"
+                fi
+            else
+                echo "    (无新提交)"
+            fi
+
+            # 尝试获取远程 VERSIONS.json 的版本号
+            remote_be=$(git -C "$PROJECT_DIR" show origin/main:VERSIONS.json 2>/dev/null | \
+                python3 -c "import json,sys; print(json.load(sys.stdin).get('backend',{}).get('version','unknown'))" 2>/dev/null || echo "?")
+            remote_hw=$(git -C "$PROJECT_DIR" show origin/main:VERSIONS.json 2>/dev/null | \
+                python3 -c "import json,sys; print(json.load(sys.stdin).get('admin-web',{}).get('version','unknown'))" 2>/dev/null || echo "?")
+            remote_h5=$(git -C "$PROJECT_DIR" show origin/main:VERSIONS.json 2>/dev/null | \
+                python3 -c "import json,sys; print(json.load(sys.stdin).get('h5',{}).get('version','unknown'))" 2>/dev/null || echo "?")
+            echo ""
+            echo "  [远程版本号]"
+            echo "    后端: v${remote_be}    管理后台: v${remote_hw}    H5: v${remote_h5}"
+
+            # 版本变化提示
+            echo ""
+            echo "  [版本变化]"
+            [ "$be_local" != "$remote_be" ] && [ "$remote_be" != "?" ] && \
+                echo "    后端: v${be_local} → v${remote_be}" || echo "    后端: 无变化"
+            [ "$hw_local" != "$remote_hw" ] && [ "$remote_hw" != "?" ] && \
+                echo "    管理后台: v${hw_local} → v${remote_hw}" || echo "    管理后台: 无变化"
+            [ "$h5_local" != "$remote_h5" ] && [ "$remote_h5" != "?" ] && \
+                echo "    H5: v${h5_local} → v${remote_h5}" || echo "    H5: 无变化"
+        elif [ "$remote_commit" = "$local_commit" ]; then
+            echo "  [远程] commit: ${remote_commit}"
+            echo "  本地已是最新版本,无待更新提交"
+        else
+            echo "  (无法获取远程版本信息,可能网络不通)"
+        fi
+    else
+        echo "  (非 Git 项目,无法对比版本)"
+    fi
+    echo -e "${CYAN}------------------------------${NC}"
+    echo ""
 }
 
 # 健康检查:等待后端就绪
@@ -191,10 +288,13 @@ main() {
     echo -e "${BLUE}==========================================${NC}"
     echo -e "${BLUE}  企业智慧食堂系统 - 安全升级${NC}"
     echo -e "${BLUE}==========================================${NC}"
-    echo "  当前版本: $(get_version)"
+    echo "  当前版本: v$(get_version)"
     echo "  升级范围: ${SCOPE}"
     echo "  升级时间: $(date '+%Y-%m-%d %H:%M:%S')"
     echo -e "${BLUE}==========================================${NC}"
+
+    # 显示版本对比(本地 vs 远程)
+    show_version_diff
 
     # 检查 Docker
     if ! command -v docker &>/dev/null; then
@@ -358,8 +458,14 @@ main() {
     echo -e "${GREEN}==========================================${NC}"
     echo -e "${GREEN}  升级完成!${NC}"
     echo -e "${GREEN}==========================================${NC}"
-    echo "  旧版本: $(cat "$PROJECT_DIR/backup/snapshots/$snap_id/version.txt" 2>/dev/null || echo '?')"
-    echo "  新版本: $(get_version)"
+    echo "  旧系统版本: $(cat "$PROJECT_DIR/backup/snapshots/$snap_id/version.txt" 2>/dev/null || echo '?')"
+    echo "  新系统版本: v$(get_version)"
+    echo ""
+    echo "  各模块版本:"
+    echo "    后端: v$(get_module_version backend)"
+    echo "    管理后台: v$(get_module_version admin-web)"
+    echo "    H5订餐端: v$(get_module_version h5)"
+    echo ""
     echo "  快照 ID: $snap_id (已保留,可用于回退)"
     echo ""
     echo "  数据库迁移已由 Flyway 自动执行"

@@ -52,14 +52,42 @@ error() { echo -e "${RED}[错误]${NC} $1"; }
 # 工具函数
 #==============================================================
 
-# 获取当前版本号
+# 获取当前系统版本号(从 VERSIONS.json 读取)
 get_version() {
-    if [ -f "$PROJECT_DIR/backend/src/main/resources/version.json" ]; then
-        grep -m1 '"version"' "$PROJECT_DIR/backend/src/main/resources/version.json" 2>/dev/null \
+    if [ -f "$PROJECT_DIR/VERSIONS.json" ]; then
+        # 读取 system.version 字段
+        python3 -c "import json; print(json.load(open('$PROJECT_DIR/VERSIONS.json'))['system']['version'])" 2>/dev/null || \
+        grep -A1 '"system"' "$PROJECT_DIR/VERSIONS.json" 2>/dev/null | grep '"version"' \
             | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "unknown"
     else
         echo "unknown"
     fi
+}
+
+# 获取指定模块版本号(参数: 模块名 backend/admin-web/h5/terminal)
+get_module_version() {
+    local module="$1"
+    local versions_file="$PROJECT_DIR/VERSIONS.json"
+    if [ ! -f "$versions_file" ]; then
+        echo "unknown"
+        return
+    fi
+    python3 -c "import json; print(json.load(open('$versions_file')).get('$module',{}).get('version','unknown'))" 2>/dev/null || \
+    echo "unknown"
+}
+
+# 显示所有模块版本号(多行)
+show_all_versions() {
+    local versions_file="$PROJECT_DIR/VERSIONS.json"
+    if [ ! -f "$versions_file" ]; then
+        echo "  (VERSIONS.json 不存在,版本未知)"
+        return
+    fi
+    echo "  后端服务:    v$(get_module_version backend)"
+    echo "  管理后台:    v$(get_module_version admin-web)"
+    echo "  H5订餐端:    v$(get_module_version h5)"
+    echo "  X86终端:     v$(get_module_version terminal)"
+    echo "  系统版本:    v$(get_module_version system)"
 }
 
 # 获取服务状态摘要(一行)
@@ -525,6 +553,57 @@ menu_uninstall() {
 }
 
 #==============================================================
+# 13. 查看版本详情与更新日志
+#==============================================================
+menu_versions() {
+    echo ""
+    echo -e "${BLUE}========== 版本详情 ==========${NC}"
+    echo ""
+    local versions_file="$PROJECT_DIR/VERSIONS.json"
+    if [ ! -f "$versions_file" ]; then
+        warn "VERSIONS.json 不存在"
+        pause
+        return
+    fi
+
+    # 用 python3 解析 JSON,显示各模块版本和更新日志
+    python3 -c "
+import json
+with open('$versions_file', encoding='utf-8') as f:
+    data = json.load(f)
+order = ['system', 'backend', 'admin-web', 'h5', 'terminal']
+names = {'system': '系统整体', 'backend': '后端服务', 'admin-web': '管理后台', 'h5': 'H5订餐端', 'terminal': 'X86终端'}
+for k in order:
+    if k in data:
+        v = data[k]
+        print(f\"  【{names.get(k, k)}】 v{v.get('version', 'unknown')}\")
+        print(f\"    来源: {v.get('source', '-')}\")
+        cl = v.get('changelog', '')
+        if cl:
+            print(f\"    更新: {cl}\")
+        print()
+" 2>/dev/null || {
+        # python3 不可用时降级显示
+        echo "  后端服务:    v$(get_module_version backend)"
+        echo "  管理后台:    v$(get_module_version admin-web)"
+        echo "  H5订餐端:    v$(get_module_version h5)"
+        echo "  X86终端:     v$(get_module_version terminal)"
+        echo "  系统版本:    v$(get_module_version system)"
+        echo ""
+        warn "(python3 不可用,仅显示版本号,不显示更新日志)"
+    }
+
+    # 显示最近 git 提交历史(最近 10 条)
+    if [ -d "$PROJECT_DIR/.git" ]; then
+        echo -e "${BLUE}---------- 最近代码更新 ----------${NC}"
+        git -C "$PROJECT_DIR" log --oneline -10 --pretty=format:"  %h %s (%ci)" 2>/dev/null || echo "  (无法读取 git 日志)"
+        echo ""
+    fi
+    echo ""
+    pause
+}
+
+#==============================================================
 # 主菜单
 #==============================================================
 show_menu() {
@@ -535,42 +614,50 @@ show_menu() {
     version=$(get_version)
     local status_line
     status_line=$(get_status_line)
+    local be_ver hw_ver h5_ver term_ver
+    be_ver=$(get_module_version backend)
+    hw_ver=$(get_module_version admin-web)
+    h5_ver=$(get_module_version h5)
+    term_ver=$(get_module_version terminal)
 
-    echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}   ${BOLD}企业智慧食堂系统 - 管理面板${NC}              ${BLUE}║${NC}"
-    echo -e "${BLUE}╠══════════════════════════════════════════════╣${NC}"
-    echo -e "${BLUE}║${NC}  版本: v${version}    状态: ${status_line}        ${BLUE}║${NC}"
-    echo -e "${BLUE}╠══════════════════════════════════════════════╣${NC}"
-    echo -e "${BLUE}║${NC}                                              ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}【升级】${NC}                                     ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   1) 升级全部 (后端+前端) ${YELLOW}含备份+自动回退${NC}  ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   2) 仅升级后端                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   3) 仅升级前端 (admin-web + h5)            ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}                                              ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}【备份与恢复】${NC}                              ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   4) 手动备份 (创建快照)                     ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   5) 恢复备份 (从快照恢复)                   ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   6) 查看快照列表                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}                                              ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}【管理】${NC}                                     ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   7) 查看服务状态                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   8) 重置管理员密码                           ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   9) 查看日志                                 ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  10) 重启服务                                 ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  11) 停止服务                                 ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}                                              ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}【系统】${NC}                                     ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  12) 修复 canteen 系统命令(重新安装)           ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}                                              ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   0) 退出                                     ${BLUE}║${NC}"
-    echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${NC}   ${BOLD}企业智慧食堂系统 - 管理面板${NC}                      ${BLUE}║${NC}"
+    echo -e "${BLUE}╠══════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BLUE}║${NC}  系统版本: v${version}    状态: ${status_line}          ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  后端: v${be_ver}  管理后台: v${hw_ver}  H5: v${h5_ver}      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  终端: v${term_ver}                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}╠══════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}【升级】${NC}                                             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   1) 升级全部 (后端+前端) ${YELLOW}含备份+自动回退+版本对比${NC}  ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   2) 仅升级后端                                     ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   3) 仅升级前端 (admin-web + h5)                    ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}【备份与恢复】${NC}                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   4) 手动备份 (创建快照)                             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   5) 恢复备份 (从快照恢复)                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   6) 查看快照列表                                     ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}【管理】${NC}                                             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   7) 查看服务状态                                     ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   8) 重置管理员密码                                   ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   9) 查看日志                                         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  10) 重启服务                                         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  11) 停止服务                                         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}【系统】${NC}                                             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  12) 修复 canteen 系统命令(重新安装)                   ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  13) 查看版本详情与更新日志                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   0) 退出                                             ${BLUE}║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
 main_loop() {
     while true; do
         show_menu
-        read -p "$(echo -e "${CYAN}请选择 [0-12]: ${NC}")" choice
+        read -p "$(echo -e "${CYAN}请选择 [0-13]: ${NC}")" choice
 
         case "$choice" in
             1) menu_upgrade_all ;;
@@ -585,6 +672,7 @@ main_loop() {
             10) menu_restart ;;
             11) menu_stop ;;
             12) menu_install ;;
+            13) menu_versions ;;
             0|q|quit|exit)
                 echo ""
                 info "再见!"

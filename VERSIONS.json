@@ -1,0 +1,32 @@
+{
+  "backend": {
+    "version": "0.0.2",
+    "name": "后端服务",
+    "source": "backend/pom.xml",
+    "changelog": "微信登录/通知推送/V15迁移/默认密码12345678/默认余额5000/EmployeeVO.mustChangePassword"
+  },
+  "admin-web": {
+    "version": "0.0.2",
+    "name": "管理后台",
+    "source": "admin-web/package.json",
+    "changelog": "食堂创建用餐时间选填/员工读卡器刷卡/默认余额5000/默认密码12345678"
+  },
+  "h5": {
+    "version": "0.0.2",
+    "name": "H5订餐端",
+    "source": "h5/package.json",
+    "changelog": "首次登录强制改密/修复我的页面退出登录/微信登录/通知公告活动展示优化"
+  },
+  "terminal": {
+    "version": "1.0.0",
+    "name": "X86取餐终端",
+    "source": "src-python/installer.iss",
+    "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
+  },
+  "system": {
+    "version": "0.0.2",
+    "name": "系统整体版本",
+    "source": "VERSIONS.json",
+    "changelog": "8项功能优化+微信登录+公众号通知推送+构建脚本安全修复"
+  }
+}
