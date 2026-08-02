@@ -221,6 +221,8 @@ main() {
     else
         info "非 Git 项目,跳过代码拉取"
     fi
+    # git pull 后脚本可能丢失可执行位(Windows 仓库不保留 +x),统一修复
+    chmod +x "$PROJECT_DIR"/*.sh "$PROJECT_DIR"/scripts/*.sh 2>/dev/null || true
     echo ""
 
     #==========================================================

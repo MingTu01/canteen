@@ -54,6 +54,27 @@ fix_ownership() {
 }
 
 #==============================================================
+# 修正脚本可执行权限
+#==============================================================
+# 问题场景:git checkout / git pull 从 Windows 仓库拉取后,
+# 脚本文件可能丢失可执行位(Linux 需要 +x 才能直接 ./xxx.sh 运行)。
+# 解决:启动时自动给所有 .sh 脚本补上 +x 权限。
+fix_permissions() {
+    local need_fix=false
+    for f in "$PROJECT_DIR"/*.sh "$PROJECT_DIR"/scripts/*.sh; do
+        [[ -f "$f" ]] || continue
+        if [[ ! -x "$f" ]]; then
+            need_fix=true
+            break
+        fi
+    done
+    if [[ "$need_fix" == "true" ]]; then
+        info "修正脚本可执行权限..."
+        chmod +x "$PROJECT_DIR"/*.sh "$PROJECT_DIR"/scripts/*.sh 2>/dev/null || true
+    fi
+}
+
+#==============================================================
 # 工具函数
 #==============================================================
 
@@ -616,6 +637,8 @@ cmd_deploy() {
 
     # 部署开始前:修正项目目录所有权(避免 root 所有导致后续 git pull 失败)
     fix_ownership
+    # 修正脚本可执行权限(避免 git pull 后 .sh 丢失 +x)
+    fix_permissions
 
     install_docker
     configure_docker_mirror
@@ -626,8 +649,9 @@ cmd_deploy() {
     setup_autostart
     install_canteen_command
 
-    # 部署结束前:再次修正所有权(确保新建的 backup/logs/uploads 等目录归普通用户)
+    # 部署结束前:再次修正所有权和权限(确保新建目录和脚本可用)
     fix_ownership
+    fix_permissions
 
     verify_and_summary
 }
