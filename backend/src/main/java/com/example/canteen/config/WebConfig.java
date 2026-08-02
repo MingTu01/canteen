@@ -69,13 +69,13 @@ public class WebConfig implements WebMvcConfigurer {
 /**
  * CORS 配置(全 profile 生效)。
  *
- * - admin-web / H5 通过 Nginx 反代同源访问,CORS 不会触发
- * - X86 终端(Tauri EXE)直接跨域调用后端 API,需要允许 Tauri origin
- * - dev 环境的 localhost:* 端口用于 vite dev server 调试
+ * 部署场景:
+ * - admin-web / H5 通过 Nginx 反代同源访问,但浏览器仍会带 Origin 头
+ * - 浏览器可能通过内网 IP、外网域名、反代域名访问,origin 不固定
+ * - X86 终端(Tauri EXE)直接跨域调用后端 API
  *
- * Tauri origin 说明:
- * - Windows / Linux: http://tauri.localhost
- * - macOS: tauri://localhost
+ * 策略:放行所有 origin。安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制。
+ * allowedOriginPatterns("*") 兼容 allowCredentials=true(allowedOrigins("*") 不兼容)。
  */
 @Configuration
 class CorsConfig implements WebMvcConfigurer {
@@ -88,30 +88,14 @@ class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         // API 接口 CORS
-        // 内网部署场景:浏览器可能通过内网 IP(如 http://172.19.171.4:18080)访问,
-        // nginx 反代到后端虽然同源,但浏览器仍会带 Origin 头,Spring CORS 需放行。
-        // 生产环境前端经 nginx 反代同源访问,跨域仅来自 X86 终端(Tauri)和 dev 调试。
+        // 部署场景:
+        // - admin-web / H5 通过 nginx 反代同源访问(浏览器仍带 Origin 头,Spring CORS 需放行)
+        // - 浏览器可能通过内网 IP、外网域名、反代域名访问,origin 不固定
+        // - X86 终端(Tauri)直接跨域调用后端 API
+        // 因此放行所有 origin,credentials 仍可用(allowedOriginPatterns 支持通配)。
+        // 安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制。
         registry.addMapping("/api/**")
-                .allowedOriginPatterns(
-                        "http://localhost:*",
-                        "http://127.0.0.1:*",
-                        "https://localhost:*",
-                        "https://127.0.0.1:*",
-                        // 兜底:浏览器对默认端口(80/443)会省略端口号,
-                        // 导致 origin 为 http://127.0.0.1(不带端口),
-                        // 与 http://127.0.0.1:* 不匹配(后者要求带 :port)
-                        "http://localhost",
-                        "http://127.0.0.1",
-                        "https://localhost",
-                        "https://127.0.0.1",
-                        // 内网 IP 访问(浏览器通过 http://172.19.x.x:18080 访问 admin-web)
-                        "http://*:*",
-                        "https://*:*",
-                        // Tauri 桌面应用 origin(X86 终端 EXE)
-                        "http://tauri.localhost",
-                        "https://tauri.localhost",
-                        "tauri://localhost"
-                )
+                .allowedOriginPatterns("*")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true)
@@ -120,13 +104,7 @@ class CorsConfig implements WebMvcConfigurer {
         // 终端前端运行在 http://127.0.0.1:1287,fetch 后端 /uploads/xxx.jpg 需要 CORS 头
         // 否则 imageCache.ts 中 fetch 头像图片会被浏览器拦截,无法缓存到 IndexedDB
         registry.addMapping("/uploads/**")
-                .allowedOriginPatterns(
-                        "http://*:*",
-                        "https://*:*",
-                        "http://tauri.localhost",
-                        "https://tauri.localhost",
-                        "tauri://localhost"
-                )
+                .allowedOriginPatterns("*")
                 .allowedMethods("GET", "OPTIONS")
                 .allowedHeaders("*")
                 .maxAge(3600);
