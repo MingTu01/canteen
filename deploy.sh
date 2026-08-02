@@ -35,6 +35,25 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 #==============================================================
+# 修正项目目录所有权
+#==============================================================
+# 问题场景:用户用 sudo git clone 或 sudo ./deploy.sh 部署后,
+# 项目目录归 root 所有,普通用户(canteen)执行 git pull 会报
+# "detected dubious ownership" 错误。
+# 解决:sudo 运行时自动把项目目录所有权交给实际调用者(SUDO_USER),
+# root 仍有权限读写普通用户文件,不影响后续 sudo 部署。
+fix_ownership() {
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        local current_owner
+        current_owner=$(stat -c '%U' "$PROJECT_DIR" 2>/dev/null || echo "")
+        if [[ -n "$current_owner" ]] && [[ "$current_owner" != "$SUDO_USER" ]]; then
+            info "修正项目目录所有权: ${current_owner} -> ${SUDO_USER}"
+            chown -R "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR" 2>/dev/null || true
+        fi
+    fi
+}
+
+#==============================================================
 # 工具函数
 #==============================================================
 
@@ -595,6 +614,9 @@ cmd_deploy() {
         fi
     fi
 
+    # 部署开始前:修正项目目录所有权(避免 root 所有导致后续 git pull 失败)
+    fix_ownership
+
     install_docker
     configure_docker_mirror
     configure_env
@@ -603,6 +625,10 @@ cmd_deploy() {
     start_services
     setup_autostart
     install_canteen_command
+
+    # 部署结束前:再次修正所有权(确保新建的 backup/logs/uploads 等目录归普通用户)
+    fix_ownership
+
     verify_and_summary
 }
 
