@@ -57,33 +57,50 @@ canteen upgrade all
 
 ### 1.1 一键部署（推荐）
 
+> **避免权限问题的关键：** 用普通用户克隆，仅 Docker 安装和系统命令安装用 sudo。`deploy.sh` v0.0.3+ 已自动处理权限（chown 项目目录 + 加入 docker 组）。
+
 ```bash
-# 克隆 deploy 分支到服务器(国内使用 ghproxy 加速)
+# 1. 用普通用户登录(如 canteen / ubuntu),不要用 root
+# /opt 通常需要 root 创建,所以先 sudo mkdir 再 chown 给自己
+sudo mkdir -p /opt/canteen
+sudo chown -R $(whoami):$(whoami) /opt/canteen
+
+# 2. 用普通用户克隆 deploy 分支(不要 sudo clone!)
 git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
-# 赋予执行权限
+# 3. 赋予执行权限
 chmod +x deploy.sh scripts/*.sh canteen.sh
 
-# 启动部署向导（需要 root 或 sudo）
+# 4. 用 sudo 运行 deploy.sh(仅 Docker 安装和系统命令需要 sudo)
 sudo ./deploy.sh
+
+# 5. 重新登录让 docker 组生效(deploy.sh 会自动把你加入 docker 组)
+exit
+# 重新 SSH 登录后,验证:docker compose ps 应该不需要 sudo 就能运行
 ```
 
 部署向导会交互式引导你完成以下步骤：
 
 1. **检测 Docker 环境**（已安装自动跳过，未安装则使用阿里云源安装）
+   - 自动把当前用户加入 docker 组（避免后续 canteen 需要 sudo）
 2. **配置镜像加速器**（已有配置会询问是否替换 y/n，首次自动配置国内加速源）
 3. **配置环境变量**：
    - MySQL 密码（留空则自动生成随机密码）
    - JWT 密钥（自动生成 64 位随机十六进制）
    - **超管账号密码**（自定义设置，至少 8 位）
+   - 自动 chown `.env` 给当前用户
 4. **构建运行时镜像**（首次需要，仅含 JRE+curl，不含业务代码；deploy 分支已含产物，无需构建）
 5. **启动服务**（Docker Compose 编排）
 6. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
 7. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
 8. **部署验证**（健康检查 + 访问地址输出）
+   - 自动 chown 项目目录给当前用户（避免 dubious ownership）
 
-> **重要：** 必须克隆 `deploy` 分支（`-b deploy`），不要克隆 `main` 分支。`main` 分支只含源码，服务器构建会因缺少 Maven/Node.js 失败。
+> **重要：** 
+> - 必须克隆 `deploy` 分支（`-b deploy`），不要克隆 `main` 分支。`main` 分支只含源码，服务器构建会因缺少 Maven/Node.js 失败。
+> - 不要用 `sudo git clone`！会让整个项目目录归 root 所有。用普通用户克隆，仅 `sudo ./deploy.sh` 时用 sudo。
+> - 部署完成后必须**重新登录**让 docker 组生效，否则 `canteen` 命令仍需 sudo。
 
 ### 1.2 跳过 Docker 安装
 
@@ -475,30 +492,82 @@ sudo rm -rf /opt/canteen
 docker volume rm canteen_mysql_data canteen_redis_data
 ```
 
-#### 阶段四：从 deploy 分支重新部署
+#### 阶段四：从 deploy 分支重新部署（避免权限问题版）
+
+> **权限问题根源：** 历史上多次出现 `.env 被 root 所有`、`deploy/ 目录被 root 所有`、`docker compose 权限拒绝`，根源是混用 sudo 和普通用户。下面的流程严格区分：**系统级操作用 sudo，业务文件归普通用户**。
+
+**步骤 1：用普通用户克隆（不要用 sudo clone）**
 
 ```bash
-# 克隆 deploy 分支
-sudo git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+# 用你的普通用户(如 canteen / ubuntu)登录,不要用 root
+# /opt 通常需要 root 创建,所以先 sudo mkdir 再 chown
+sudo mkdir -p /opt/canteen
+sudo chown -R $(whoami):$(whoami) /opt/canteen
 
-# 修正目录所有权(关键!避免权限问题)
-sudo chown -R canteen:canteen /opt/canteen
-
-# 配置 Git 忽略目录所有权检查
-sudo git config --global --add safe.directory /opt/canteen
-sudo -u canteen git config --global --add safe.directory /opt/canteen
-
-# 恢复 .env 配置
-cp /tmp/canteen-env-backup /opt/canteen/.env
-chown canteen:canteen /opt/canteen/.env
-chmod 600 /opt/canteen/.env
-
-# 赋予脚本可执行权限
+# 用普通用户克隆(这样 /opt/canteen 直接归你所有,无需后续 chown)
+git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 chmod +x *.sh scripts/*.sh
+```
 
-# 创建必要目录
-mkdir -p backup uploads
+**步骤 2：用 sudo 运行 deploy.sh（仅 Docker 安装和系统命令需要 sudo）**
+
+```bash
+sudo ./deploy.sh
+```
+
+`deploy.sh` 内部已自动处理权限（v0.0.3+）：
+- `fix_ownership()`：sudo 运行时自动把项目目录 chown 给实际调用者（SUDO_USER）
+- `add_user_to_docker_group()`：自动把 SUDO_USER 加入 docker 组（避免后续 canteen 需要 sudo）
+- `.env` 创建后立即 chown 给 SUDO_USER
+
+**步骤 3：重新登录让 docker 组生效**
+
+```bash
+# deploy.sh 会提示:已加入 docker 组,需重新登录后生效
+exit
+# 重新 SSH 登录后,docker 组权限才会生效
+```
+
+或临时生效（不退出登录）：
+
+```bash
+newgrp docker
+```
+
+**步骤 4：验证权限正确（关键检查点）**
+
+```bash
+cd /opt/canteen
+
+# 1. 检查目录所有权(应显示你的用户名,不是 root)
+ls -ld /opt/canteen
+ls -l /opt/canteen/.env
+
+# 2. 检查 docker 组成员(应包含你的用户名)
+groups
+
+# 3. 验证普通用户可运行 docker(无需 sudo)
+docker compose ps
+
+# 4. 验证 git 可用(无 dubious ownership 错误)
+git status
+```
+
+如果以上 4 项都通过，后续 `canteen` 命令和 `git pull` 不会再有权限问题。
+
+**步骤 5：恢复 .env 配置（如果有备份）**
+
+```bash
+cp /tmp/canteen-env-backup /opt/canteen/.env
+chmod 600 /opt/canteen/.env
+# 所有者应已是当前用户(deploy.sh 的 fix_ownership 已处理)
+```
+
+**步骤 6：构建后端运行时镜像并启动**
+
+```bash
+cd /opt/canteen
 
 # 构建后端运行时镜像(首次需要,仅含 JRE+curl,不含业务代码)
 docker compose build backend
@@ -506,7 +575,7 @@ docker compose build backend
 # 启动所有服务
 docker compose up -d
 
-# 安装 canteen 系统命令
+# 安装 canteen 系统命令(这一步需要 sudo,因为写入 /usr/local/bin)
 sudo ./canteen.sh install
 ```
 

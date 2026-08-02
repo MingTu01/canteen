@@ -301,6 +301,7 @@ install_docker() {
 
     if command -v docker &> /dev/null && docker info &> /dev/null; then
         info "Docker 已安装且运行中,跳过安装"
+        add_user_to_docker_group
         return 0
     fi
 
@@ -329,6 +330,34 @@ install_docker() {
     systemctl enable docker
     systemctl start docker
     info "Docker 安装完成"
+    add_user_to_docker_group
+}
+
+#==============================================================
+# 把当前用户加入 docker 组(避免后续 canteen 命令需要 sudo)
+#==============================================================
+# 问题场景:sudo ./deploy.sh 部署后,普通用户运行 canteen(内含 docker compose)
+# 会报 "permission denied while trying to connect to the Docker daemon socket"。
+# 解决:把实际调用者(SUDO_USER)加入 docker 组,后续无需 sudo 即可操作 Docker。
+# 注意:加入 docker 组后需重新登录或 newgrp docker 才能生效。
+add_user_to_docker_group() {
+    # 只在 sudo 运行时有意义(root 直接运行无需此步骤)
+    if [[ -z "$SUDO_USER" ]] || [[ "$SUDO_USER" == "root" ]]; then
+        return 0
+    fi
+
+    # 检查用户是否已在 docker 组
+    if id -nG "$SUDO_USER" 2>/dev/null | grep -qw "docker"; then
+        return 0
+    fi
+
+    info "将用户 ${SUDO_USER} 加入 docker 组(避免后续 canteen 命令需要 sudo)..."
+    if usermod -aG docker "$SUDO_USER" 2>/dev/null; then
+        warn "已加入 docker 组,需重新登录后生效(或执行: newgrp docker)"
+        warn "否则普通用户运行 canteen 仍需 sudo"
+    else
+        warn "加入 docker 组失败,后续普通用户运行 canteen 可能需要 sudo"
+    fi
 }
 
 configure_docker_mirror() {
