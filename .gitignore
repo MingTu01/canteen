@@ -58,3 +58,9 @@ docker-compose.override.yml
 
 # Python cache
 __pycache__/
+
+# Maven 本地缓存(仅本地构建用,不提交)
+.m2-cache/
+
+# Python 打包产物输出(由 build_installer.py 生成)
+src-python/output/

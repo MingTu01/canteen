@@ -54,7 +54,7 @@ const mealTagType = (mealType: number): 'primary' | 'warning' | 'success' => {
 const loadList = async (): Promise<void> => {
   loading.value = true
   try {
-    list.value = await getMyGroupOrders()
+    list.value = (await getMyGroupOrders()) ?? []
   } catch {
     /* 拦截器已提示 */
   } finally {

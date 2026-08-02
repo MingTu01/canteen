@@ -581,11 +581,11 @@ onBeforeUnmount(() => {
               </h2>
             </header>
             <p class="card__desc">
-              填入服务器域名、管理员账号密码、食堂安全码完成绑定。绑定后终端将被锁定到该食堂,无法越权访问其他门店。
+              填入服务器地址、管理员账号密码、食堂安全码完成绑定。绑定后终端将被锁定到该食堂,无法越权访问其他门店。
             </p>
             <div class="settings__form">
               <div class="settings__field">
-                <label class="settings__label">服务器域名(留空=同源开发模式,可省略端口自动探测)</label>
+                <label class="settings__label">服务器地址(留空=同源开发模式,可省略端口自动探测)</label>
                 <input
                   v-model="form.serverUrl"
                   type="text"
@@ -601,6 +601,7 @@ onBeforeUnmount(() => {
                     type="text"
                     autocomplete="off"
                     class="settings__input"
+                    placeholder="超管或本店管理员账号"
                   />
                 </div>
                 <div class="settings__field">
@@ -727,13 +728,13 @@ onBeforeUnmount(() => {
       <div class="modal__panel">
         <h3 class="modal__title">确认解除绑定?</h3>
         <p class="modal__desc">
-          解绑后本机将清除食堂绑定信息,需重新输入管理员账号和安全码才能使用。为防止误操作,请输入管理员账号密码确认。
+          解绑后本机将清除食堂绑定信息,需重新绑定才能使用。为防止误操作,请输入管理员账号密码确认(超管或本店管理员均可)。
         </p>
         <div class="modal__form">
           <input
             v-model="unbindForm.username"
             type="text"
-            placeholder="管理员账号"
+            placeholder="超管或本店管理员账号"
             autocomplete="off"
             :disabled="unbindVerifying"
             class="modal__input"

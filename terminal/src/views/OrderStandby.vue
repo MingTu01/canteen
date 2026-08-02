@@ -11,7 +11,6 @@
  * 刷卡成功 → 跳转 /order/menu
  *
  * 生产环境:仅支持 USB 读卡器(键盘模拟输入)与点击刷卡按钮提示
- * 测试模式已移除,如需调试请在开发环境(import.meta.env.DEV)单独添加
  */
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'

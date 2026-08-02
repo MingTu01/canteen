@@ -85,14 +85,21 @@ public class BackupExporter {
         }
     }
 
-    /** 引用表名(order 是保留字)。 */
+    /** 引用表名(order 是保留字)。校验白名单防止恢复恶意备份文件时 SQL 注入。 */
     public String quoteTable(String table) {
+        if (!BackupConstants.TABLES_IN_ORDER.contains(table)) {
+            throw new BusinessException("非法表名: " + table);
+        }
         if ("order".equals(table)) return "`order`";
         return table;
     }
 
-    /** P0-4 引用列名:统一加反引号,防止列名拼接 SQL 注入(MySQL/H2 均支持)。 */
+    /** P0-4 引用列名:统一加反引号,防止列名拼接 SQL 注入(MySQL/H2 均支持)。
+     *  校验列名仅含字母/数字/下划线,防止反引号断裂注入。 */
     public String quoteColumn(String column) {
+        if (column == null || !column.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+            throw new BusinessException("非法列名: " + column);
+        }
         return "`" + column + "`";
     }
 

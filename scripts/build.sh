@@ -7,7 +7,6 @@
 #   ./scripts/build.sh backend      # 仅构建后端
 #   ./scripts/build.sh admin-web    # 仅构建管理后台
 #   ./scripts/build.sh h5           # 仅构建 H5
-#   ./scripts/build.sh terminal     # 仅构建终端
 #
 # 产物输出:
 #   deploy/backend/app.jar
@@ -15,8 +14,10 @@
 #   deploy/admin-web/nginx.conf
 #   deploy/h5/html/
 #   deploy/h5/nginx.conf
-#   deploy/terminal/html/
-#   deploy/terminal/nginx.conf
+#
+# 说明:
+#   - X86 终端不在 Docker 中部署,改为在 Windows 上打包为独立 EXE 安装包
+#     (详见 src-python/build_installer.py)
 #
 # 设计要点:
 #   - 使用 Docker 容器构建,宿主机无需安装 JDK/Node.js
@@ -61,7 +62,6 @@ init_dirs() {
     mkdir -p "$DEPLOY_DIR/backend"
     mkdir -p "$DEPLOY_DIR/admin-web/html"
     mkdir -p "$DEPLOY_DIR/h5/html"
-    mkdir -p "$DEPLOY_DIR/terminal/html"
 }
 
 # ---------- 构建后端 ----------
@@ -120,17 +120,17 @@ case "$TARGET" in
         build_backend
         build_frontend admin-web
         build_frontend h5
-        build_frontend terminal
         ;;
     backend)
         build_backend
         ;;
-    admin-web|h5|terminal)
+    admin-web|h5)
         build_frontend "$TARGET"
         ;;
     *)
         error "未知目标: $TARGET"
-        echo "用法: $0 [all|backend|admin-web|h5|terminal]"
+        echo "用法: $0 [all|backend|admin-web|h5]"
+        echo "提示:X86 终端打包请在 Windows 上运行 src-python/build_installer.py"
         exit 1
         ;;
 esac

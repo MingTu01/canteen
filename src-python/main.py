@@ -18,6 +18,63 @@
 import os
 import sys
 import glob
+import traceback
+from datetime import datetime
+
+# ===== 日志重定向:同时输出到 CMD 窗口和日志文件 =====
+# 日志文件放在用户目录(%LOCALAPPDATA%\CanteenTerminal\terminal.log),
+# 方便排查安装版问题(用户看不到 CMD 窗口内容时可直接查日志文件)。
+class TeeLogger:
+    """同时写入 stdout 和日志文件。"""
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            try:
+                s.write(data)
+                s.flush()
+            except Exception:
+                pass
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+def _setup_logging():
+    """配置日志:同时输出到控制台和文件。"""
+    if sys.platform != 'win32':
+        return
+    # 日志文件路径:%LOCALAPPDATA%\CanteenTerminal\terminal.log
+    local_appdata = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~\\AppData\\Local')
+    log_dir = os.path.join(local_appdata, 'CanteenTerminal')
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        return
+    log_path = os.path.join(log_dir, 'terminal.log')
+    try:
+        # 每次启动覆盖旧日志(避免文件无限增长)
+        log_file = open(log_path, 'w', encoding='utf-8', buffering=1)
+        # 写入启动分隔线
+        log_file.write(f'===== 终端启动 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} =====\n')
+        log_file.flush()
+        # 同时输出到原 stdout 和日志文件
+        sys.stdout = TeeLogger(sys.stdout, log_file)
+        sys.stderr = TeeLogger(sys.stderr, log_file)
+        print(f'[Log] 日志文件: {log_path}', flush=True)
+    except Exception as e:
+        # 日志初始化失败不影响程序运行
+        print(f'[Log] 日志文件初始化失败: {e}')
+
+_setup_logging()
+
+# 全局异常钩子:未捕获的异常写入日志
+def _excepthook(exc_type, exc_value, exc_tb):
+    print(f'[FATAL] 未捕获异常: {exc_type.__name__}: {exc_value}', flush=True)
+    traceback.print_exception(exc_type, exc_value, exc_tb)
+sys.excepthook = _excepthook
 
 # 确保能导入同目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -134,7 +191,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineScript
 from PyQt5.QtGui import QKeyEvent
 
-from config import read_config, ensure_config_json, get_exe_dir, read_full_config
+from config import read_config, ensure_config_json, get_exe_dir, get_local_appdata_dir, read_full_config
 from server import find_web_dist, start_server
 from bridge import ShellBridge
 from card_reader import CardReader
@@ -146,7 +203,13 @@ class FullscreenWebPage(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, line, source):
         # 前端 console.log 会打印到这里,方便调试
         prefix = {0: 'JS Log', 1: 'JS Warn', 2: 'JS Error', 3: 'JS Info'}.get(level, 'JS')
-        print(f'[{prefix}] {message}')
+        # 显示来源文件和行号,便于定位前端报错
+        src_name = source.split('/')[-1] if source else '?'
+        print(f'[{prefix}] {src_name}:{line} {message}')
+
+    def createWindow(self, _type):
+        # 阻止 target=_blank 弹出新窗口
+        return None
 
 
 class TerminalWindow(QWidget):
@@ -180,6 +243,15 @@ class TerminalWindow(QWidget):
         self.page = FullscreenWebPage(self.view)
         self.view.setPage(self.page)
 
+        # 诊断信号:加载进度 / 加载完成 / 渲染进程崩溃
+        self.view.loadProgress.connect(
+            lambda p: print(f'[WebEngine] 加载进度: {p}%'))
+        self.view.loadFinished.connect(
+            lambda ok: print(f'[WebEngine] 加载完成: ok={ok}'))
+        # 渲染进程崩溃(QtWebEngineProcess.exe 异常退出)会导致页面白屏/网络失效
+        self.page.renderProcessTerminated.connect(
+            self._on_render_crash)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
@@ -191,6 +263,18 @@ class TerminalWindow(QWidget):
         self.view.setUrl(QUrl(self.url))
 
         print(f'[Window] 窗口已创建(模式: {"全屏" if self._is_fullscreen else "窗口"}),加载: {self.url}')
+
+    def _on_render_crash(self, termination_type, exit_code):
+        """渲染进程崩溃诊断。"""
+        type_map = {
+            0: 'Normal(正常结束)',
+            1: 'Abnormal(异常退出)',
+            2: 'Crashed(崩溃)',
+            3: 'Killed(被杀死)',
+        }
+        type_str = type_map.get(termination_type, f'未知({termination_type})')
+        print(f'[WebEngine ERROR] 渲染进程崩溃! 类型={type_str} 退出码={exit_code}')
+        print(f'[WebEngine ERROR] 可能原因: GPU 驱动问题 / 资源加载失败 / 沙箱冲突')
 
     def keyPressEvent(self, event: QKeyEvent):
         """键盘事件:Alt+F4 / Ctrl+Shift+Q 退出。"""
@@ -252,16 +336,29 @@ def main():
     except Exception:
         pass
     print('=' * 60, flush=True)
-    print('企业智慧食堂终端 (Python Shell)', flush=True)
+    print('企业智慧食堂终端 (Python Shell) - 诊断模式', flush=True)
     print('=' * 60, flush=True)
+
+    # 0. 环境诊断:打印关键路径和权限,帮助定位问题
+    import ctypes
+    from config import get_appdata_dir, get_local_appdata_dir, get_config_path
+    print(f'[Diag] EXE 路径: {sys.executable}', flush=True)
+    print(f'[Diag] EXE 目录: {get_exe_dir()}', flush=True)
+    print(f'[Diag] 配置目录: {get_appdata_dir()}', flush=True)
+    print(f'[Diag] 配置文件: {get_config_path()}', flush=True)
+    print(f'[Diag] 数据目录: {get_local_appdata_dir()}', flush=True)
+    print(f'[Diag] Python: {sys.version}', flush=True)
+    print(f'[Diag] 用户: {os.environ.get("USERNAME", "?")}', flush=True)
+    print(f'[Diag] 是否管理员: {bool(ctypes.windll.shell32.IsUserAnAdmin()) if sys.platform == "win32" else "?"}', flush=True)
 
     # 1. 确保配置文件存在
     ensure_config_json()
 
     # 1.1 读取完整配置(window_mode / card_interval / idle_timeout / server_url)
     cfg = read_full_config()
-    print(f'[Init] 配置: 窗口模式={cfg["window_mode"]}, 读卡间隔={cfg["card_interval"]}s, '
-          f'待机超时={cfg["idle_timeout"]}s')
+    print(f'[Init] 配置: server_url={cfg["server_url"]}, 窗口模式={cfg["window_mode"]}, '
+          f'读卡间隔={cfg["card_interval"]}s, 待机超时={cfg["idle_timeout"]}s', flush=True)
+    print(f'[Init] 配置文件实际路径: {get_config_path()}', flush=True)
 
     # 2. 查找 Vue 前端 dist 目录
     web_dir = find_web_dist()
@@ -276,19 +373,29 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName('企业智慧食堂终端')
 
-    # 3.1 配置 QtWebEngine 持久化存储到 EXE 同目录的 data 子目录,
-    # 避免默认存到系统临时目录导致 localStorage(终端绑定状态)在重启后丢失。
+    # 3.1 配置 QtWebEngine 持久化存储到 %LOCALAPPDATA%\CanteenTerminal\data,
+    # 而非 EXE 同目录(安装版 EXE 在 Program Files 下只读,QtWebEngine 的
+    # Network Service 子进程无法写入会导致 NetworkError)。
     # 必须在创建任何 QWebEngineView / QWebEngineProfile 使用方之前设置。
     #
     # 重要:必须禁用 HTTP 磁盘缓存(setHttpCacheType NoCache),
     # 否则重新打包 EXE 后,QtWebEngine 会加载旧缓存的 index.html,
     # 它引用旧哈希的 JS 文件(如 index-OldHash.js),但新包里只有
     # index-NewHash.js → 旧 JS 404 → 前端崩溃(localStorage 仍持久化)。
-    data_dir = os.path.join(get_exe_dir(), 'data')
+    data_dir = os.path.join(get_local_appdata_dir(), 'data')
     try:
         os.makedirs(data_dir, exist_ok=True)
     except Exception as e:
         print(f'[Init] data 目录创建失败: {e}')
+    # 诊断:测试 data 目录是否真的可写(权限问题的最直接验证)
+    try:
+        test_file = os.path.join(data_dir, '.write_test')
+        with open(test_file, 'w') as f:
+            f.write('ok')
+        os.remove(test_file)
+        print(f'[Diag] data 目录可写测试: 通过 ({data_dir})', flush=True)
+    except Exception as e:
+        print(f'[Diag] data 目录可写测试: 失败! ({data_dir}) 错误: {e}', flush=True)
 
     # 清理上次崩溃/异常退出残留的 SQLite 锁文件和 journal 文件。
     # 残留的 -journal/-wal/-shm 文件会导致下次启动时 "database is locked" 死锁,
@@ -336,7 +443,16 @@ def main():
 
     # 6. 启动 HTTP 服务器(serve Vue dist + API 端点)
     server, server_url = start_server(web_dir, bridge)
-    print(f'[Init] HTTP 服务器: {server_url}')
+    print(f'[Init] HTTP 服务器: {server_url}', flush=True)
+
+    # 诊断:测试本地服务器是否真的能访问(index.html 是否可加载)
+    try:
+        import urllib.request
+        with urllib.request.urlopen(server_url + '/', timeout=2) as resp:
+            html = resp.read(200)
+            print(f'[Diag] 本地服务器连通测试: 通过 (HTTP {resp.status}, 前{len(html)}字节)', flush=True)
+    except Exception as e:
+        print(f'[Diag] 本地服务器连通测试: 失败! 错误: {e}', flush=True)
 
     # 7. 创建主窗口(根据 window_mode 决定全屏/窗口)
     is_fullscreen = (cfg['window_mode'] == 'fullscreen')

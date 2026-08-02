@@ -233,12 +233,15 @@ def start_server(directory, bridge, port=0):
 
     # 固定端口优先:保证 origin(http://127.0.0.1:port)稳定,
     # 否则 localStorage/IndexedDB 会因端口变化而丢失(绑定配置、菜品缓存全部失效)。
-    # 候选端口按优先级尝试:1287 是终端默认端口,后续端口作为 fallback。
+    # 注意:不能用 80/443 等默认端口!浏览器对默认端口会省略端口号,
+    # 导致 origin 变成 http://127.0.0.1(不带端口),而非 http://127.0.0.1:80,
+    # 这会与后端 CORS 配置 http://127.0.0.1:* 不匹配(后者要求带 :port),
+    # 引发 CORS 跨域错误。必须使用非默认端口,让 origin 始终带端口号。
     if port != 0:
         # 调用方显式指定端口,直接用
         candidates = [port]
     else:
-        candidates = [1287, 1288, 1289, 1290, 1291]
+        candidates = [1287, 1288, 1289, 1290, 1291, 8888, 9090, 3000]
 
     server = None
     actual_port = None

@@ -7,12 +7,14 @@
 #   ./scripts/update.sh backend      # 仅更新后端
 #   ./scripts/update.sh admin-web    # 仅更新管理后台
 #   ./scripts/update.sh h5           # 仅更新 H5
-#   ./scripts/update.sh terminal     # 仅更新终端
 #
 # 此脚本不会重建 Docker 镜像,仅:
 #   1. git pull 拉取最新代码
 #   2. 在 Docker 容器中重新构建产物
 #   3. 重启对应服务(卷映射自动加载新产物)
+#
+# 注意:X86 终端不在 Docker 中部署,需在 Windows 上单独打包
+#       (运行 src-python/build_installer.py)
 #==============================================================
 
 set -e
@@ -44,7 +46,7 @@ fi
 # 3. 重启服务(不重建镜像)
 info "重启服务..."
 if [[ "$TARGET" == "all" ]]; then
-    docker compose restart backend admin-web h5 terminal
+    docker compose restart backend admin-web h5
 elif [[ "$TARGET" == "backend" ]]; then
     docker compose restart backend
 else

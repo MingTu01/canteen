@@ -13,6 +13,7 @@ import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -94,6 +95,21 @@ public class GlobalExceptionHandler {
         log.error("参数校验失败: {}", message, ex);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(400, "参数验证失败: " + message));
+    }
+
+    /**
+     * 静态资源/接口不存在(NoResourceFoundException)
+     * Spring Boot 6.x 新增异常:访问不存在的静态资源(如 /、/favicon.ico)时抛出。
+     * 旧版 Spring Boot 返回 404,6.x 改为抛异常,若不单独处理会被下面的
+     * RuntimeException 兜底捕获并返回 500,误导前端以为是服务器错误。
+     * 此处显式返回 404,与旧行为保持一致。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(NoResourceFoundException ex) {
+        // 静态资源不存在是正常情况(如 favicon.ico),不记录 ERROR 日志,仅 DEBUG
+        log.debug("资源不存在: {}", ex.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(404, "资源不存在"));
     }
 
     /**

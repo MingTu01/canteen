@@ -22,7 +22,7 @@
                     │                                                  │
    用户/浏览器 ──────┼──> 80  ──> [admin-web nginx] ──┐                 │
                     │      81 ──> [h5       nginx] ──┤  /api/          │
-   X86 终端  ───────┼──> 82 ──> [terminal  nginx] ──┤  反向代理       │
+   X86 终端(EXE) ───┼─────────────────────────────────┤  反向代理       │
                     │                                ├─────────────────┼──> [backend:8080]
                     │                                │     │           │     Spring Boot 3.5
                     │                                │     │           │     Java 25 + JWT
@@ -33,14 +33,15 @@
                     │                                                  │
                     └──────────────────────────────────────────────────┘
 
+  说明:X86 终端为独立 Windows EXE 安装包,不参与 Docker 部署,
+        通过 HTTPS 直连后端 API(默认地址 https://canteen.908521.xyz)。
+
   deploy/ 目录(卷映射,更新时只需替换文件):
   ├── backend/app.jar          → /app/app.jar
   ├── admin-web/html/          → /usr/share/nginx/html
   ├── admin-web/nginx.conf     → /etc/nginx/conf.d/default.conf
   ├── h5/html/                 → /usr/share/nginx/html
-  ├── h5/nginx.conf            → /etc/nginx/conf.d/default.conf
-  ├── terminal/html/           → /usr/share/nginx/html
-  └── terminal/nginx.conf      → /etc/nginx/conf.d/default.conf
+  └── h5/nginx.conf            → /etc/nginx/conf.d/default.conf
 ```
 
 ### 1.3 端口与目录映射
@@ -49,10 +50,11 @@
 |------|------|------|--------|------|
 | admin-web | 80 | nginx:alpine | deploy/admin-web/{html,nginx.conf} | 管理后台 |
 | h5 | 81 | nginx:alpine | deploy/h5/{html,nginx.conf} | H5 订餐端 |
-| terminal | 82 | nginx:alpine | deploy/terminal/{html,nginx.conf} | X86 终端 |
 | backend | 8080 | canteen-backend-runtime(基于 JRE 25) | deploy/backend/app.jar | 后端 API |
 | mysql | 127.0.0.1:3306 | mysql:8.0 | 卷 mysql_data | 数据库 |
 | redis | 127.0.0.1:6379 | redis:7-alpine | 卷 redis_data | 缓存 |
+
+> X86 终端为独立 Windows EXE 安装包,不参与 Docker 部署,打包方式见「第十章 X86 终端 EXE 安装包打包」。
 
 ### 1.4 持久化目录
 
@@ -130,8 +132,7 @@ curl http://localhost:8080/api/system/health
 # 3. 前端访问
 curl -o /dev/null -w "admin: %{http_code}\n"  http://localhost/
 curl -o /dev/null -w "h5: %{http_code}\n"    http://localhost:81/
-curl -o /dev/null -w "terminal: %{http_code}\n" http://localhost:82/
-# 期望: 三个都返回 200
+# 期望: 两个都返回 200
 ```
 
 ### 2.5 默认账号
@@ -170,12 +171,11 @@ cd /opt/canteen
 
 # 仅更新 H5
 ./scripts/update.sh h5
-
-# 仅更新终端
-./scripts/update.sh terminal
 ```
 
 `update.sh` 自动完成：`git pull` → `build.sh` → `docker compose restart`
+
+> X86 终端不在 Docker 中部署,更新方式见「第十章 X86 终端 EXE 安装包打包」。
 
 ### 3.3 手动更新（分步操作）
 
@@ -204,7 +204,7 @@ docker compose logs -f backend
 curl http://localhost:8080/api/system/health
 ```
 
-#### 3.3.2 更新前端（admin-web / h5 / terminal）
+#### 3.3.2 更新前端（admin-web / h5）
 
 ```bash
 cd /opt/canteen
@@ -213,15 +213,14 @@ cd /opt/canteen
 git pull
 
 # 2. 重新构建前端 dist（在 Docker 容器中构建，输出到 deploy/xxx/html/）
-./scripts/build.sh admin-web    # 或 h5 / terminal
+./scripts/build.sh admin-web    # 或 h5
 
 # 3. 重启对应容器
-docker compose restart admin-web    # 或 h5 / terminal
+docker compose restart admin-web    # 或 h5
 
 # 4. 验证
 curl -o /dev/null -w "%{http_code}\n" http://localhost/      # admin
 curl -o /dev/null -w "%{http_code}\n" http://localhost:81/   # h5
-curl -o /dev/null -w "%{http_code}\n" http://localhost:82/   # terminal
 
 # 5. 浏览器强制刷新（Vite 构建产物文件名带 contenthash，自动失效缓存）
 ```
@@ -238,7 +237,8 @@ curl -o /dev/null -w "%{http_code}\n" http://localhost:82/   # terminal
 | backend | 仅后端 | deploy/backend/app.jar |
 | admin-web | 仅管理后台 | deploy/admin-web/{html,nginx.conf} |
 | h5 | 仅 H5 | deploy/h5/{html,nginx.conf} |
-| terminal | 仅终端 | deploy/terminal/{html,nginx.conf} |
+
+> X86 终端不在 build.sh 构建范围内,需在 Windows 上运行 `src-python/build_installer.py` 打包。
 
 构建脚本特点：
 - **使用 Docker 容器构建**：宿主机无需安装 JDK 25 / Node.js 20
@@ -257,7 +257,7 @@ git checkout <旧版本commit>
 ./scripts/build.sh all
 
 # 3. 重启服务
-docker compose restart backend admin-web h5 terminal
+docker compose restart backend admin-web h5
 ```
 
 > **数据库回滚**：如果新版本包含数据库迁移，必须从升级前备份恢复：
@@ -344,9 +344,6 @@ git config --global url."https://ghproxy.net/https://github.com/".insteadOf "htt
 │   ├── h5/
 │   │   ├── html/                   # H5 dist 内容
 │   │   └── nginx.conf
-│   └── terminal/
-│       ├── html/                   # 终端 dist 内容
-│       └── nginx.conf
 ├── backup/                         # 数据库备份（持久化）
 ├── uploads/                        # 上传图片（持久化）
 ├── .m2-cache/                      # Maven 缓存（加速构建，gitignore）
@@ -537,35 +534,111 @@ rm -rf .m2-cache
 
 ### 9.5 X86 终端无法连接服务器
 
-1. 检查终端设置页的 API 地址是否正确：`http://<服务器IP>:8080`
-2. 检查服务器防火墙是否放行 8080 端口
-3. 检查 nginx 是否正确代理 `/api/` 到 backend
+1. 检查终端设置页的 API 地址是否正确（默认 `https://canteen.908521.xyz`，可改为服务器 IP/域名）
+2. 检查服务器防火墙/安全组是否放行后端端口（8080 或 443/HTTPS）
+3. 若使用域名 + HTTPS，确认 Nginx/反向代理已正确转发 `/api/` 到 backend
+4. 终端首次使用需完成「绑定」（管理员账号 + 食堂安全码），详见第十章
 
 ---
 
-## 十、X86 终端桌面端部署
+## 十、X86 终端 EXE 安装包打包
 
-### 10.1 打包
+> X86 终端（订餐机/取餐机）为独立 Windows 应用,**不参与 Docker 部署**,
+> 通过 PyInstaller + Inno Setup 打包为正式 EXE 安装包,内置 CH375 读卡器驱动,
+> 默认连接 `https://canteen.908521.xyz`。
 
-X86 终端使用 Python + PyQt5 打包为原生 EXE，在 Windows 上打包：
+### 10.1 打包前置条件
+
+在 **Windows 打包机**上准备以下环境：
+
+| 依赖 | 版本要求 | 说明 |
+|------|----------|------|
+| Node.js | 18+ | 构建终端 Vue 前端 |
+| Python | 3.10 **32 位** | PyInstaller 打包（OUR_IDR.dll 是 32 位,必须用 32 位 Python） |
+| PyQt5 + PyQtWebEngine | 最新 | `pip install PyQt5 PyQtWebEngine pyinstaller` |
+| Inno Setup | 6+ | 打包正式安装包,下载: https://jrsoftware.org/isdl.php |
+| CH375 驱动文件 | — | 放入 `src-python/drivers/`（CH375WDM.INF / CH375W64.SYS / CH375WDM.CAT 等） |
+
+> 驱动文件获取:南京沁恒电子官网 http://www.wch.cn/downloads/CH372DRV_EXE.html ,
+> 或随读卡器附赠光盘。详细清单见 `src-python/drivers/README.txt`。
+
+### 10.2 一键打包
 
 ```bash
 cd src-python
-pip install pyinstaller
-pyinstaller canteen-terminal.spec
-# 产物: dist/canteen-terminal/canteen-terminal.exe
+
+# 完整打包（构建前端 + PyInstaller + Inno Setup）
+python build_installer.py
+
+# 跳过已构建的前端
+python build_installer.py --skip-web
+
+# 跳过已构建的 PyInstaller,仅重新打包安装包
+python build_installer.py --skip-web --skip-py
+
+# 仅运行 Inno Setup（前端和 PyInstaller 产物均已就绪）
+python build_installer.py --only-iss
 ```
 
-### 10.2 部署到终端设备
+打包脚本自动完成三步：
 
-1. 将 `dist/canteen-terminal/` 整个目录复制到终端设备
-2. 首次运行 `读写器驱动安装32or64bit.exe` 安装读卡器驱动
-3. 运行 `canteen-terminal.exe`
-4. 连续点击窗口右上角 6 下 → 输入管理员密码 → 配置服务器地址
+| 步骤 | 说明 | 产物 |
+|------|------|------|
+| 1. 构建前端 | `npm run build`(终端 Vue 项目) | `terminal/dist/` |
+| 2. PyInstaller | 打包 Python + PyQt5 + 前端 + 驱动 | `dist/canteen-terminal/`(绿色目录版) |
+| 3. Inno Setup | 打包为正式安装包(含驱动自动安装) | `output/CanteenTerminal-Setup-1.0.0.exe` |
 
-### 10.3 终端更新
+> 若未安装 Inno Setup 或未设置 `ISCC_PATH` 环境变量,脚本会自动查找常见安装路径。
 
-替换 `canteen-terminal.exe` 同目录的文件，重启程序即可。
+### 10.3 安装包功能
+
+最终生成的 `CanteenTerminal-Setup-1.0.0.exe` 安装包具备：
+
+- 安装终端程序到 `C:\Program Files\CanteenTerminal\`
+- **自动安装 CH375 读卡器驱动**（调用 `pnputil /add-driver`，静默执行）
+- 创建开始菜单快捷方式 + 桌面快捷方式（可选）
+- 开机自启（可选）
+- 完整卸载程序（卸载时清理配置和缓存）
+- 默认 API 地址内置为 `https://canteen.908521.xyz`（绑定页自动填入）
+
+### 10.4 部署到终端设备
+
+1. 将 `CanteenTerminal-Setup-1.0.0.exe` 拷贝到终端 Windows 设备
+2. 双击运行安装包（需管理员权限,用于安装驱动）
+3. 安装完成后从开始菜单或桌面快捷方式启动「企业智慧食堂终端」
+4. 首次启动需绑定:
+   - 连续点击窗口右上角 6 下(2 秒内)→ 弹出密码框(管理员密码)
+   - 验证通过后进入配置页,确认/修改服务器地址(默认已填 `https://canteen.908521.xyz`)
+   - 输入管理员账号密码 + 食堂安全码 → 点击绑定
+5. 绑定成功后终端进入运行模式(订餐/取餐),刷卡即可使用
+
+### 10.5 终端更新
+
+重新在打包机上运行 `python build_installer.py` 生成新版本安装包,
+在终端设备上覆盖安装即可（配置数据保留）。
+
+> 仅更新前端/Python 逻辑而驱动未变时,也可只替换安装目录下的文件后重启程序,
+> 但推荐使用安装包覆盖安装,确保文件完整。
+
+### 10.6 手动分步打包（调试用）
+
+如需单独调试某一环节,可分步执行：
+
+```bash
+cd src-python
+
+# 1. 仅构建前端
+cd ../terminal && npm install --registry=https://registry.npmmirror.com && npm run build && cd ../src-python
+
+# 2. 仅运行 PyInstaller（生成绿色目录版 dist/canteen-terminal/）
+C:\Python310-32\python.exe -m PyInstaller canteen-terminal.spec --clean --noconfirm
+
+# 3. 仅运行 Inno Setup（生成正式安装包）
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+```
+
+绿色目录版 `dist/canteen-terminal/canteen-terminal.exe` 可直接运行测试,
+但不含驱动自动安装,需手动安装驱动后才能使用读卡器。
 
 ---
 
@@ -579,3 +652,7 @@ pyinstaller canteen-terminal.spec
 - 新增更新脚本 `scripts/update.sh`（pull + build + restart）
 - 全链路国内源加速：Docker 镜像源、阿里云 Maven、npmmirror
 - 文档补充 GitHub 加速器克隆方式
+- X86 终端从 Docker 部署中移除,改为 **PyInstaller + Inno Setup 正式 EXE 安装包**
+  - 内置 CH375 读卡器驱动,安装时自动调用 pnputil 安装
+  - 默认 API 地址 `https://canteen.908521.xyz`
+  - 打包脚本 `src-python/build_installer.py` 一键完成前端构建 + PyInstaller + Inno Setup

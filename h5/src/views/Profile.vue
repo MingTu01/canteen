@@ -190,7 +190,7 @@ const loadRecharges = async (): Promise<void> => {
   if (!authStore.employeeId) return
   rechargeLoading.value = true
   try {
-    recharges.value = await getMyRecharges(authStore.employeeId)
+    recharges.value = (await getMyRecharges(authStore.employeeId)) ?? []
   } catch {
     /* 拦截器已提示 */
   } finally {

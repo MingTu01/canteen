@@ -6,23 +6,32 @@
 
 set -e
 
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
 if [ -z "$1" ]; then
     echo "用法: $0 <backup_file.tar.gz>"
     echo ""
     echo "可用备份文件："
-    ls -lh /app/backup/*.tar.gz 2>/dev/null || ls -lh ./backup/*.tar.gz 2>/dev/null || echo "  无备份文件"
+    ls -lh "$PROJECT_DIR/backup/"*.tar.gz 2>/dev/null || echo "  无备份文件"
     exit 1
 fi
 
 BACKUP_FILE="$1"
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# 加载 .env(若存在),获取 MYSQL_ROOT_PASSWORD 等配置
+if [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    . "$PROJECT_DIR/.env"
+    set +a
+fi
 
 # 从环境变量或默认值获取数据库配置
 DB_HOST="${SPRING_DATASOURCE_HOST:-localhost}"
 DB_PORT="${SPRING_DATASOURCE_PORT:-3306}"
 DB_NAME="${MYSQL_DATABASE:-canteen}"
 DB_USER="${SPRING_DATASOURCE_USERNAME:-root}"
-DB_PASS="${SPRING_DATASOURCE_PASSWORD:-canteen2026}"
+# 优先 SPRING_DATASOURCE_PASSWORD,其次 MYSQL_ROOT_PASSWORD,最后默认值
+DB_PASS="${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-canteen2026}}"
 
 # Docker 环境检测
 if command -v docker &> /dev/null && docker ps | grep -q canteen-mysql; then

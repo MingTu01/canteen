@@ -70,7 +70,7 @@ const openOrderPicker = async (): Promise<void> => {
   if (!authStore.employeeId) return
   orderLoading.value = true
   try {
-    orders.value = await getMyOrders(authStore.employeeId)
+    orders.value = (await getMyOrders(authStore.employeeId)) ?? []
   } catch {
     /* 拦截器已提示 */
   } finally {

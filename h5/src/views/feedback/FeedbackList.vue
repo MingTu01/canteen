@@ -61,7 +61,7 @@ const categoryTagType = (c?: number): 'primary' | 'success' | 'warning' | 'defau
 const loadList = async (): Promise<void> => {
   loading.value = true
   try {
-    list.value = await getMyFeedback()
+    list.value = (await getMyFeedback()) ?? []
   } catch {
     /* 拦截器已提示 */
   } finally {

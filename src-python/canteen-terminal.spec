@@ -17,7 +17,8 @@ PyInstaller 打包配置 - 企业智慧食堂终端(绿色目录版)
   (菜品图片缓存失效)。onedir 模式下所有文件在 EXE 同目录,
   QtWebEngineProcess 能正确访问持久化目录,无锁冲突。
 
-  后续正式部署可用 Inno Setup 或 NSIS 将此目录打包为安装包。
+  正式部署用 Inno Setup 将此目录打包为安装包(installer.iss)。
+  安装包会自动安装 CH375 读卡器驱动 + VC++ 运行时 + 终端程序。
 """
 import os
 import PyQt5
@@ -36,7 +37,7 @@ a = Analysis(
     pathex=[SRC_DIR],
     binaries=[
         # (源路径, 目标目录)
-        # 把 OUR_IDR.dll 和 IDUSB.DLL 打包进目录
+        # 把 OUR_IDR.dll 和 IDUSB.DLL 打包进目录(读卡器 SDK 依赖)
         (os.path.join(SRC_DIR, 'OUR_IDR.dll'), '.'),
         (os.path.join(SRC_DIR, 'IDUSB.DLL'), '.'),
     ],
@@ -52,6 +53,10 @@ a = Analysis(
         # QtWebEngine 翻译文件(qtwebengine_locales 目录)
         (os.path.join(QT5_DIR, 'translations', 'qtwebengine_locales', '.'),
          os.path.join('PyQt5', 'Qt5', 'translations', 'qtwebengine_locales')),
+        # CH375 读卡器驱动文件(安装时由 Inno Setup 调用 pnputil 安装)
+        # 将 drivers/ 目录原样打包到 _internal/drivers/
+        # 文件清单:CH375WDM.INF / CH375WDM.CAT / CH375W64.SYS / CH375DLL.DLL / CH375DLL64.DLL
+        ('drivers', 'drivers'),
     ],
     hiddenimports=[
         # PyQt5 模块
@@ -101,12 +106,12 @@ exe = EXE(
         'IDUSB.DLL',
     ],
     runtime_tmpdir=None,
-    console=True,  # 显示控制台,方便看日志(正式部署可改 False)
+    console=False,  # 正式部署:不显示控制台窗口(日志仍写入 %LOCALAPPDATA%\CanteenTerminal\terminal.log)
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='icon.ico',  # 可选:图标
+    icon='icon.ico',  # 程序图标(食堂主题)
 )
 
 coll = COLLECT(

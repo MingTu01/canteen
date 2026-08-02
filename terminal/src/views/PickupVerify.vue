@@ -73,7 +73,7 @@ const fetchAndAdvance = async () => {
       .filter((o) => o.date === today && o.status === 1)
       .sort((a, b) => Number(a.mealType) - Number(b.mealType))
     if (pending.length === 0) {
-      // 无待取餐订单:提示用户并返回待机页(生产环境不生成模拟订单)
+      // 无待取餐订单:提示用户并返回待机页
       errorTitle.value = '暂无待取餐订单'
       errorMsg.value = '今日暂无待取餐订单,请先在订餐端下单'
       errorVariant.value = 'info'

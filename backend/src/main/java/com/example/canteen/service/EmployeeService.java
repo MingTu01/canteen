@@ -67,6 +67,9 @@ public class EmployeeService {
             pwd = generateDefaultPassword();
         }
         if (!pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
+            if (pwd.length() < 8) {
+                throw new BusinessException("密码至少8位");
+            }
             pwd = passwordEncoder.encode(pwd);
         }
         employee.setPassword(pwd);
@@ -106,9 +109,9 @@ public class EmployeeService {
         String pwd = employee.getPassword();
         if (pwd != null && !pwd.isBlank()
                 && !pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
-            // P1-6 校验密码长度
-            if (pwd.length() < 6) {
-                throw new BusinessException("密码至少6位");
+            // P1-6 校验密码长度(与全局策略一致:至少 8 位)
+            if (pwd.length() < 8) {
+                throw new BusinessException("密码至少8位");
             }
             employee.setPassword(passwordEncoder.encode(pwd));
             // P1-1 同步更新密码修改时间,使旧 token 失效
@@ -171,6 +174,9 @@ public class EmployeeService {
                     pwd = generateDefaultPassword();
                 }
                 if (!pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
+                    if (pwd.length() < 8) {
+                        throw new BusinessException("密码至少8位");
+                    }
                     pwd = passwordEncoder.encode(pwd);
                 }
                 e.setPassword(pwd);

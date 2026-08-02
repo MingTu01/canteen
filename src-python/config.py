@@ -1,21 +1,23 @@
 """
 config.json 配置文件读写。
 
-此文件与终端 EXE 放在同一目录下,修改后重启应用生效。
+配置文件存放在用户专属目录 %APPDATA%\\CanteenTerminal\\config.json,
+而非 EXE 同目录(安装版 EXE 在 Program Files 下只读)。
 支持 // 行注释(解析时自动去除)。
 管理员密码验证由后端 /api/admin/login 接口完成,无需本地配置。
 """
 import json
 import os
+import shutil
 import sys
 import re
 
 
 def get_exe_dir():
-    """获取 EXE 同目录路径(用于读写 config.json)。
+    """获取 EXE 同目录路径(用于查找 web 资源、DLL 等只读文件)。
 
-    PyInstaller 打包后,sys.executable 是 EXE 路径;
-    开发模式下,用 __file__ 所在目录。
+    注意:config.json 不再存放在此目录(安装版 EXE 在 Program Files 下只读),
+    改用 get_appdata_dir()。
     """
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
@@ -30,6 +32,30 @@ def get_meipass():
     if getattr(sys, 'frozen', False):
         return sys._MEIPASS
     return get_exe_dir()
+
+
+def get_appdata_dir():
+    """获取用户配置目录(%APPDATA%\\CanteenTerminal),用于存放 config.json。
+
+    安装版 EXE 位于 Program Files(对普通用户只读),
+    config.json 必须放在用户有写权限的目录,这是 Windows 程序的标准做法。
+    """
+    appdata = os.environ.get('APPDATA')
+    if not appdata:
+        appdata = os.path.expanduser('~\\AppData\\Roaming')
+    return os.path.join(appdata, 'CanteenTerminal')
+
+
+def get_local_appdata_dir():
+    """获取用户本地数据目录(%LOCALAPPDATA%\\CanteenTerminal)。
+
+    用于存放 QtWebEngine 持久化数据(LocalStorage/IndexedDB/Cookies/
+    Network State),需要可读写且不漫游。
+    """
+    appdata = os.environ.get('LOCALAPPDATA')
+    if not appdata:
+        appdata = os.path.expanduser('~\\AppData\\Local')
+    return os.path.join(appdata, 'CanteenTerminal')
 
 
 def strip_json_comments(content):
@@ -79,12 +105,12 @@ DEFAULT_CONFIG_JSON = """{
   //
   // 填写示例:
   //   局域网部署: "http://192.168.1.100:8080"
-  //   域名部署:   "https://canteen.xxx.com"
+  //   域名部署:   "https://canteen.908521.xyz"
   //   注意:不要带末尾斜杠 /,不要带 /api 后缀(程序会自动拼接)
   //
   // 管理员密码验证由后端 /api/admin/login 接口完成,
   // 无需在此文件配置密码,使用系统现有的管理员账号即可。
-  "server_url": "",
+  "server_url": "https://canteen.908521.xyz",
 
   // ============================================================
   // 终端运行参数
@@ -109,11 +135,37 @@ DEFAULT_CONFIG_JSON = """{
 """
 
 
+def get_config_path():
+    """返回 config.json 的实际路径(%APPDATA%\\CanteenTerminal\\config.json)。"""
+    return os.path.join(get_appdata_dir(), 'config.json')
+
+
+def migrate_legacy_config():
+    """从旧位置(EXE 同目录)迁移 config.json 到 %APPDATA%。
+
+    升级到新版后,旧 config.json 仍在 Program Files 下(只读),
+    迁移到用户目录以保证可读写且不丢失已配置的 server_url 等参数。
+    仅在目标不存在时迁移一次,避免覆盖。
+    """
+    new_path = get_config_path()
+    old_path = os.path.join(get_exe_dir(), 'config.json')
+    if not os.path.exists(new_path) and os.path.exists(old_path):
+        try:
+            os.makedirs(get_appdata_dir(), exist_ok=True)
+            shutil.copy2(old_path, new_path)
+            print(f'[Config] 已迁移旧配置: {old_path} -> {new_path}')
+        except Exception as e:
+            print(f'[Config] 迁移旧配置失败(将使用默认配置): {e}')
+
+
 def ensure_config_json():
-    """确保 config.json 存在于 EXE 同目录。首次运行时自动生成默认配置。"""
-    cfg_path = os.path.join(get_exe_dir(), 'config.json')
+    """确保 config.json 存在于 %APPDATA%。首次运行时自动生成默认配置。"""
+    migrate_legacy_config()
+    cfg_dir = get_appdata_dir()
+    cfg_path = get_config_path()
     if not os.path.exists(cfg_path):
         try:
+            os.makedirs(cfg_dir, exist_ok=True)
             with open(cfg_path, 'w', encoding='utf-8') as f:
                 f.write(DEFAULT_CONFIG_JSON)
             print(f'[Bootstrap] 默认 config.json 已生成: {cfg_path}')
@@ -122,7 +174,7 @@ def ensure_config_json():
 
 
 def read_config():
-    """读取 EXE 同目录的 config.json,返回 server_url。
+    """读取 config.json,返回 server_url。
 
     如果文件不存在或解析失败,返回空字符串。
     """
@@ -141,10 +193,10 @@ def read_full_config():
     缺失的字段用默认值填充,保证调用方能直接取到所有字段。
     """
     ensure_config_json()
-    cfg_path = os.path.join(get_exe_dir(), 'config.json')
-    # 默认值
+    cfg_path = get_config_path()
+    # 默认值(与 DEFAULT_CONFIG_JSON 中的预设地址保持一致)
     result = {
-        'server_url': '',
+        'server_url': 'https://canteen.908521.xyz',
         'window_mode': DEFAULT_WINDOW_MODE,
         'card_interval': DEFAULT_CARD_INTERVAL,
         'idle_timeout': DEFAULT_IDLE_TIMEOUT,
@@ -175,7 +227,7 @@ def write_config(updates):
     Args:
         updates: dict,要更新的字段(key 必须是 server_url/window_mode/card_interval/idle_timeout)
     """
-    cfg_path = os.path.join(get_exe_dir(), 'config.json')
+    cfg_path = get_config_path()
     # 读取现有配置(已含默认值)
     current = read_full_config()
     # 合并更新
@@ -184,6 +236,7 @@ def write_config(updates):
             current[key] = updates[key]
     # 写回(不带注释,但 JSON 格式化)
     try:
+        os.makedirs(get_appdata_dir(), exist_ok=True)
         with open(cfg_path, 'w', encoding='utf-8') as f:
             json.dump(current, f, ensure_ascii=False, indent=2)
         print(f'[Config] 配置已更新: {updates}')

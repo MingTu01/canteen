@@ -250,7 +250,7 @@ onMounted(async () => {
     diningTimes.value = slots
     // 加载今日菜单
     const today = time.date || formatDateStr(new Date())
-    menus.value = await getMenuByDate(storeId, today)
+    menus.value = (await getMenuByDate(storeId, today)) ?? []
     // 每 30 秒刷新服务器时间(更新分钟数,影响餐别判断)
     timer = setInterval(async () => {
       serverTime.value = await fetchServerTime()

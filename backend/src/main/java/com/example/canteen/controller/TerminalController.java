@@ -22,7 +22,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -144,33 +143,6 @@ public class TerminalController {
         result.put("token", newToken);
         result.put("storeId", storeId);
         result.put("storeName", store.getName());
-        return ApiResponse.success(result);
-    }
-
-    /**
-     * 终端本店员工精简列表(用于终端测试面板模拟刷卡)。
-     * 用终端 token(role=3)调用,从 token 取 storeId,只返回本店员工。
-     * 返回字段仅含 id/cardNo/name,不含 phone 等敏感 PII。
-     */
-    @GetMapping("/employees")
-    public ApiResponse<List<Map<String, Object>>> listStoreEmployees() {
-        Long storeId = SecurityContext.currentStoreId();
-        if (storeId == null) {
-            throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
-        }
-        List<Employee> employees = employeeMapper.selectList(
-                new LambdaQueryWrapper<Employee>()
-                        .eq(Employee::getStoreId, storeId)
-                        .eq(Employee::getIsDeleted, 0)
-                        .orderByAsc(Employee::getId)
-        );
-        List<Map<String, Object>> result = employees.stream().map(e -> {
-            Map<String, Object> m = new HashMap<>();
-            m.put("id", e.getId());
-            m.put("cardNo", e.getCardNo());
-            m.put("name", e.getName());
-            return m;
-        }).collect(java.util.stream.Collectors.toList());
         return ApiResponse.success(result);
     }
 

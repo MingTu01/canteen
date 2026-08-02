@@ -9,7 +9,6 @@
  *   - 先尝试刷卡(员工接口),失败再尝试取餐码核销
  *
  * 生产环境:仅支持 USB 读卡器/扫码枪(键盘模拟输入)
- * 测试模式已移除,如需调试请在开发环境(import.meta.env.DEV)单独添加
  */
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'

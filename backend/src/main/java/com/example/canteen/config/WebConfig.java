@@ -46,8 +46,6 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/sse/**",
                         // 公开接口:H5/terminal 免登录获取品牌信息
                         "/api/store/*/branding",
-                        // 测试员工列表(所有环境可用,用于登录页模拟刷卡)
-                        "/api/test/employees",
                         "/actuator/**"
                 );
     }
@@ -96,6 +94,13 @@ class CorsConfig implements WebMvcConfigurer {
                         "http://127.0.0.1:*",
                         "https://localhost:*",
                         "https://127.0.0.1:*",
+                        // 兜底:浏览器对默认端口(80/443)会省略端口号,
+                        // 导致 origin 为 http://127.0.0.1(不带端口),
+                        // 与 http://127.0.0.1:* 不匹配(后者要求带 :port)
+                        "http://localhost",
+                        "http://127.0.0.1",
+                        "https://localhost",
+                        "https://127.0.0.1",
                         // Tauri 桌面应用 origin(X86 终端 EXE)
                         "http://tauri.localhost",
                         "https://tauri.localhost",
@@ -114,6 +119,10 @@ class CorsConfig implements WebMvcConfigurer {
                         "http://127.0.0.1:*",
                         "https://localhost:*",
                         "https://127.0.0.1:*",
+                        "http://localhost",
+                        "http://127.0.0.1",
+                        "https://localhost",
+                        "https://127.0.0.1",
                         "http://tauri.localhost",
                         "https://tauri.localhost",
                         "tauri://localhost"

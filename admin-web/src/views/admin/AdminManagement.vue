@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   ElButton,
   ElDialog,
@@ -67,11 +67,18 @@ function defaultAdmin(): Admin {
   return { username: '', name: '', password: '', storeId: undefined, role: 2, status: 1 }
 }
 
-const rules: FormRules = {
+const rules = computed<FormRules>(() => ({
   username: [{ required: true, message: '请输入登录账号', trigger: 'blur' }],
   name: [{ required: true, message: '请输入管理员姓名', trigger: 'blur' }],
   storeId: [{ required: true, message: '请选择所属食堂', trigger: 'change' }],
-}
+  // 新增时密码必填且≥8位;编辑时密码可空(空=不修改),填了则校验≥8位
+  password: isEdit.value
+    ? [{ min: 8, message: '密码至少 8 位', trigger: 'blur' }]
+    : [
+        { required: true, message: '请输入密码', trigger: 'blur' },
+        { min: 8, message: '密码至少 8 位', trigger: 'blur' },
+      ],
+}))
 
 const openAdd = () => {
   isEdit.value = false

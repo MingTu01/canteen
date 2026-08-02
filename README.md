@@ -31,7 +31,7 @@ sudo ./deploy.sh
 | 终端桌面壳 | Python 3.10（32 位）+ PyQt5 + QWebEngineView（兼容 Win7/Win7 32 位） |
 | 认证 | JWT Token + HttpOnly Cookie + BCrypt 密码加密 |
 | 数据库迁移 | Flyway（V1~V13）+ SchemaMigrationRunner（增量补丁） |
-| 部署 | Docker Compose |
+| 部署 | Docker Compose（后端/管理后台/H5）+ PyInstaller + Inno Setup EXE 安装包（X86 终端） |
 
 ## 项目结构
 
@@ -119,10 +119,12 @@ cd /opt/canteen
 ./scripts/update.sh backend
 
 # 仅更新前端
-./scripts/update.sh admin-web    # 或 h5 / terminal
+./scripts/update.sh admin-web    # 或 h5
 ```
 
 更新脚本自动完成：`git pull` → 在 Docker 容器中构建产物 → 重启对应服务。**全程不涉及镜像重建**。
+
+> X86 终端不在 Docker 中部署,需在 Windows 上运行 `src-python/build_installer.py` 打包为 EXE 安装包,详见 [DEPLOYMENT.md](DEPLOYMENT.md) 第十章。
 
 ### 本机开发（恢复测试数据）
 
@@ -141,8 +143,9 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 |----|------|------|
 | 管理后台 | http://localhost | admin / 123456 |
 | H5 订餐端 | http://localhost:81 | 员工订餐 |
-| X86 终端（预览） | http://localhost:82 | 订餐机 / 取餐机 |
 | 后端 API | http://localhost:8080 | `/api/system/health` 健康检查 |
+
+> X86 终端为独立 Windows EXE 安装包,不在 Docker 中部署,默认连接 `https://canteen.908521.xyz`。
 
 ### 默认账号
 
@@ -176,20 +179,35 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 
 ## X86 终端
 
-终端使用 **Python + PyQt5 + QWebEngineView** 打包为原生 EXE（`src-python/dist/canteen-terminal/canteen-terminal.exe`），绿色免安装目录版，**默认全屏无边框启动**，兼容 Win7/Win10/Win11 32/64 位。
+终端使用 **Python + PyQt5 + QWebEngineView** 打包为正式 Windows EXE 安装包（`src-python/output/CanteenTerminal-Setup-1.0.0.exe`），**内置 CH375 读卡器驱动自动安装**，默认连接 `https://canteen.908521.xyz`，兼容 Win7/Win10/Win11 32/64 位。
+
+> X86 终端不参与 Docker 部署,需在 Windows 打包机上运行 `src-python/build_installer.py` 生成安装包。详细打包流程见 [DEPLOYMENT.md](DEPLOYMENT.md) 第十章。
+
+### 一键打包
+
+```bash
+cd src-python
+
+# 完整打包（前端 + PyInstaller + Inno Setup）
+python build_installer.py
+
+# 产物: output/CanteenTerminal-Setup-1.0.0.exe
+```
+
+前置条件：Node.js 18+、Python 3.10 **32 位**（含 PyQt5/PyQtWebEngine/pyinstaller）、Inno Setup 6+、CH375 驱动文件放入 `src-python/drivers/`。
 
 详细架构与配置说明见 [05-PythonShell.md](file:///d:/文档/enterprise-canteen/enterprise-canteen/docs/05-PythonShell.md)。
 
 ### config.json 配置
 
-EXE 同目录放置 `config.json`（支持 `//` 行注释）配置以下字段：
+安装目录下 `config.json`（支持 `//` 行注释）配置以下字段：
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `server_url` | string | `""` | 预设后端服务器地址，绑定页面会自动填入；留空则要求手动输入。不要带末尾斜杠 `/`，不要带 `/api` 后缀 |
+| `server_url` | string | `"https://canteen.908521.xyz"` | 预设后端服务器地址，绑定页面会自动填入；留空则要求手动输入。不要带末尾斜杠 `/`，不要带 `/api` 后缀 |
 | `window_mode` | string | `"fullscreen"` | `"fullscreen"`（全屏无边框）或 `"windowed"`（1280×800 窗口） |
-| `card_interval` | float | `2.0` | 读卡防抖间隔（秒），推荐 1.0~3.0 |
-| `idle_timeout` | int | `30` | 无操作自动返回待机页时间（秒），0=永不 |
+| `card_interval` | float | `2.5` | 读卡防抖间隔（秒），推荐 1.0~3.0 |
+| `idle_timeout` | int | `120` | 无操作自动返回待机页时间（秒），0=永不 |
 
 > 管理员密码验证由后端 `/api/admin/login` 接口完成（BCrypt），**config.json 中无密码字段**。
 
@@ -203,15 +221,15 @@ EXE 同目录放置 `config.json`（支持 `//` 行注释）配置以下字段�
 ### 终端本地配置（localStorage）
 
 通过设置页面配置：
-1. 服务器 API 地址
+1. 服务器 API 地址（默认已填 `https://canteen.908521.xyz`）
 2. 管理员账号密码 + 食堂安全码（绑定签发终端 token）
 3. 运行模式（订餐 / 取餐）
 
 配置存储在终端本地，不同终端可独立配置。本地 IndexedDB 缓存菜品、菜品图片、菜单、员工头像数据，断网时仍可展示，**减少服务器压力**。
 
-### CH372 读卡器驱动
+### CH375 读卡器驱动
 
-内置 CH372/CH375/CH376 USB 芯片驱动（通过 ctypes 调 `OUR_IDR.dll` + `IDUSB.DLL`），支持 VID_4348&PID_5537 等多种芯片。首次部署时运行 `读写器驱动安装32or64bit.exe` 安装。
+内置 CH372/CH375/CH376 USB 芯片驱动（通过 ctypes 调 `OUR_IDR.dll` + `IDUSB.DLL`），支持 VID_4348&PID_5537 等多种芯片。**安装包安装时自动调用 pnputil 安装驱动**,无需手动运行驱动安装程序。
 
 ## 数据备份
 
