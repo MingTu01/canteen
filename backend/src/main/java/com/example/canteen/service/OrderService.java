@@ -45,15 +45,18 @@ public class OrderService {
     private final DishMapper dishMapper;
     private final EmployeeMapper employeeMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final WechatNotifyService wechatNotifyService;
 
     public OrderService(OrderMapper orderMapper, OrderItemMapper orderItemMapper,
                         DishMapper dishMapper, EmployeeMapper employeeMapper,
-                        JdbcTemplate jdbcTemplate) {
+                        JdbcTemplate jdbcTemplate,
+                        WechatNotifyService wechatNotifyService) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.dishMapper = dishMapper;
         this.employeeMapper = employeeMapper;
         this.jdbcTemplate = jdbcTemplate;
+        this.wechatNotifyService = wechatNotifyService;
     }
 
     /**
@@ -228,6 +231,14 @@ public class OrderService {
             item.setPrice(dish.getPrice());
             item.setQuantity(itemDTO.getQuantity());
             orderItemMapper.insert(item);
+        }
+
+        // 微信公众号模板消息推送(含订单日期、餐次、金额、取餐码)
+        // 事务提交后异步推送,失败仅记录日志,不影响下单主流程
+        try {
+            wechatNotifyService.notifyOrderCreated(order, employee);
+        } catch (Exception e) {
+            log.warn("微信订单通知推送异常: orderId={}, error={}", order.getId(), e.getMessage());
         }
 
         return order;

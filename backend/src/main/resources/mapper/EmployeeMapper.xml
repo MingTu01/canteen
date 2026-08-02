@@ -23,6 +23,12 @@
         LIMIT 1
     </select>
 
+    <select id="selectByWxOpenid" resultType="com.example.canteen.entity.Employee">
+        SELECT * FROM employee
+        WHERE wx_openid = #{wxOpenid} AND status = 1 AND is_deleted = 0
+        LIMIT 1
+    </select>
+
     <update id="deductBalance">
         UPDATE employee SET balance = balance - #{amount}, updated_at = NOW()
         WHERE id = #{id} AND balance >= #{amount} AND is_deleted = 0

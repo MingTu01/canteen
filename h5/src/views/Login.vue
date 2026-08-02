@@ -38,6 +38,19 @@ const branding = computed(() => brandingStore.branding)
 /** 版本号 */
 const version = __APP_VERSION__
 
+// ============ 微信登录回调处理 ============
+/** 微信回调处理中 */
+const wechatLoading = ref(false)
+/** 微信绑定弹窗 */
+const showBindPopup = ref(false)
+/** 微信绑定表单 */
+const bindForm = reactive({
+  bindToken: '',
+  phone: '',
+  password: '',
+})
+const bindSubmitting = ref(false)
+
 /** 校验手机号格式(中国大陆:第二位 3-9) */
 const validatePhone = (val: string): boolean => /^1[3-9]\d{9}$/.test(val)
 
@@ -92,10 +105,82 @@ const onWechatLogin = (): void => {
   wechatLogin()
 }
 
+/**
+ * 处理微信授权回调:URL 带 code 参数时自动触发。
+ * 已绑定 openid → 直接登录成功;未绑定 → 弹窗输入手机号+密码。
+ */
+const handleWechatCallback = async (code: string): Promise<void> => {
+  wechatLoading.value = true
+  try {
+    const emp = await authStore.wechatLogin(code)
+    showSuccessToast('微信登录成功')
+    if (emp.storeId) {
+      brandingStore.fetchBranding(emp.storeId).catch(() => {
+        /* 忽略 */
+      })
+    }
+    // 清除 URL 中的 code 参数,避免刷新重复触发
+    router.replace('/')
+  } catch (e: unknown) {
+    const err = e as Error & { needBind?: boolean; bindToken?: string }
+    if (err.needBind && err.bindToken) {
+      // 未绑定,弹窗输入手机号+密码
+      bindForm.bindToken = err.bindToken
+      bindForm.phone = ''
+      bindForm.password = ''
+      showBindPopup.value = true
+      // 清除 URL 中的 code 参数
+      router.replace('/login')
+    }
+    // 其他错误由拦截器 toast 提示
+  } finally {
+    wechatLoading.value = false
+  }
+}
+
+/** 微信绑定提交 */
+const onBindSubmit = async (): Promise<void> => {
+  if (!bindForm.phone) {
+    showFailToast('请输入手机号')
+    return
+  }
+  if (!validatePhone(bindForm.phone)) {
+    showFailToast('手机号格式不正确')
+    return
+  }
+  if (!bindForm.password) {
+    showFailToast('请输入密码')
+    return
+  }
+
+  bindSubmitting.value = true
+  try {
+    const emp = await authStore.wechatBind(bindForm.bindToken, bindForm.phone, bindForm.password)
+    showSuccessToast('绑定并登录成功')
+    showBindPopup.value = false
+    if (emp.storeId) {
+      brandingStore.fetchBranding(emp.storeId).catch(() => {
+        /* 忽略 */
+      })
+    }
+    router.replace('/')
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    bindSubmitting.value = false
+  }
+}
+
 onMounted(() => {
   // 如果已经登录,跳首页(路由守卫也会处理,这里双保险)
   if (authStore.isLoggedIn) {
     router.replace('/')
+    return
+  }
+  // 微信授权回调:URL query 带 code 参数
+  const code = route.query.code
+  if (typeof code === 'string' && code.length > 0) {
+    handleWechatCallback(code)
   }
 })
 </script>
@@ -179,6 +264,60 @@ onMounted(() => {
       <div class="login-page__version">v{{ version }}</div>
       <div class="login-page__copyright">© {{ new Date().getFullYear() }} 企业食堂订餐系统</div>
     </div>
+
+    <!-- 微信回调处理中遮罩 -->
+    <van-overlay :show="wechatLoading" z-index="9999">
+      <div class="login-page__wechat-loading">
+        <van-loading size="36px" color="#ffffff">微信登录中...</van-loading>
+      </div>
+    </van-overlay>
+
+    <!-- 微信绑定弹窗:首次微信登录需输入手机号+密码验证身份 -->
+    <van-popup
+      v-model:show="showBindPopup"
+      position="bottom"
+      round
+      closeable
+      :close-on-click-overlay="false"
+      :style="{ maxHeight: '80%' }"
+    >
+      <div class="bind-popup">
+        <div class="bind-popup__title">绑定员工账号</div>
+        <p class="bind-popup__desc">
+          首次使用微信登录,请输入手机号和密码验证身份并完成绑定。绑定后可直接微信一键登录。
+        </p>
+        <van-cell-group inset>
+          <van-field
+            v-model="bindForm.phone"
+            label="手机号"
+            placeholder="请输入手机号"
+            type="tel"
+            maxlength="11"
+            clearable
+            :label-align="fieldAlign"
+          />
+          <van-field
+            v-model="bindForm.password"
+            label="密码"
+            placeholder="请输入密码(至少 8 位)"
+            type="password"
+            maxlength="20"
+            :label-align="fieldAlign"
+          />
+        </van-cell-group>
+        <div class="bind-popup__footer">
+          <van-button
+            block
+            round
+            type="primary"
+            :loading="bindSubmitting"
+            @click="onBindSubmit"
+          >
+            绑定并登录
+          </van-button>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -269,6 +408,36 @@ onMounted(() => {
     margin-top: 4px;
     font-size: 11px;
     color: $text-placeholder;
+  }
+
+  &__wechat-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+}
+
+/* 微信绑定弹窗 */
+.bind-popup {
+  padding: 20px 0 calc(env(safe-area-inset-bottom) + 16px);
+
+  &__title {
+    padding: 0 16px;
+    font-size: 17px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__desc {
+    padding: 8px 16px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: $text-secondary;
+  }
+
+  &__footer {
+    margin: 16px 16px 0;
   }
 }
 </style>

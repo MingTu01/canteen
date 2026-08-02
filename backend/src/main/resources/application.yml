@@ -81,6 +81,21 @@ jwt:
   # 终端 token 过期时间(默认 365 天,避免 7x24 终端频繁失绑)
   terminal-expiration: ${JWT_TERMINAL_EXPIRATION:31536000000}
 
+# 微信公众号网页授权配置(可选,未配置时 H5 微信登录按钮提示"未配置")
+# 在微信公众号后台 → 设置与开发 → 公众号设置 → 功能设置 → 网页授权域名 填写 H5 访问域名
+wechat:
+  app-id: ${WECHAT_APP_ID:}
+  app-secret: ${WECHAT_APP_SECRET:}
+  # 模板消息(可选):配置后在公众号后台「模板消息」中申请对应模板,填入模板ID即可启用推送
+  # 通知/公告/活动模板:字段需含 title / content / time(在公众号后台按此命名申请)
+  template:
+    notify: ${WECHAT_TEMPLATE_NOTIFY:}
+    # 订单创建模板:字段需含 orderDate / mealType / amount / pickupCode / time
+    order: ${WECHAT_TEMPLATE_ORDER:}
+  # H5 访问基础URL(用于模板消息点击跳转,如 https://canteen.example.com)
+  # 反向代理场景填外网域名;末尾不带斜杠
+  h5-base-url: ${WECHAT_H5_BASE_URL:}
+
 logging:
   level:
     com.example.canteen: INFO

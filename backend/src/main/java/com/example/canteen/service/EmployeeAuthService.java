@@ -109,6 +109,8 @@ public class EmployeeAuthService {
         employee.setPassword(passwordEncoder.encode(newPassword));
         // 同步更新密码修改时间,使旧 token 失效(JwtAuthenticationFilter 校验 iat < passwordUpdatedAt)
         employee.setPasswordUpdatedAt(LocalDateTime.now());
+        // 清除"必须修改密码"标志
+        employee.setMustChangePassword(0);
         employeeMapper.updateById(employee);
         rateLimiter.recordSuccess(rateLimitKey);
     }

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS employee (
     phone VARCHAR(20),
     wx_openid VARCHAR(64),
     password_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    must_change_password INT DEFAULT 0,
     is_deleted INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

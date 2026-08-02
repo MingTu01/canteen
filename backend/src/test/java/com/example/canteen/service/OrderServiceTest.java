@@ -42,6 +42,7 @@ class OrderServiceTest {
     private DishMapper dishMapper;
     private EmployeeMapper employeeMapper;
     private JdbcTemplate jdbcTemplate;
+    private WechatNotifyService wechatNotifyService;
     private OrderService orderService;
 
     private Employee testEmployee;
@@ -55,10 +56,12 @@ class OrderServiceTest {
         dishMapper = mock(DishMapper.class);
         employeeMapper = mock(EmployeeMapper.class);
         jdbcTemplate = mock(JdbcTemplate.class);
+        wechatNotifyService = mock(WechatNotifyService.class);
         // 订单截止时间配置:默认 15:00(测试用例均使用今日日期,实际不会被读取)
         when(jdbcTemplate.queryForObject(anyString(), eq(String.class), anyString()))
                 .thenReturn("15:00");
-        orderService = new OrderService(orderMapper, orderItemMapper, dishMapper, employeeMapper, jdbcTemplate);
+        orderService = new OrderService(orderMapper, orderItemMapper, dishMapper, employeeMapper,
+                jdbcTemplate, wechatNotifyService);
 
         testEmployee = new Employee();
         testEmployee.setId(1L);

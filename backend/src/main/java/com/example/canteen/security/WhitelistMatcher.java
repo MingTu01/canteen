@@ -39,6 +39,8 @@ public class WhitelistMatcher {
             "/h2-console",
             // 上传的静态图片资源:/uploads/xxx.jpg
             "/uploads/",
+            // 微信登录三步接口(auth-url / login / bind),未登录态调用
+            "/api/employee/wechat/",
     };
 
     /** 公开接口正则:GET /api/store/{id}/branding */

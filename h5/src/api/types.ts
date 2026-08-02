@@ -38,6 +38,8 @@ export interface Employee {
   departmentName?: string
   balance?: number
   status?: number
+  /** 是否需要强制修改密码(1=首次登录使用默认密码,需强制改密) */
+  mustChangePassword?: number
   createdAt?: string
   updatedAt?: string
 }

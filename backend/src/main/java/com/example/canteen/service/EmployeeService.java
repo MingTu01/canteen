@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -61,10 +60,12 @@ public class EmployeeService {
         if (employee.getIsDeleted() == null) {
             employee.setIsDeleted(0);
         }
-        // P1-5 密码哈希:若未提供则生成随机 8 位密码;若已是 BCrypt 则保留
+        // P1-5 密码哈希:若未提供则使用默认密码 12345678;若已是 BCrypt 则保留
+        boolean usedDefaultPassword = false;
         String pwd = employee.getPassword();
         if (pwd == null || pwd.isBlank()) {
             pwd = generateDefaultPassword();
+            usedDefaultPassword = true;
         }
         if (!pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
             if (pwd.length() < 8) {
@@ -73,6 +74,8 @@ public class EmployeeService {
             pwd = passwordEncoder.encode(pwd);
         }
         employee.setPassword(pwd);
+        // 使用了默认密码 → 标记首次登录必须修改
+        employee.setMustChangePassword(usedDefaultPassword ? 1 : 0);
         // 初始化密码更新时间(用于 JWT 失效校验)
         if (employee.getPasswordUpdatedAt() == null) {
             employee.setPasswordUpdatedAt(LocalDateTime.now());
@@ -81,15 +84,12 @@ public class EmployeeService {
         return employee;
     }
 
-    /** P1-5 生成随机 8 位默认密码(排除易混淆字符 0/O/1/I/l) */
+    /** 默认初始密码(配合 H5 首次登录强制修改密码使用) */
+    private static final String DEFAULT_PASSWORD = "12345678";
+
+    /** 返回默认初始密码(未显式指定密码时使用,H5 首次登录会强制修改) */
     private String generateDefaultPassword() {
-        String chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-        SecureRandom random = new SecureRandom();
-        StringBuilder sb = new StringBuilder(8);
-        for (int i = 0; i < 8; i++) {
-            sb.append(chars.charAt(random.nextInt(chars.length())));
-        }
-        return sb.toString();
+        return DEFAULT_PASSWORD;
     }
 
     public Employee updateEmployee(Employee employee) {
@@ -168,10 +168,12 @@ public class EmployeeService {
                 if (e.getDepartmentId() == null && e.getDepartmentName() != null) {
                     e.setDepartmentId(deptNameToId.get(e.getDepartmentName().trim()));
                 }
-                // P1-5 密码处理:未提供则生成随机 8 位密码
+                // P1-5 密码处理:未提供则使用默认密码 12345678
+                boolean usedDefault = false;
                 String pwd = e.getPassword();
                 if (pwd == null || pwd.isBlank()) {
                     pwd = generateDefaultPassword();
+                    usedDefault = true;
                 }
                 if (!pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
                     if (pwd.length() < 8) {
@@ -180,6 +182,7 @@ public class EmployeeService {
                     pwd = passwordEncoder.encode(pwd);
                 }
                 e.setPassword(pwd);
+                e.setMustChangePassword(usedDefault ? 1 : 0);
                 employeeMapper.insert(e);
                 success++;
             } catch (Exception ex) {

@@ -332,8 +332,9 @@ main() {
             if [ "$code" = "200" ]; then
                 info "${name} (port ${port}): 正常"
             else
-                # 前端失败不触发回退(可能只是 nginx 缓存问题),仅警告
-                warn "${name} (port ${port}): HTTP ${code}(可能需要等待)"
+                # 前端失败也触发回退(可能是构建产物为空导致 nginx 403)
+                error "${name} (port ${port}): HTTP ${code}(前端不可用)"
+                health_ok=false
             fi
         done
     fi

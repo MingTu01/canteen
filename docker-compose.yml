@@ -120,6 +120,13 @@ services:
       INIT_ADMIN_USERNAME: ${INIT_ADMIN_USERNAME:-}
       INIT_ADMIN_PASSWORD: ${INIT_ADMIN_PASSWORD:-}
       INIT_ADMIN_FORCE: ${INIT_ADMIN_FORCE:-}
+      # 微信公众号登录(可选,配置后 H5 微信浏览器内可一键登录)
+      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-}
+      # 微信公众号模板消息推送(可选,配置后通知发布/下单成功时推送)
+      WECHAT_TEMPLATE_NOTIFY: ${WECHAT_TEMPLATE_NOTIFY:-}
+      WECHAT_TEMPLATE_ORDER: ${WECHAT_TEMPLATE_ORDER:-}
+      WECHAT_H5_BASE_URL: ${WECHAT_H5_BASE_URL:-}
     ports:
       # 绑定 0.0.0.0 让局域网 X86 终端可访问
       # 宿主机端口 18082(不常用端口,避免与 nginx 等冲突)

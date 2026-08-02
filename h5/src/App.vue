@@ -3,12 +3,14 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import router from '@/router'
 import TabBar from '@/components/TabBar.vue'
+import ForceChangePassword from '@/components/ForceChangePassword.vue'
 
 /**
  * 根组件:
  * - RouterView 渲染路由页面
  * - 底部 TabBar(首页/订餐/订单/我的),登录页与详情/表单页隐藏
  * - keep-alive 缓存首页和订餐页(meta.keepAlive = true)
+ * - ForceChangePassword:首次登录强制改密弹窗(全局挂载)
  */
 const route = useRoute()
 
@@ -36,6 +38,9 @@ const hideTabbar = computed<boolean>(() => !!route.meta.hideTabbar)
     </router-view>
 
     <TabBar v-if="!hideTabbar" />
+
+    <!-- 首次登录强制修改密码弹窗(全局) -->
+    <ForceChangePassword />
   </div>
 </template>
 

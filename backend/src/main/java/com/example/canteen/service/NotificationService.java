@@ -18,9 +18,12 @@ import java.util.List;
 public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
     private final NotificationMapper notificationMapper;
+    private final WechatNotifyService wechatNotifyService;
 
-    public NotificationService(NotificationMapper notificationMapper) {
+    public NotificationService(NotificationMapper notificationMapper,
+                               WechatNotifyService wechatNotifyService) {
         this.notificationMapper = notificationMapper;
+        this.wechatNotifyService = wechatNotifyService;
     }
 
     /**
@@ -62,6 +65,14 @@ public class NotificationService {
         validateSchedule(notification);
         normalizeDefaultStatus(notification);
         notificationMapper.insert(notification);
+        // 微信推送(status=1 且已到上架时间才推送,内部已校验)
+        // WechatNotifyService.notifyNotificationPublished 为 @Async,不阻塞主流程
+        try {
+            wechatNotifyService.notifyNotificationPublished(notification);
+        } catch (Exception e) {
+            log.warn("微信通知推送异常: notificationId={}, error={}",
+                    notification.getId(), e.getMessage());
+        }
         return notification;
     }
 
@@ -74,7 +85,19 @@ public class NotificationService {
         validateSchedule(notification);
         // 防止越权修改 storeId
         notification.setStoreId(existing.getStoreId());
+        // 判断是否为"上架"操作(从 status=0 变为 status=1),需要推送微信
+        boolean publishTransition = existing.getStatus() != null && existing.getStatus() == 0
+                && notification.getStatus() != null && notification.getStatus() == 1;
         notificationMapper.updateById(notification);
+        // 上架操作触发微信推送(避免编辑已上架通知时重复推送)
+        if (publishTransition) {
+            try {
+                wechatNotifyService.notifyNotificationPublished(notification);
+            } catch (Exception e) {
+                log.warn("微信通知推送异常: notificationId={}, error={}",
+                        notification.getId(), e.getMessage());
+            }
+        }
         return notification;
     }
 

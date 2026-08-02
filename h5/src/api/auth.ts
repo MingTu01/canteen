@@ -1,5 +1,5 @@
 import { post, put, get } from './index'
-import type { EmployeeLoginResult, EmployeeQrcode } from './types'
+import type { Employee, EmployeeLoginResult, EmployeeQrcode } from './types'
 
 /**
  * 认证相关 API
@@ -32,4 +32,46 @@ export function changePassword(oldPassword: string, newPassword: string): Promis
 /** 获取当前登录员工的身份二维码内容(供取餐终端扫码) */
 export function getMyQrcode(): Promise<EmployeeQrcode> {
   return get<EmployeeQrcode>('/employee/my-qrcode')
+}
+
+/** 获取当前登录员工的完整信息(基于 token,无需传 ID) */
+export function getMe(): Promise<Employee> {
+  return get<Employee>('/employee/me')
+}
+
+/* ============================================================
+ * 微信登录相关
+ * ============================================================ */
+
+/** 微信授权 URL 响应 */
+export interface WechatAuthUrlResult {
+  authUrl: string
+}
+
+/** 微信登录响应(两种状态:直接登录成功 / 需要绑定) */
+export interface WechatLoginResult {
+  /** "login" = 已绑定直接登录成功;"need_bind" = 未绑定需输入手机号+密码 */
+  status: 'login' | 'need_bind'
+  /** status=login 时返回 */
+  token?: string
+  employee?: Employee
+  /** status=need_bind 时返回,用于后续绑定接口 */
+  bindToken?: string
+}
+
+/** 获取微信网页授权 URL(后端拼接完整回调地址) */
+export function getWechatAuthUrl(redirect?: string): Promise<WechatAuthUrlResult> {
+  return get<WechatAuthUrlResult>('/employee/wechat/auth-url', {
+    params: redirect ? { redirect } : {},
+  })
+}
+
+/** 微信授权码登录:已绑定则直接登录,未绑定返回 bindToken */
+export function wechatLogin(code: string): Promise<WechatLoginResult> {
+  return post<WechatLoginResult>('/employee/wechat/login', { code })
+}
+
+/** 微信绑定:通过手机号+密码验证身份,绑定 openid 后自动登录 */
+export function wechatBind(bindToken: string, phone: string, password: string): Promise<EmployeeLoginResult> {
+  return post<EmployeeLoginResult>('/employee/wechat/bind', { bindToken, phone, password })
 }

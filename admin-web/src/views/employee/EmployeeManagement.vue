@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   ElButton,
   ElDialog,
@@ -18,7 +18,7 @@ import {
   ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
-import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X, CreditCard, Usb } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -78,7 +78,7 @@ const defaultEmployee = (): Employee => ({
   name: '',
   avatar: '',
   departmentId: undefined,
-  balance: 0,
+  balance: 5000,
   password: '',
   status: 1,
 })
@@ -100,6 +100,147 @@ const openEdit = (row: Employee) => {
   form.value = { ...row, password: '' }
   dialogVisible.value = true
 }
+
+// ===== 读卡器刷卡填卡号 =====
+// 支持两种读卡器模式:
+// 1. 键盘模拟模式(HID 楔形读卡器):读卡器模拟键盘输入卡号+回车,所有浏览器通用
+// 2. 串口模式(Web Serial API):直接连接读卡器的串口,仅 Chrome/Edge 89+ 支持
+const cardReading = ref(false)
+const cardReadBuffer = ref('')
+let cardReadTimer: ReturnType<typeof setTimeout> | null = null
+let serialPort: any = null
+let serialReader: any = null
+
+/** 开始键盘模拟模式读卡 */
+const startKeyboardCardRead = () => {
+  cardReading.value = true
+  cardReadBuffer.value = ''
+  ElMessage.info('请刷卡…')
+}
+
+/** 停止键盘模拟模式读卡 */
+const stopKeyboardCardRead = () => {
+  cardReading.value = false
+  cardReadBuffer.value = ''
+  if (cardReadTimer) {
+    clearTimeout(cardReadTimer)
+    cardReadTimer = null
+  }
+}
+
+/** 键盘模式读卡:捕获快速连续输入,以回车结尾视为完整卡号 */
+const handleCardKeydown = (e: KeyboardEvent) => {
+  if (!cardReading.value) return
+  // 读卡器输入通常很快,忽略修饰键
+  if (e.ctrlKey || e.altKey || e.metaKey) return
+
+  if (e.key === 'Enter') {
+    // 回车 = 读卡结束
+    if (cardReadBuffer.value.length > 0) {
+      form.value.cardNo = cardReadBuffer.value.trim()
+      ElMessage.success('读卡成功')
+    }
+    stopKeyboardCardRead()
+    e.preventDefault()
+    return
+  }
+
+  // 单字符输入
+  if (e.key.length === 1) {
+    cardReadBuffer.value += e.key
+    // 重置超时(读卡器输入间隔 <100ms,手动输入 >200ms)
+    if (cardReadTimer) clearTimeout(cardReadTimer)
+    cardReadTimer = setTimeout(() => {
+      // 超时后如果缓冲区有内容,视为读卡完成(部分读卡器不发送回车)
+      if (cardReadBuffer.value.length >= 4) {
+        form.value.cardNo = cardReadBuffer.value.trim()
+        ElMessage.success('读卡成功')
+      }
+      stopKeyboardCardRead()
+    }, 150)
+    e.preventDefault()
+  }
+}
+
+/** 串口模式读卡(Web Serial API) */
+const startSerialCardRead = async () => {
+  if (!('serial' in navigator)) {
+    ElMessage.warning('当前浏览器不支持串口读卡,请使用 Chrome/Edge 浏览器,或使用键盘模拟模式')
+    return
+  }
+  try {
+    serialPort = await (navigator as any).serial.requestPort()
+    await serialPort.open({ baudRate: 9600 })
+    ElMessage.info('读卡器已连接,请刷卡…')
+    cardReading.value = true
+
+    const decoder = new TextDecoderStream()
+    const readableStreamClosed = serialPort.readable.pipeTo(decoder.writable)
+    serialReader = decoder.readable.getReader()
+
+    // 后台读取循环
+    ;(async () => {
+      let buffer = ''
+      while (cardReading.value) {
+        try {
+          const { value, done } = await serialReader.read()
+          if (done) break
+          if (value) {
+            buffer += value
+            // 多数读卡器以回车/换行结尾
+            if (buffer.includes('\n') || buffer.includes('\r')) {
+              const cardNo = buffer.replace(/[\r\n]/g, '').trim()
+              if (cardNo.length > 0) {
+                form.value.cardNo = cardNo
+                ElMessage.success('读卡成功')
+                stopSerialCardRead()
+                return
+              }
+              buffer = ''
+            }
+          }
+        } catch {
+          break
+        }
+      }
+    })()
+  } catch (err: any) {
+    if (err.name !== 'NotFoundError') {
+      ElMessage.error('连接读卡器失败: ' + (err.message || err))
+    }
+    cardReading.value = false
+  }
+}
+
+/** 停止串口读卡 */
+const stopSerialCardRead = async () => {
+  cardReading.value = false
+  try {
+    if (serialReader) {
+      await serialReader.cancel()
+      serialReader = null
+    }
+    if (serialPort) {
+      await serialPort.close()
+      serialPort = null
+    }
+  } catch {
+    /* 忽略关闭错误 */
+  }
+}
+
+/** 切换读卡状态 */
+const toggleCardRead = () => {
+  if (cardReading.value) {
+    stopKeyboardCardRead()
+    stopSerialCardRead()
+  } else {
+    startKeyboardCardRead()
+  }
+}
+
+/** 串口支持检测 */
+const serialSupported = computed(() => 'serial' in navigator)
 
 /** 启用/禁用员工(只更新 status 字段) */
 const handleToggleStatus = async (row: Employee) => {
@@ -269,8 +410,8 @@ const importResult = ref<{ success: number; failed: number; errors: Array<{ row:
 /** 下载导入模板 */
 const handleDownloadTemplate = () => {
   const data = [
-    { 卡号: 'CARD001', 手机号: '13800000001', 姓名: '张三', 部门名称: '技术部', 初始余额: 0, 密码: '123456', 状态: '启用', 头像URL: '' },
-    { 卡号: 'CARD002', 手机号: '13800000002', 姓名: '李四', 部门名称: '市场部', 初始余额: 100, 密码: '123456', 状态: '启用', 头像URL: 'https://example.com/avatar.png' },
+    { 卡号: 'CARD001', 手机号: '13800000001', 姓名: '张三', 部门名称: '技术部', 初始余额: 5000, 密码: '', 状态: '启用', 头像URL: '' },
+    { 卡号: 'CARD002', 手机号: '13800000002', 姓名: '李四', 部门名称: '市场部', 初始余额: 5000, 密码: '', 状态: '启用', 头像URL: 'https://example.com/avatar.png' },
   ]
   const ws = XLSX.utils.json_to_sheet(data)
   // 列宽
@@ -452,6 +593,14 @@ const handleExport = async () => {
 onMounted(() => {
   fetchList()
   fetchDepartments()
+  // 注册键盘读卡监听(全局,但仅在 cardReading=true 时生效)
+  window.addEventListener('keydown', handleCardKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleCardKeydown)
+  stopKeyboardCardRead()
+  stopSerialCardRead()
 })
 
 // ===== 批量导入照片 =====
@@ -769,7 +918,30 @@ const onPhotoImportClose = () => {
             </div>
           </ElFormItem>
           <ElFormItem label="卡号" prop="cardNo">
-            <ElInput v-model="form.cardNo" placeholder="请输入员工卡号" aria-required="true" />
+            <div class="flex items-center gap-2 w-full">
+              <ElInput
+                v-model="form.cardNo"
+                :placeholder="cardReading ? '请刷卡…' : '请输入员工卡号'"
+                aria-required="true"
+                class="flex-1"
+                :class="{ 'card-reading': cardReading }"
+              />
+              <ElButton
+                :type="cardReading ? 'danger' : 'primary'"
+                :icon="CreditCard"
+                @click="toggleCardRead"
+              >
+                {{ cardReading ? '取消' : '刷卡' }}
+              </ElButton>
+              <ElButton
+                v-if="serialSupported"
+                :icon="Usb"
+                title="连接 USB/串口读卡器"
+                @click="startSerialCardRead"
+              >
+                串口
+              </ElButton>
+            </div>
           </ElFormItem>
           <ElFormItem label="手机号" prop="phone">
             <ElInput v-model="form.phone" placeholder="用于 H5/小程序登录(同店内唯一)" maxlength="11" />
@@ -788,7 +960,7 @@ const onPhotoImportClose = () => {
           <ElFormItem label="密码">
             <ElInput
               v-model="form.password"
-              :placeholder="isEdit ? '留空则不修改密码' : '请输入初始密码'"
+              :placeholder="isEdit ? '留空则不修改密码' : '留空默认为 12345678'"
               type="password"
               show-password
             />
@@ -891,7 +1063,7 @@ const onPhotoImportClose = () => {
               <li>部门名称需与门店已有部门一致，否则该字段会被忽略。</li>
               <li>卡号在同门店内必须唯一，重复行会被跳过并记录。</li>
               <li>手机号同门店内唯一,留空则该员工无法用手机号登录(H5/小程序)。</li>
-              <li>密码留空默认为 <code class="rounded bg-bg-tertiary px-1">123456</code>。</li>
+              <li>密码留空默认为 <code class="rounded bg-bg-tertiary px-1">12345678</code>。</li>
               <li>头像URL：可填写图片链接（http/https）或 dataURL；留空则无头像。Excel 无法嵌入本地图片，批量上传本地图片请用单条编辑里的头像上传功能。</li>
             </ul>
           </div>
@@ -1145,3 +1317,15 @@ const onPhotoImportClose = () => {
     </PageContainer>
   </Layout>
 </template>
+
+<style scoped>
+/* 读卡中输入框高亮闪烁动画 */
+.card-reading :deep(.el-input__wrapper) {
+  box-shadow: 0 0 0 2px var(--el-color-primary) !important;
+  animation: card-read-pulse 1s ease-in-out infinite;
+}
+@keyframes card-read-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--el-color-primary); }
+  50% { box-shadow: 0 0 0 2px var(--el-color-primary-light-3); }
+}
+</style>

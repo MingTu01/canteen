@@ -104,12 +104,34 @@ build_frontend() {
         "$NODE_IMAGE" \
         sh -c "npm install --registry=https://registry.npmmirror.com && npm run build"
 
-    # 清空旧产物并复制新产物
-    rm -rf "$DEPLOY_DIR/$name/html"
-    mkdir -p "$DEPLOY_DIR/$name/html"
-    cp -r "$PROJECT_DIR/$name/dist/"* "$DEPLOY_DIR/$name/html/"
+    # 验证构建产物:dist/index.html 必须存在
+    if [ ! -f "$PROJECT_DIR/$name/dist/index.html" ]; then
+        error "$name 构建失败:dist/index.html 不存在"
+        error "保留旧产物不动,请检查构建日志排查原因"
+        exit 1
+    fi
 
-    # 复制 nginx.conf
+    # 原子替换:先复制到临时目录,验证成功后再替换旧产物
+    # 避免复制失败导致 html 目录为空 → nginx 403
+    # 临时目录创建在 deploy 同级(同文件系统),mv 才能原子操作
+    local tmp_html="$DEPLOY_DIR/$name/.html.tmp.$$"
+    rm -rf "$tmp_html"
+    mkdir -p "$tmp_html"
+    cp -r "$PROJECT_DIR/$name/dist/"* "$tmp_html/"
+
+    # 再次验证临时目录中有 index.html
+    if [ ! -f "$tmp_html/index.html" ]; then
+        rm -rf "$tmp_html"
+        error "$name 产物复制失败:临时目录中未找到 index.html"
+        error "保留旧产物不动"
+        exit 1
+    fi
+
+    # 原子替换:删除旧 html,移动新 html
+    rm -rf "$DEPLOY_DIR/$name/html"
+    mv "$tmp_html" "$DEPLOY_DIR/$name/html"
+
+    # 复制 nginx.conf(单独处理,nginx.conf 不需要原子性)
     cp "$PROJECT_DIR/$name/nginx.conf" "$DEPLOY_DIR/$name/nginx.conf"
 
     info "$name 构建完成: deploy/$name/html/ ($(du -sh "$DEPLOY_DIR/$name/html" | cut -f1))"

@@ -21,6 +21,8 @@ public class EmployeeVO {
     private String departmentName;
     private BigDecimal balance;
     private Integer status;
+    /** 是否需要强制修改密码(首次登录使用默认密码时为 1) */
+    private Integer mustChangePassword;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -36,6 +38,7 @@ public class EmployeeVO {
         vo.setDepartmentId(e.getDepartmentId());
         vo.setBalance(e.getBalance());
         vo.setStatus(e.getStatus());
+        vo.setMustChangePassword(e.getMustChangePassword());
         vo.setCreatedAt(e.getCreatedAt());
         vo.setUpdatedAt(e.getUpdatedAt());
         return vo;

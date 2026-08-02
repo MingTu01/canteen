@@ -21,6 +21,9 @@ public interface EmployeeMapper extends BaseMapper<Employee> {
     /** 手机号全局唯一查询(phone 已建全局唯一索引,登录不传 storeId 时用) */
     Employee selectByPhone(@Param("phone") String phone);
 
+    /** 微信 openid 查询(微信登录用,openid 全局唯一) */
+    Employee selectByWxOpenid(@Param("wxOpenid") String wxOpenid);
+
     /** B1 原子扣减余额:balance>=amount 才更新,返回受影响行数 */
     int deductBalance(@Param("id") Long id, @Param("amount") BigDecimal amount);
 

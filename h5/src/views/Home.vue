@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onActivated } from 'vue'
 
 import { useRouter } from 'vue-router'
-import { showToast, showDialog } from 'vant'
+import { showToast, showDialog, showImagePreview } from 'vant'
 import {
   Megaphone,
   UtensilsCrossed,
@@ -53,8 +53,60 @@ const noticeText = computed(() => {
   return notifications.value.map((n) => n.title).join('  ·  ')
 })
 
-/** 门店公告列表(最多 5 条) */
-const noticeList = computed(() => notifications.value.slice(0, 5))
+/** 公告列表(type=3):展示标题 + 图片 + 内容 */
+const announcementList = computed(() =>
+  notifications.value.filter((n) => n.type === 3).slice(0, 10),
+)
+
+/** 活动列表(type=4):列表仅展示标题,点击展开详情 */
+const activityList = computed(() =>
+  notifications.value.filter((n) => n.type === 4).slice(0, 10),
+)
+
+/** 其他通知(非公告非活动):保留在原"公司通知"列表 */
+const noticeList = computed(() =>
+  notifications.value.filter((n) => n.type !== 3 && n.type !== 4).slice(0, 5),
+)
+
+/** 活动详情弹窗 */
+const activityDetail = ref<Notification | null>(null)
+const showActivityPopup = ref(false)
+
+/** 图片缓存 Map（通知/公告图片，id → blob URL 或原 URL） */
+const cachedNoticeImages = ref<Map<number, string>>(new Map())
+
+/** 批量预加载通知图片到缓存 Map */
+const refreshNoticeImages = async (): Promise<void> => {
+  const map = new Map<number, string>()
+  await Promise.all(
+    notifications.value.map(async (n) => {
+      if (!n.imageUrl) return
+      if (/^(https?:)?\/\//.test(n.imageUrl) || n.imageUrl.startsWith('data:')) {
+        map.set(n.id, n.imageUrl)
+        return
+      }
+      map.set(n.id, await getCachedImage(n.imageUrl))
+    }),
+  )
+  cachedNoticeImages.value = map
+}
+
+/** 获取通知图片地址(缓存后) */
+const getNoticeImage = (item: Notification): string => {
+  return cachedNoticeImages.value.get(item.id) || item.imageUrl || ''
+}
+
+/** 图片预览(点击放大) */
+const previewImage = (url: string): void => {
+  if (!url) return
+  showImagePreview([url])
+}
+
+/** 展示活动详情 */
+const showActivityDetail = (item: Notification): void => {
+  activityDetail.value = item
+  showActivityPopup.value = true
+}
 
 /** 快捷入口配置(对齐模板 Lucide 图标) */
 interface ShortcutItem {
@@ -167,6 +219,9 @@ const getDishImage = (dish: Dish): string => {
 // 菜品列表变化时异步刷新缓存 Map
 watch(newDishes, refreshDishImages, { immediate: true })
 
+// 通知列表变化时异步刷新图片缓存 Map
+watch(notifications, refreshNoticeImages, { immediate: true })
+
 /** 点击新品卡片 */
 const onDishCardClick = (): void => {
   showToast('请前往订餐页下单')
@@ -271,8 +326,8 @@ onActivated(() => {
         </div>
       </section>
 
-      <!-- 今日新品 -->
-      <section class="home__section">
+      <!-- 今日新品(无新品时隐藏整个模块) -->
+      <section v-if="dishesLoading || newDishes.length > 0" class="home__section">
         <div class="home__section-header">
           <h2 class="home__section-title">今日新品</h2>
           <span class="home__section-more" @click="go('/order')">查看更多</span>
@@ -286,9 +341,6 @@ onActivated(() => {
             </div>
           </template>
         </van-skeleton>
-
-        <!-- 空状态 -->
-        <van-empty v-else-if="newDishes.length === 0" description="暂无新品" image-size="80" />
 
         <!-- 横向滑动卡片列表 -->
         <div v-else class="home__dish-list">
@@ -323,22 +375,58 @@ onActivated(() => {
         </div>
       </section>
 
-      <!-- 公司通知 -->
-      <section class="home__section">
+      <!-- 公告(展示标题 + 图片 + 内容,与新品展示方式一致) -->
+      <section v-if="announcementList.length > 0" class="home__section">
+        <div class="home__section-header">
+          <h2 class="home__section-title">公告</h2>
+        </div>
+        <div class="home__notice-list">
+          <div
+            v-for="item in announcementList"
+            :key="item.id"
+            class="home__announcement-card"
+          >
+            <h3 class="home__announcement-title">{{ item.title }}</h3>
+            <div
+              v-if="getNoticeImage(item)"
+              class="home__announcement-image"
+              @click="previewImage(getNoticeImage(item))"
+            >
+              <img :src="getNoticeImage(item)" :alt="item.title" loading="lazy" />
+            </div>
+            <p v-if="item.content" class="home__announcement-content">{{ item.content }}</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 活动(列表仅展示标题,点击展开标题 + 图片 + 内容) -->
+      <section v-if="activityList.length > 0" class="home__section">
+        <div class="home__section-header">
+          <h2 class="home__section-title">活动</h2>
+        </div>
+        <div class="home__notice-list">
+          <div
+            v-for="item in activityList"
+            :key="item.id"
+            class="home__notice-card"
+            @click="showActivityDetail(item)"
+          >
+            <div class="home__notice-top">
+              <h3 class="home__notice-title">{{ item.title }}</h3>
+              <span class="home__notice-tag home__notice-tag--accent">活动</span>
+            </div>
+            <p class="home__notice-date">{{ formatDate(item.createdAt || item.startDate) }}</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 公司通知(非公告非活动的其他通知) -->
+      <section v-if="!notificationLoading && noticeList.length > 0" class="home__section">
         <div class="home__section-header">
           <h2 class="home__section-title">公司通知</h2>
-          <span class="home__section-more">全部</span>
         </div>
 
-        <van-skeleton v-if="notificationLoading" :row="3" :loading="true" />
-
-        <van-empty
-          v-else-if="noticeList.length === 0"
-          description="暂无通知"
-          image-size="80"
-        />
-
-        <div v-else class="home__notice-list">
+        <div class="home__notice-list">
           <div
             v-for="item in noticeList"
             :key="item.id"

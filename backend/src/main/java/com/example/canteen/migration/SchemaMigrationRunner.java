@@ -282,6 +282,9 @@ public class SchemaMigrationRunner {
             } catch (Exception ignored) {}
             self.createIndexIfNotExists("idx_stock_count_store_status", "stock_count", "store_id, status");
             self.createIndexIfNotExists("idx_stock_count_material", "stock_count", "material_id");
+        }),
+        new Migration("1.6.0", "add must_change_password to employee", self -> {
+            self.addColumnIfNotExists("employee", "must_change_password", "INT DEFAULT 0");
         })
     };
 }
