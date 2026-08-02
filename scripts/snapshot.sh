@@ -313,16 +313,16 @@ snapshot_restore() {
         warn "快照无产物备份,跳过"
     fi
 
-    # 3. 回退代码(失败时中止,避免状态不一致)
+    # 3. 回退代码(用 git reset --hard 保持分支上下文,避免 detached HEAD)
     if [ -f "$snap_path/git_commit.txt" ]; then
         local commit
         commit=$(cat "$snap_path/git_commit.txt")
         if [ "$commit" != "nongit" ] && [ -d "$PROJECT_DIR/.git" ]; then
-            info "回退代码到 ${commit:0:12}..."
-            if ! git -C "$PROJECT_DIR" checkout "$commit" 2>/dev/null; then
+            info "回退代码到 ${commit:0:12}(git reset --hard,保持分支上下文)..."
+            if ! git -C "$PROJECT_DIR" reset --hard "$commit" 2>/dev/null; then
                 error "代码回退失败,中止恢复流程"
                 warn "数据库和产物已恢复,但代码仍是当前版本"
-                warn "请手动执行:git -C $PROJECT_DIR checkout $commit"
+                warn "请手动执行:git -C $PROJECT_DIR reset --hard $commit"
                 return 1
             fi
             info "代码已回退"

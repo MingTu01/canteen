@@ -24,9 +24,9 @@
     "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
   },
   "system": {
-    "version": "0.0.2",
+    "version": "0.0.3",
     "name": "系统整体版本",
     "source": "VERSIONS.json",
-    "changelog": "8项功能优化+微信登录+公众号通知推送+构建脚本安全修复"
+    "changelog": "deploy分支部署架构:main放源码/deploy放产物/服务器免构建/publish.sh发布/upgrade.sh分支感知/git reset回退"
   }
 }

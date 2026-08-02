@@ -108,6 +108,24 @@ get_status_line() {
     fi
 }
 
+# 获取当前 git 分支名(用于菜单显示)
+get_current_branch() {
+    if [ ! -d "$PROJECT_DIR/.git" ]; then
+        echo "非Git"
+        return
+    fi
+    local branch
+    branch=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")
+    if [ -z "$branch" ]; then
+        # detached HEAD 状态
+        local commit
+        commit=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+        echo "detached(${commit})"
+    else
+        echo "$branch"
+    fi
+}
+
 # 等待用户按回车继续
 pause() {
     echo ""
@@ -160,17 +178,37 @@ menu_status() {
     pause
 }
 
+# 显示升级步骤说明(根据当前分支自动适配)
+# 参数: $1 = 升级范围描述(如 "全部" / "后端" / "前端")
+show_upgrade_steps() {
+    local scope_desc="$1"
+    local cur_branch
+    cur_branch=$(get_current_branch)
+    echo "  此操作将:"
+    echo "    1. 创建升级前快照(数据库 + 产物 + 代码版本)"
+    if [ "$cur_branch" = "deploy" ]; then
+        echo "    2. 拉取最新产物(git pull origin deploy,无需构建)"
+        echo "    3. 重启${scope_desc}服务"
+        echo "    4. 健康检查"
+        echo "    5. 如失败将自动回退到升级前状态"
+        echo ""
+        echo -e "  ${YELLOW}当前分支: deploy(免构建模式,秒级更新)${NC}"
+    else
+        echo "    2. 拉取最新代码(git pull)"
+        echo "    3. 重新构建${scope_desc}产物"
+        echo "    4. 重启${scope_desc}服务"
+        echo "    5. 健康检查"
+        echo "    6. 如失败将自动回退到升级前状态"
+        echo ""
+        echo -e "  ${YELLOW}当前分支: ${cur_branch}(需本地构建)${NC}"
+    fi
+}
+
 # 2. 升级全部(后端+前端)
 menu_upgrade_all() {
     echo ""
     echo -e "${BLUE}========== 升级全部 ==========${NC}"
-    echo "  此操作将:"
-    echo "    1. 创建升级前快照(数据库 + 产物 + 代码版本)"
-    echo "    2. 拉取最新代码(git pull)"
-    echo "    3. 重新构建全部产物"
-    echo "    4. 重启所有服务"
-    echo "    5. 健康检查"
-    echo "    6. 如失败将自动回退到升级前状态"
+    show_upgrade_steps "全部"
     echo ""
     if confirm "确认升级全部?"; then
         chmod +x "$PROJECT_DIR/scripts/upgrade.sh"
@@ -185,12 +223,7 @@ menu_upgrade_all() {
 menu_upgrade_backend() {
     echo ""
     echo -e "${BLUE}========== 升级后端 ==========${NC}"
-    echo "  此操作将:"
-    echo "    1. 创建升级前快照"
-    echo "    2. 拉取最新代码"
-    echo "    3. 重新构建后端 jar"
-    echo "    4. 重启后端服务"
-    echo "    5. 健康检查(失败自动回退)"
+    show_upgrade_steps "后端"
     echo ""
     if confirm "确认升级后端?"; then
         chmod +x "$PROJECT_DIR/scripts/upgrade.sh"
@@ -205,12 +238,7 @@ menu_upgrade_backend() {
 menu_upgrade_frontend() {
     echo ""
     echo -e "${BLUE}========== 升级前端 ==========${NC}"
-    echo "  此操作将:"
-    echo "    1. 创建升级前快照"
-    echo "    2. 拉取最新代码"
-    echo "    3. 重新构建 admin-web + h5"
-    echo "    4. 重启前端服务"
-    echo "    5. 健康检查(失败自动回退)"
+    show_upgrade_steps "前端(admin-web + h5)"
     echo ""
     if confirm "确认升级前端?"; then
         chmod +x "$PROJECT_DIR/scripts/upgrade.sh"
@@ -619,13 +647,15 @@ show_menu() {
     hw_ver=$(get_module_version admin-web)
     h5_ver=$(get_module_version h5)
     term_ver=$(get_module_version terminal)
+    local cur_branch
+    cur_branch=$(get_current_branch)
 
     echo -e "${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}   ${BOLD}企业智慧食堂系统 - 管理面板${NC}                      ${BLUE}║${NC}"
     echo -e "${BLUE}╠══════════════════════════════════════════════════════╣${NC}"
     echo -e "${BLUE}║${NC}  系统版本: v${version}    状态: ${status_line}          ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  后端: v${be_ver}  管理后台: v${hw_ver}  H5: v${h5_ver}      ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  终端: v${term_ver}                                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  终端: v${term_ver}  分支: ${cur_branch}                        ${BLUE}║${NC}"
     echo -e "${BLUE}╠══════════════════════════════════════════════════════╣${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${BOLD}【升级】${NC}                                             ${BLUE}║${NC}"

@@ -1,15 +1,25 @@
 #!/bin/bash
 #==============================================================
-# 企业智慧食堂系统 - 安全升级脚本
+# 企业智慧食堂系统 - 安全升级脚本(分支感知版)
 #==============================================================
-# 升级流程(带回退保护):
+# 本脚本自动检测当前所在分支,按分支采用不同升级策略:
+#
+# 【deploy 分支】(服务器部署用,产物已预构建):
 #   1. 升级前快照(数据库 + deploy 产物 + git commit)
-#   2. git pull 拉取最新代码
+#   2. git pull 拉取最新产物(deploy 分支,无需构建)
+#   3. docker compose up -d 重启服务
+#   4. 健康检查(等待 120s)
+#   5. 失败则自动回退到快照状态
+#
+# 【main 分支】(开发机用,需本地构建):
+#   1. 升级前快照
+#   2. git pull 拉取源码
 #   3. build.sh 重建产物
-#   4. docker compose restart 重启服务
-#   5. 健康检查(等待 120s)
-#   6. 失败则自动回退到快照状态
-#   7. 成功则清理旧快照(保留最近 5 个)
+#   4. docker compose up -d 重启服务
+#   5. 健康检查 + 自动回退
+#
+# 【detached HEAD】(历史遗留问题):
+#   自动切换到 deploy 分支并继续升级
 #
 # 用法:
 #   ./scripts/upgrade.sh              # 升级全部(后端 + 前端)
@@ -25,7 +35,7 @@ cd "$PROJECT_DIR"
 
 SCOPE="${1:-all}"
 
-# 颜色
+# 颜色(必须在分支检测前定义,因分支检测中会调用 info/warn/error)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -37,6 +47,52 @@ info()  { echo -e "${GREEN}[升级]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
 error() { echo -e "${RED}[错误]${NC} $1"; }
 step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
+
+#==============================================================
+# 分支检测:确定升级模式
+#==============================================================
+# 获取当前分支名(detached HEAD 时为空)
+CURRENT_BRANCH=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")
+
+# 检测是否处于 detached HEAD 状态
+IS_DETACHED=false
+if [ -z "$CURRENT_BRANCH" ]; then
+    IS_DETACHED=true
+fi
+
+# 确定升级模式:deploy 分支 = 免构建,其他 = 需构建
+NO_BUILD=false
+TRACK_BRANCH="main"
+
+if [ "$IS_DETACHED" = "true" ]; then
+    # detached HEAD:尝试切换到 deploy 分支(服务器部署场景)
+    info "检测到 detached HEAD 状态,尝试切换到 deploy 分支..."
+    if git -C "$PROJECT_DIR" checkout deploy 2>/dev/null; then
+        CURRENT_BRANCH="deploy"
+        NO_BUILD=true
+        TRACK_BRANCH="deploy"
+        info "已切换到 deploy 分支(免构建模式)"
+    elif git -C "$PROJECT_DIR" checkout -b deploy origin/deploy 2>/dev/null; then
+        CURRENT_BRANCH="deploy"
+        NO_BUILD=true
+        TRACK_BRANCH="deploy"
+        info "已从远程创建并切换到 deploy 分支(免构建模式)"
+    else
+        # 无法切换到 deploy,回退到 main 分支
+        warn "无法切换到 deploy 分支,尝试 main 分支(需构建模式)..."
+        if git -C "$PROJECT_DIR" checkout main 2>/dev/null; then
+            CURRENT_BRANCH="main"
+            TRACK_BRANCH="main"
+        else
+            error "无法确定所在分支,且无法切换到 deploy 或 main"
+            warn "请手动执行: git checkout deploy  或  git checkout main"
+            exit 1
+        fi
+    fi
+elif [ "$CURRENT_BRANCH" = "deploy" ]; then
+    NO_BUILD=true
+    TRACK_BRANCH="deploy"
+fi
 
 # 获取当前系统版本号(从 VERSIONS.json 读取)
 get_version() {
@@ -85,20 +141,20 @@ show_version_diff() {
     # 获取远程最新 commit 和版本号
     local remote_commit="" remote_be="" remote_hw="" remote_h5=""
     if [ -d "$PROJECT_DIR/.git" ]; then
-        info "检查远程仓库最新版本..."
-        # 获取远程 main 分支最新 commit(不修改本地代码)
-        remote_commit=$(git -C "$PROJECT_DIR" ls-remote origin main 2>/dev/null | awk '{print $1}' | cut -c1-12)
+        info "检查远程仓库最新版本(分支: ${TRACK_BRANCH})..."
+        # 获取远程跟踪分支最新 commit(不修改本地代码)
+        remote_commit=$(git -C "$PROJECT_DIR" ls-remote origin "$TRACK_BRANCH" 2>/dev/null | awk '{print $1}' | cut -c1-12)
 
         if [ -n "$remote_commit" ] && [ "$remote_commit" != "$local_commit" ]; then
             echo ""
-            echo "  [远程最新版本] commit: ${remote_commit}"
+            echo "  [远程最新版本] commit: ${remote_commit} (分支: ${TRACK_BRANCH})"
             # 显示本地与远程之间的提交差异
             echo ""
             echo "  [待更新提交] (本地 ${local_commit} → 远程 ${remote_commit})"
             # 获取远程 commit 但本地没有的提交列表
-            git -C "$PROJECT_DIR" fetch origin main 2>/dev/null
+            git -C "$PROJECT_DIR" fetch origin "$TRACK_BRANCH" 2>/dev/null
             local new_commits
-            new_commits=$(git -C "$PROJECT_DIR" log --oneline HEAD..origin/main 2>/dev/null)
+            new_commits=$(git -C "$PROJECT_DIR" log --oneline "HEAD..origin/${TRACK_BRANCH}" 2>/dev/null)
             if [ -n "$new_commits" ]; then
                 echo "$new_commits" | head -20 | while read -r line; do
                     echo "    $line"
@@ -113,11 +169,11 @@ show_version_diff() {
             fi
 
             # 尝试获取远程 VERSIONS.json 的版本号
-            remote_be=$(git -C "$PROJECT_DIR" show origin/main:VERSIONS.json 2>/dev/null | \
+            remote_be=$(git -C "$PROJECT_DIR" show "origin/${TRACK_BRANCH}:VERSIONS.json" 2>/dev/null | \
                 python3 -c "import json,sys; print(json.load(sys.stdin).get('backend',{}).get('version','unknown'))" 2>/dev/null || echo "?")
-            remote_hw=$(git -C "$PROJECT_DIR" show origin/main:VERSIONS.json 2>/dev/null | \
+            remote_hw=$(git -C "$PROJECT_DIR" show "origin/${TRACK_BRANCH}:VERSIONS.json" 2>/dev/null | \
                 python3 -c "import json,sys; print(json.load(sys.stdin).get('admin-web',{}).get('version','unknown'))" 2>/dev/null || echo "?")
-            remote_h5=$(git -C "$PROJECT_DIR" show origin/main:VERSIONS.json 2>/dev/null | \
+            remote_h5=$(git -C "$PROJECT_DIR" show "origin/${TRACK_BRANCH}:VERSIONS.json" 2>/dev/null | \
                 python3 -c "import json,sys; print(json.load(sys.stdin).get('h5',{}).get('version','unknown'))" 2>/dev/null || echo "?")
             echo ""
             echo "  [远程版本号]"
@@ -227,18 +283,18 @@ auto_rollback() {
         fi
     fi
 
-    # 3. 回退代码(失败时中止回退流程,避免代码与数据库版本不一致)
+    # 3. 回退代码(用 git reset --hard 保持分支上下文,避免 detached HEAD)
     if [ -f "$snap_path/git_commit.txt" ]; then
         local commit
         commit=$(cat "$snap_path/git_commit.txt")
         if [ "$commit" != "nongit" ] && [ -d "$PROJECT_DIR/.git" ]; then
-            info "回退:代码回退到 ${commit:0:12}..."
-            if git -C "$PROJECT_DIR" checkout "$commit" 2>/dev/null; then
+            info "回退:代码回退到 ${commit:0:12}(git reset --hard,保持分支上下文)..."
+            if git -C "$PROJECT_DIR" reset --hard "$commit" 2>/dev/null; then
                 info "代码已回退"
             else
                 error "代码回退失败,中止回退流程避免状态不一致"
                 warn "数据库和产物已恢复到快照状态,但代码仍是当前版本"
-                warn "请手动执行:git -C $PROJECT_DIR checkout $commit"
+                warn "请手动执行:git -C $PROJECT_DIR reset --hard $commit"
                 warn "完成后重启服务:docker compose up -d"
                 return 1
             fi
@@ -289,9 +345,19 @@ main() {
     echo -e "${BLUE}  企业智慧食堂系统 - 安全升级${NC}"
     echo -e "${BLUE}==========================================${NC}"
     echo "  当前版本: v$(get_version)"
+    echo "  当前分支: ${CURRENT_BRANCH}"
+    if [ "$NO_BUILD" = "true" ]; then
+        echo "  升级模式: 免构建(deploy 分支,产物已预构建)"
+    else
+        echo "  升级模式: 本地构建(main 分支,需 build.sh)"
+    fi
     echo "  升级范围: ${SCOPE}"
     echo "  升级时间: $(date '+%Y-%m-%d %H:%M:%S')"
     echo -e "${BLUE}==========================================${NC}"
+
+    # 步骤总数:免构建模式 5 步,构建模式 6 步
+    local total_steps=6
+    [ "$NO_BUILD" = "true" ] && total_steps=5
 
     # 显示版本对比(本地 vs 远程)
     show_version_diff
@@ -305,10 +371,10 @@ main() {
     #==========================================================
     # 步骤 1:创建升级前快照(关键!)
     #==========================================================
-    step "步骤 1/6 创建升级前快照"
+    step "步骤 1/${total_steps} 创建升级前快照"
     chmod +x "$PROJECT_DIR/scripts/snapshot.sh"
     local snap_id
-    snap_id=$("$PROJECT_DIR/scripts/snapshot.sh" create "升级前快照(scope=$SCOPE)") || {
+    snap_id=$("$PROJECT_DIR/scripts/snapshot.sh" create "升级前快照(scope=$SCOPE, branch=$CURRENT_BRANCH)") || {
         error "快照创建失败,为安全起见中止升级"
         warn "请检查数据库连接和磁盘空间后重试"
         exit 1
@@ -323,17 +389,26 @@ main() {
     echo ""
 
     #==========================================================
-    # 步骤 2:拉取最新代码
+    # 步骤 2:拉取最新代码/产物
     #==========================================================
-    step "步骤 2/6 拉取最新代码"
+    if [ "$NO_BUILD" = "true" ]; then
+        step "步骤 2/${total_steps} 拉取最新产物"
+    else
+        step "步骤 2/${total_steps} 拉取最新代码"
+    fi
     if [ -d "$PROJECT_DIR/.git" ]; then
-        info "执行 git pull..."
-        if git -C "$PROJECT_DIR" pull 2>/dev/null; then
-            info "代码已更新"
+        info "执行 git pull (分支: ${CURRENT_BRANCH})..."
+        # 显式指定远程和分支,避免 detached HEAD 时 pull 失败
+        if git -C "$PROJECT_DIR" pull origin "$CURRENT_BRANCH" 2>/dev/null; then
+            info "已更新"
         else
             # git pull 失败不回退(可能是网络问题),但提醒用户
             warn "git pull 失败(可能是网络问题或冲突)"
-            warn "将使用当前代码继续构建。如需更新代码请手动 git pull"
+            if [ "$NO_BUILD" = "true" ]; then
+                warn "将使用当前产物继续。如需更新请手动 git pull origin deploy"
+            else
+                warn "将使用当前代码继续构建。如需更新代码请手动 git pull"
+            fi
             read -p "$(echo -e "${CYAN}[?]${NC} 是否继续? [y/N]: ")" cont
             [ "$cont" != "y" ] && [ "$cont" != "Y" ] && {
                 info "已取消升级"
@@ -342,50 +417,80 @@ main() {
             }
         fi
     else
-        info "非 Git 项目,跳过代码拉取"
+        info "非 Git 项目,跳过拉取"
     fi
     # git pull 后脚本可能丢失可执行位(Windows 仓库不保留 +x),统一修复
     chmod +x "$PROJECT_DIR"/*.sh "$PROJECT_DIR"/scripts/*.sh 2>/dev/null || true
     echo ""
 
     #==========================================================
-    # 步骤 3:构建产物
+    # 步骤 3:构建产物(仅 main 分支,deploy 分支跳过)
     #==========================================================
-    step "步骤 3/6 构建产物"
-    chmod +x "$PROJECT_DIR/scripts/build.sh"
+    local current_step=3
+    if [ "$NO_BUILD" = "false" ]; then
+        step "步骤 3/${total_steps} 构建产物"
+        chmod +x "$PROJECT_DIR/scripts/build.sh"
 
-    local build_failed=false
-    case "$SCOPE" in
-        backend)
-            info "构建后端..."
-            "$PROJECT_DIR/scripts/build.sh" backend || build_failed=true
-            ;;
-        frontend)
-            info "构建 admin-web..."
-            "$PROJECT_DIR/scripts/build.sh" admin-web || build_failed=true
-            if [ "$build_failed" = false ]; then
-                info "构建 h5..."
-                "$PROJECT_DIR/scripts/build.sh" h5 || build_failed=true
+        local build_failed=false
+        case "$SCOPE" in
+            backend)
+                info "构建后端..."
+                "$PROJECT_DIR/scripts/build.sh" backend || build_failed=true
+                ;;
+            frontend)
+                info "构建 admin-web..."
+                "$PROJECT_DIR/scripts/build.sh" admin-web || build_failed=true
+                if [ "$build_failed" = false ]; then
+                    info "构建 h5..."
+                    "$PROJECT_DIR/scripts/build.sh" h5 || build_failed=true
+                fi
+                ;;
+            all)
+                info "构建全部..."
+                "$PROJECT_DIR/scripts/build.sh" all || build_failed=true
+                ;;
+        esac
+
+        if [ "$build_failed" = true ]; then
+            error "构建失败!"
+            auto_rollback "$snap_id"
+            exit 1
+        fi
+        info "产物构建完成"
+        echo ""
+        current_step=4
+    else
+        info "deploy 分支:产物已预构建,跳过构建步骤"
+        # 验证产物存在
+        if [ "$SCOPE" = "backend" ] || [ "$SCOPE" = "all" ]; then
+            if [ ! -f "$PROJECT_DIR/deploy/backend/app.jar" ]; then
+                error "后端产物不存在: deploy/backend/app.jar"
+                warn "deploy 分支可能不完整,请检查 git pull 是否成功"
+                auto_rollback "$snap_id"
+                exit 1
             fi
-            ;;
-        all)
-            info "构建全部..."
-            "$PROJECT_DIR/scripts/build.sh" all || build_failed=true
-            ;;
-    esac
-
-    if [ "$build_failed" = true ]; then
-        error "构建失败!"
-        auto_rollback "$snap_id"
-        exit 1
+        fi
+        if [ "$SCOPE" = "frontend" ] || [ "$SCOPE" = "all" ]; then
+            if [ ! -f "$PROJECT_DIR/deploy/admin-web/html/index.html" ]; then
+                error "admin-web 产物不存在: deploy/admin-web/html/index.html"
+                auto_rollback "$snap_id"
+                exit 1
+            fi
+            if [ ! -f "$PROJECT_DIR/deploy/h5/html/index.html" ]; then
+                error "h5 产物不存在: deploy/h5/html/index.html"
+                auto_rollback "$snap_id"
+                exit 1
+            fi
+        fi
+        info "产物验证通过"
+        echo ""
+        current_step=3
     fi
-    info "产物构建完成"
-    echo ""
 
     #==========================================================
-    # 步骤 4:重启服务
+    # 步骤:重启服务
     #==========================================================
-    step "步骤 4/6 重启服务"
+    step "步骤 ${current_step}/${total_steps} 重启服务"
     info "重启服务(卷映射模式,用 up -d 确保重读配置)..."
     local restart_failed=false
     case "$SCOPE" in
@@ -407,11 +512,12 @@ main() {
     fi
     info "服务已重启"
     echo ""
+    current_step=$((current_step + 1))
 
     #==========================================================
-    # 步骤 5:健康检查
+    # 步骤:健康检查
     #==========================================================
-    step "步骤 5/6 健康检查"
+    step "步骤 ${current_step}/${total_steps} 健康检查"
 
     local health_ok=true
 
@@ -438,17 +544,18 @@ main() {
             fi
         done
     fi
+    current_step=$((current_step + 1))
 
     #==========================================================
-    # 步骤 6:结果处理
+    # 步骤:结果处理
     #==========================================================
     if [ "$health_ok" = false ]; then
-        step "步骤 6/6 升级失败 - 自动回退"
+        step "步骤 ${current_step}/${total_steps} 升级失败 - 自动回退"
         auto_rollback "$snap_id"
         exit 1
     fi
 
-    step "步骤 6/6 升级成功"
+    step "步骤 ${current_step}/${total_steps} 升级成功"
 
     # 清理旧快照(保留最近 5 个)
     info "清理旧快照(保留最近 5 个)..."
@@ -469,7 +576,9 @@ main() {
     echo "  快照 ID: $snap_id (已保留,可用于回退)"
     echo ""
     echo "  数据库迁移已由 Flyway 自动执行"
-    echo "  迁移脚本目录: backend/src/main/resources/db/migration/"
+    if [ "$NO_BUILD" = "false" ]; then
+        echo "  迁移脚本目录: backend/src/main/resources/db/migration/"
+    fi
     echo ""
     echo "  如需回退:"
     echo "    canteen → 恢复备份 → 选择 $snap_id"
