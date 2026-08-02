@@ -88,6 +88,9 @@ class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         // API 接口 CORS
+        // 内网部署场景:浏览器可能通过内网 IP(如 http://172.19.171.4:18080)访问,
+        // nginx 反代到后端虽然同源,但浏览器仍会带 Origin 头,Spring CORS 需放行。
+        // 生产环境前端经 nginx 反代同源访问,跨域仅来自 X86 终端(Tauri)和 dev 调试。
         registry.addMapping("/api/**")
                 .allowedOriginPatterns(
                         "http://localhost:*",
@@ -101,6 +104,9 @@ class CorsConfig implements WebMvcConfigurer {
                         "http://127.0.0.1",
                         "https://localhost",
                         "https://127.0.0.1",
+                        // 内网 IP 访问(浏览器通过 http://172.19.x.x:18080 访问 admin-web)
+                        "http://*:*",
+                        "https://*:*",
                         // Tauri 桌面应用 origin(X86 终端 EXE)
                         "http://tauri.localhost",
                         "https://tauri.localhost",
@@ -115,14 +121,8 @@ class CorsConfig implements WebMvcConfigurer {
         // 否则 imageCache.ts 中 fetch 头像图片会被浏览器拦截,无法缓存到 IndexedDB
         registry.addMapping("/uploads/**")
                 .allowedOriginPatterns(
-                        "http://localhost:*",
-                        "http://127.0.0.1:*",
-                        "https://localhost:*",
-                        "https://127.0.0.1:*",
-                        "http://localhost",
-                        "http://127.0.0.1",
-                        "https://localhost",
-                        "https://127.0.0.1",
+                        "http://*:*",
+                        "https://*:*",
                         "http://tauri.localhost",
                         "https://tauri.localhost",
                         "tauri://localhost"
