@@ -82,15 +82,29 @@ public class AdminInitializer {
                 return;
             }
 
-            // 账号不存在,检查是否处于可初始化状态(只有默认 admin 或表为空)
-            long superAdminCount = adminMapper.selectCount(new LambdaQueryWrapper<Admin>()
-                    .eq(Admin::getRole, 1));
-            long totalCount = adminMapper.selectCount(null);
+            // 账号不存在
+            boolean forceCreate = "true".equalsIgnoreCase(force);
 
-            if (totalCount > 1 || (superAdminCount == 1 && !isDefaultAdmin(username))) {
-                // 已有多个管理员或已有非默认超管,不自动创建(避免在运营系统上误创建)
-                LOG.warning("[AdminInitializer] admin 表已有 " + totalCount + " 个账号,跳过创建。如需创建请先登录管理后台手动操作。");
-                return;
+            if (!forceCreate) {
+                // 非 force 模式:仅在首次部署(admin 表只有默认 admin 且密码仍为默认值)时允许创建
+                // 避免在已运营系统上误创建新超管
+                Admin defaultAdmin = adminMapper.selectOne(new LambdaQueryWrapper<Admin>()
+                        .eq(Admin::getUsername, "admin")
+                        .eq(Admin::getRole, 1));
+                long totalCount = adminMapper.selectCount(null);
+
+                // 允许创建的条件:表为空,或只有默认 admin 且密码仍是默认值 123456
+                boolean isInitialDeploy = (totalCount == 0)
+                        || (totalCount == 1 && defaultAdmin != null && isDefaultPassword(defaultAdmin));
+
+                if (!isInitialDeploy) {
+                    LOG.warning("[AdminInitializer] admin 表已有 " + totalCount + " 个账号且非初始状态,跳过创建。如需强制创建请设置 INIT_ADMIN_FORCE=true。");
+                    return;
+                }
+                LOG.info("[AdminInitializer] 检测到首次部署,允许创建自定义超管 '" + username + "'");
+            } else {
+                // force 模式:由管理员主动触发(canteen → 重置管理员密码),允许直接创建
+                LOG.info("[AdminInitializer] force=true,允许创建新超管 '" + username + "'");
             }
 
             // 创建超管账号
@@ -131,12 +145,5 @@ public class AdminInitializer {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    /**
-     * 检查给定用户名是否为默认 admin 账号名。
-     */
-    private boolean isDefaultAdmin(String username) {
-        return "admin".equals(username);
     }
 }

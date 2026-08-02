@@ -13,8 +13,27 @@
 #   ./canteen.sh status            # 直接执行子命令(非交互)
 #==============================================================
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$PROJECT_DIR"
+# 解析符号链接:通过 /usr/local/bin/canteen 软链接调用时,
+# $0 是 /usr/local/bin/canteen,dirname 得到 /usr/local/bin(错误)。
+# 用 readlink -f 解析真实路径;不支持时回退到遍历 symlink。
+resolve_project_dir() {
+    local src="$1"
+    # readlink -f 能解析多级符号链接(GNU coreutils, CentOS/Ubuntu 自带)
+    if command -v readlink &>/dev/null; then
+        local resolved
+        resolved=$(readlink -f "$src" 2>/dev/null) && [[ -n "$resolved" ]] && { echo "$(cd "$(dirname "$resolved")" && pwd)"; return; }
+    fi
+    # 回退:手动遍历 symlink(BSD/老旧系统)
+    while [[ -L "$src" ]]; do
+        local dir
+        dir=$(cd "$(dirname "$src")" && pwd)
+        src=$(readlink "$src")
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    echo "$(cd "$(dirname "$src")" && pwd)"
+}
+PROJECT_DIR="$(resolve_project_dir "$0")"
+cd "$PROJECT_DIR" || { echo "无法进入项目目录 $PROJECT_DIR"; exit 1; }
 
 # 颜色
 RED='\033[0;31m'
@@ -230,20 +249,20 @@ menu_snapshots() {
 menu_reset_admin() {
     echo ""
     echo -e "${BLUE}========== 重置管理员密码 ==========${NC}"
-    echo "  此操作将设置超管账号密码,需要重启后端服务生效。"
+    echo "  此操作将重置超管账号密码并重启后端(同时清除登录锁定)。"
     echo "  - 若账号已存在且为超管:更新密码"
-    echo "  - 若账号不存在:创建新超管(仅在 admin 表为空或只有默认 admin 时)"
+    echo "  - 若账号不存在:强制创建新超管"
     echo ""
 
     read -p "$(echo -e "${CYAN}[?]${NC} 超管账号名 [admin]: ")" username
     username="${username:-admin}"
 
-    # 读取密码(隐藏输入,带确认)
+    # 读取密码(隐藏输入,带确认,-r 防止反斜杠被转义消耗)
     local pwd1 pwd2
     while true; do
-        read -s -p "$(echo -e "${CYAN}[?]${NC} 新密码(至少 8 位): ")" pwd1
+        read -r -s -p "$(echo -e "${CYAN}[?]${NC} 新密码(至少 8 位): ")" pwd1
         echo ""
-        read -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
+        read -r -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
         echo ""
         if [ "$pwd1" != "$pwd2" ]; then
             warn "两次输入不一致,请重新输入"
@@ -257,56 +276,88 @@ menu_reset_admin() {
     done
 
     echo ""
-    if confirm "确认重置超管 '${username}' 的密码?"; then
-        # 调用 deploy.sh 的 set_env_var 逻辑(内联实现,避免依赖)
-        local envfile="$PROJECT_DIR/.env"
-        touch "$envfile"
-
-        # 更新/追加环境变量(用 awk 避免 sed 转义问题)
-        for kv in "INIT_ADMIN_USERNAME=$username" "INIT_ADMIN_PASSWORD=$pwd1" "INIT_ADMIN_FORCE=true"; do
-            local key="${kv%%=*}"
-            local val="${kv#*=}"
-            if grep -q "^${key}=" "$envfile" 2>/dev/null; then
-                local tmp
-                tmp=$(mktemp)
-                KEY="$key" VALUE="$val" awk '
-                    BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VALUE"] }
-                    index($0, k "=") == 1 { print k "=" v; next }
-                    { print }
-                ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
-            else
-                echo "${key}=${val}" >> "$envfile"
-            fi
-        done
-
-        info "正在重启后端服务..."
-        docker compose restart backend 2>/dev/null
-
-        info "等待后端启动..."
-        local ok=false
-        for i in $(seq 1 30); do
-            if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
-                ok=true
-                break
-            fi
-            sleep 2
-            printf "."
-        done
-        echo ""
-
-        if [ "$ok" = true ]; then
-            echo ""
-            info "密码重置成功!"
-            echo "  超管账号: ${username}"
-            echo "  请使用新密码登录管理后台"
-            echo ""
-            warn "登录成功后请删除 .env 中的 INIT_ADMIN_FORCE 和 INIT_ADMIN_PASSWORD"
-        else
-            error "后端启动超时,请查看日志: docker compose logs backend"
-        fi
-    else
+    if ! confirm "确认重置超管 '${username}' 的密码?"; then
         info "已取消"
+        pause
+        return
     fi
+
+    local envfile="$PROJECT_DIR/.env"
+
+    # 检查 .env 可写(常见失败:符号链接解析错误或权限不足)
+    if ! touch "$envfile" 2>/dev/null; then
+        error "无法写入 .env 文件: $envfile"
+        warn "可能原因:权限不足或项目目录不正确"
+        warn "请尝试: sudo canteen  或  cd $(dirname "$PROJECT_DIR") && sudo ./canteen.sh"
+        pause
+        return
+    fi
+
+    # 写入 INIT_ADMIN_* 环境变量(用 awk 避免 sed 转义问题)
+    info "写入配置..."
+    for kv in "INIT_ADMIN_USERNAME=$username" "INIT_ADMIN_PASSWORD=$pwd1" "INIT_ADMIN_FORCE=true"; do
+        local key="${kv%%=*}"
+        local val="${kv#*=}"
+        if grep -q "^${key}=" "$envfile" 2>/dev/null; then
+            local tmp
+            tmp=$(mktemp)
+            KEY="$key" VALUE="$val" awk '
+                BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VALUE"] }
+                index($0, k "=") == 1 { print k "=" v; next }
+                { print }
+            ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
+        else
+            echo "${key}=${val}" >> "$envfile"
+        fi
+    done
+
+    # 用 up -d 而非 restart:restart 不重读 .env,只有 up -d 才会用新环境变量重建容器
+    info "正在重建后端服务(读取新配置 + 清除登录锁定)..."
+    if ! docker compose up -d --no-deps backend 2>/dev/null; then
+        error "后端重建失败,请检查 Docker 服务状态"
+        pause
+        return
+    fi
+
+    # 等待后端健康
+    info "等待后端启动..."
+    local ok=false
+    for i in $(seq 1 30); do
+        if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
+            ok=true
+            break
+        fi
+        sleep 2
+        printf "."
+    done
+    echo ""
+
+    if [ "$ok" = false ]; then
+        error "后端启动超时,密码可能未生效"
+        warn "请查看日志: docker compose logs backend"
+        pause
+        return
+    fi
+
+    # 自动清理 .env 中的敏感变量(密码已在数据库中,无需保留)
+    # 删除 INIT_ADMIN_FORCE 和 INIT_ADMIN_PASSWORD,保留 INIT_ADMIN_USERNAME 供参考
+    # 安全清理:先校验过滤结果非空,避免 grep 失败导致空文件覆盖 .env
+    info "清理临时配置..."
+    local tmp
+    tmp=$(mktemp)
+    if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [ -s "$tmp" ]; then
+        cp "$envfile" "${envfile}.bak" 2>/dev/null
+        mv "$tmp" "$envfile"
+    else
+        rm -f "$tmp"
+        warn "清理 .env 失败,原文件未修改(敏感变量仍保留,建议手动删除 INIT_ADMIN_FORCE/INIT_ADMIN_PASSWORD)"
+    fi
+
+    echo ""
+    info "密码重置成功!"
+    echo "  超管账号: ${username}"
+    echo "  请使用新密码登录管理后台"
+    echo ""
     pause
 }
 
@@ -368,12 +419,18 @@ menu_restart() {
 
     echo ""
     if confirm "确认重启?"; then
+        # 用 up -d 而非 restart:restart 在容器被 down 删除后会失败,up -d 会重建
+        local ok=true
         case "$svc" in
-            all)       docker compose restart ;;
-            backend)   docker compose restart backend ;;
-            frontend)  docker compose restart admin-web h5 ;;
+            all)       docker compose up -d 2>/dev/null || ok=false ;;
+            backend)   docker compose up -d --no-deps backend 2>/dev/null || ok=false ;;
+            frontend)  docker compose up -d --no-deps admin-web h5 2>/dev/null || ok=false ;;
         esac
-        info "已重启"
+        if [ "$ok" = true ]; then
+            info "已重启"
+        else
+            error "重启失败,请查看日志:canteen → 9) 查看日志"
+        fi
     else
         info "已取消"
     fi

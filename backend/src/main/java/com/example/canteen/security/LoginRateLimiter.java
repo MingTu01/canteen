@@ -68,7 +68,11 @@ public class LoginRateLimiter {
         refreshConfig();
         FailInfo info = map.get(key);
         if (info != null && info.isLocked(lockMs, maxFail)) {
-            throw new SecurityException(SecurityException.FORBIDDEN, "账号已锁定,请稍后再试");
+            long remainMs = lockMs - (System.currentTimeMillis() - info.firstFailAt);
+            long remainMin = Math.max(1, (remainMs + 59_000) / 60_000);
+            log.warn("账号 '{}' 已锁定(失败 {}/{} 次),剩余锁定约 {} 分钟", key, info.count.get(), maxFail, remainMin);
+            throw new SecurityException(SecurityException.FORBIDDEN,
+                    "账号已锁定,请约 " + remainMin + " 分钟后重试,或联系管理员重启后端服务");
         }
     }
 
@@ -77,7 +81,10 @@ public class LoginRateLimiter {
         refreshConfig();
         map.compute(key, (k, info) -> {
             if (info == null || info.shouldReset(lockMs)) return new FailInfo();
-            info.count.incrementAndGet();
+            int newCount = info.count.incrementAndGet();
+            if (newCount >= maxFail) {
+                log.warn("账号 '{}' 登录失败达到 {}/{} 次,即将锁定 {} 分钟", key, newCount, maxFail, lockMs / 60_000);
+            }
             return info;
         });
     }

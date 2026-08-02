@@ -42,8 +42,9 @@ mkdir -p "$BACKUP_PATH"
 
 if [ "$DOCKER_MODE" = true ]; then
     # Docker 模式：在容器内执行备份
+    # DB_NAME 用双引号包裹防止命令注入;仅在容器内展开,sh -c 内用 "$DB_NAME"
     docker exec canteen-mysql sh -c \
-        "mysqldump -u${DB_USER} -p${DB_PASS} --single-transaction --routines --triggers --events ${DB_NAME}" \
+        "mysqldump -u\"${DB_USER}\" -p\"${DB_PASS}\" --single-transaction --routines --triggers --events \"${DB_NAME}\"" \
         > "$BACKUP_PATH/database.sql"
 else
     # 本地模式

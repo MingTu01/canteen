@@ -52,5 +52,5 @@ VALUES ('admin', '$2b$10$ZYbFA3pByvcxS1/wrlSDP.i8ElgaAIyviU5Pp26Ev8PVJcM2GOMaC',
 -- 恢复外键检查
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 更新系统版本号为 0.0.1
-UPDATE sys_config SET config_value = '0.0.1' WHERE config_key = 'system_version';
+-- 更新系统版本号(与实际系统版本一致,避免误判为初始版本)
+UPDATE sys_config SET config_value = '1.1.0' WHERE config_key = 'system_version';

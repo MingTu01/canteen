@@ -93,41 +93,64 @@ auto_rollback() {
     local db_pass="${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-canteen2026}}"
     local db_name="${MYSQL_DATABASE:-canteen}"
 
-    # 1. 恢复 deploy/ 产物
+    # 1. 恢复 deploy/ 产物(先解压到临时目录,成功后再替换,避免 rm -rf 后 tar 失败导致产物丢失)
     if [ -s "$snap_path/deploy.tar.gz" ]; then
         info "回退:恢复 deploy/ 产物..."
-        rm -rf "$PROJECT_DIR/deploy"
-        tar -xzf "$snap_path/deploy.tar.gz" -C "$PROJECT_DIR" 2>/dev/null
-        info "产物已恢复"
+        local tmp_extract
+        tmp_extract=$(mktemp -d)
+        if tar -xzf "$snap_path/deploy.tar.gz" -C "$tmp_extract" 2>/dev/null; then
+            rm -rf "$PROJECT_DIR/deploy"
+            mv "$tmp_extract/deploy" "$PROJECT_DIR/deploy" 2>/dev/null || cp -r "$tmp_extract/deploy" "$PROJECT_DIR/deploy"
+            rm -rf "$tmp_extract"
+            info "产物已恢复"
+        else
+            rm -rf "$tmp_extract"
+            error "产物恢复失败(deploy.tar.gz 可能损坏),deploy 目录未修改"
+            warn "如需手动恢复:tar -xzf $snap_path/deploy.tar.gz -C $PROJECT_DIR"
+            return 1
+        fi
     fi
 
-    # 2. 恢复数据库
+    # 2. 恢复数据库(检查 mysql 命令退出码,失败不报告成功)
     if [ -s "$snap_path/database.sql.gz" ]; then
         if command -v docker &>/dev/null && docker ps 2>/dev/null | grep -q canteen-mysql; then
             info "回退:恢复数据库..."
-            gunzip -c "$snap_path/database.sql.gz" | \
-                docker exec -i canteen-mysql mysql -uroot -p"${db_pass}" "${db_name}" 2>/dev/null
-            info "数据库已恢复"
+            set -o pipefail
+            if gunzip -c "$snap_path/database.sql.gz" | \
+                docker exec -i canteen-mysql mysql -uroot -p"${db_pass}" "${db_name}" 2>/dev/null; then
+                info "数据库已恢复"
+            else
+                error "数据库恢复失败(密码错误或 SQL 执行异常)"
+                set +o pipefail
+                return 1
+            fi
+            set +o pipefail
         else
             warn "MySQL 容器未运行,跳过数据库恢复"
         fi
     fi
 
-    # 3. 回退代码
+    # 3. 回退代码(失败时中止回退流程,避免代码与数据库版本不一致)
     if [ -f "$snap_path/git_commit.txt" ]; then
         local commit
         commit=$(cat "$snap_path/git_commit.txt")
         if [ "$commit" != "nongit" ] && [ -d "$PROJECT_DIR/.git" ]; then
             info "回退:代码回退到 ${commit:0:12}..."
-            git -C "$PROJECT_DIR" checkout "$commit" 2>/dev/null \
-                && info "代码已回退" \
-                || warn "代码回退失败(可手动执行 git checkout $commit)"
+            if git -C "$PROJECT_DIR" checkout "$commit" 2>/dev/null; then
+                info "代码已回退"
+            else
+                error "代码回退失败,中止回退流程避免状态不一致"
+                warn "数据库和产物已恢复到快照状态,但代码仍是当前版本"
+                warn "请手动执行:git -C $PROJECT_DIR checkout $commit"
+                warn "完成后重启服务:docker compose up -d"
+                return 1
+            fi
         fi
     fi
 
-    # 4. 重启服务
+    # 4. 重启服务(用 up -d 而非 restart,确保重读 .env 和 compose 配置)
     info "回退:重启服务..."
-    docker compose restart 2>/dev/null || docker compose up -d 2>/dev/null || true
+    docker compose up -d 2>/dev/null || docker compose restart 2>/dev/null || true
 
     # 5. 回退后健康检查
     info "回退:等待服务恢复..."
@@ -263,17 +286,17 @@ main() {
     # 步骤 4:重启服务
     #==========================================================
     step "步骤 4/6 重启服务"
-    info "重启服务(卷映射模式,重启即加载新产物)..."
+    info "重启服务(卷映射模式,用 up -d 确保重读配置)..."
     local restart_failed=false
     case "$SCOPE" in
         backend)
-            docker compose restart backend || restart_failed=true
+            docker compose up -d --no-deps backend || restart_failed=true
             ;;
         frontend)
-            docker compose restart admin-web h5 || restart_failed=true
+            docker compose up -d --no-deps admin-web h5 || restart_failed=true
             ;;
         all)
-            docker compose restart || restart_failed=true
+            docker compose up -d || restart_failed=true
             ;;
     esac
 

@@ -88,27 +88,37 @@ public class AdminService {
         if (existing == null) {
             throw new BusinessException("管理员不存在");
         }
-        // 门店管理员只能改自己门店下的非超管账号
+        // 先检查角色:非超管不能修改超管账号(避免 storeId=null 导致 NPE)
         if (!SecurityContext.isSuperAdmin()) {
-            if (!existing.getStoreId().equals(SecurityContext.currentStoreId())) {
-                throw new SecurityException("无权修改其他门店管理员");
-            }
-            if (existing.getRole() == 1) {
+            if (existing.getRole() != null && existing.getRole() == 1) {
                 throw new SecurityException("无权修改超级管理员");
             }
+            // 门店管理员只能改自己门店下的非超管账号
+            if (existing.getStoreId() == null || !existing.getStoreId().equals(SecurityContext.currentStoreId())) {
+                throw new SecurityException("无权修改其他门店管理员");
+            }
         }
-        existing.setName(admin.getName());
+        // 部分更新语义:仅在前端显式提供新值时才更新,避免 null 覆盖现有字段
+        if (admin.getName() != null) {
+            existing.setName(admin.getName());
+        }
         if (!SecurityContext.isSuperAdmin()) {
             if (admin.getRole() != null && admin.getRole() == 1) {
                 throw new BusinessException("无权设置超级管理员角色");
             }
-            existing.setStoreId(existing.getStoreId());
-            existing.setRole(existing.getRole());
+            // 门店管理员不能改 storeId 和 role,保持原值
         } else {
-            existing.setStoreId(admin.getStoreId());
-            existing.setRole(admin.getRole());
+            // 超管可改 storeId 和 role
+            if (admin.getStoreId() != null) {
+                existing.setStoreId(admin.getStoreId());
+            }
+            if (admin.getRole() != null) {
+                existing.setRole(admin.getRole());
+            }
         }
-        existing.setStatus(admin.getStatus());
+        if (admin.getStatus() != null) {
+            existing.setStatus(admin.getStatus());
+        }
         adminMapper.updateById(existing);
         return AdminVO.from(existing);
     }

@@ -93,7 +93,7 @@ snapshot_create() {
 
     if mysql_running; then
         docker exec canteen-mysql sh -c \
-            "mysqldump -uroot -p${db_pass} --single-transaction --routines --triggers --events ${db_name} 2>/dev/null" \
+            "mysqldump -uroot -p\"${db_pass}\" --single-transaction --routines --triggers --events \"${db_name}\" 2>/dev/null" \
             | gzip > "$snap_path/database.sql.gz"
 
         if [ ! -s "$snap_path/database.sql.gz" ]; then
@@ -271,13 +271,20 @@ snapshot_restore() {
     db_pass=$(get_db_pass)
     local db_name="${MYSQL_DATABASE:-canteen}"
 
-    # 1. 恢复数据库
+    # 1. 恢复数据库(检查退出码,失败不报告成功)
     if [ -s "$snap_path/database.sql.gz" ]; then
         info "恢复数据库..."
         if mysql_running; then
-            gunzip -c "$snap_path/database.sql.gz" | \
-                docker exec -i canteen-mysql mysql -uroot -p"${db_pass}" "${db_name}" 2>/dev/null
-            info "数据库恢复完成"
+            set -o pipefail
+            if gunzip -c "$snap_path/database.sql.gz" | \
+                docker exec -i canteen-mysql mysql -uroot -p"${db_pass}" "${db_name}" 2>/dev/null; then
+                info "数据库恢复完成"
+            else
+                error "数据库恢复失败(密码错误或 SQL 执行异常)"
+                set +o pipefail
+                return 1
+            fi
+            set +o pipefail
         else
             error "MySQL 容器未运行,无法恢复数据库"
             warn "请先启动服务: docker compose up -d mysql"
@@ -287,31 +294,44 @@ snapshot_restore() {
         warn "快照无数据库备份,跳过"
     fi
 
-    # 2. 恢复 deploy/ 产物
+    # 2. 恢复 deploy/ 产物(先解压到临时目录,成功后再替换)
     if [ -s "$snap_path/deploy.tar.gz" ]; then
         info "恢复 deploy/ 产物..."
-        rm -rf "$PROJECT_DIR/deploy"
-        tar -xzf "$snap_path/deploy.tar.gz" -C "$PROJECT_DIR"
-        info "产物恢复完成"
+        local tmp_extract
+        tmp_extract=$(mktemp -d)
+        if tar -xzf "$snap_path/deploy.tar.gz" -C "$tmp_extract" 2>/dev/null; then
+            rm -rf "$PROJECT_DIR/deploy"
+            mv "$tmp_extract/deploy" "$PROJECT_DIR/deploy" 2>/dev/null || cp -r "$tmp_extract/deploy" "$PROJECT_DIR/deploy"
+            rm -rf "$tmp_extract"
+            info "产物恢复完成"
+        else
+            rm -rf "$tmp_extract"
+            error "产物恢复失败(deploy.tar.gz 可能损坏),deploy 目录未修改"
+            return 1
+        fi
     else
         warn "快照无产物备份,跳过"
     fi
 
-    # 3. 回退代码
+    # 3. 回退代码(失败时中止,避免状态不一致)
     if [ -f "$snap_path/git_commit.txt" ]; then
         local commit
         commit=$(cat "$snap_path/git_commit.txt")
         if [ "$commit" != "nongit" ] && [ -d "$PROJECT_DIR/.git" ]; then
             info "回退代码到 ${commit:0:12}..."
-            git -C "$PROJECT_DIR" checkout "$commit" 2>/dev/null \
-                && info "代码已回退" \
-                || warn "代码回退失败(可手动执行 git checkout $commit)"
+            if ! git -C "$PROJECT_DIR" checkout "$commit" 2>/dev/null; then
+                error "代码回退失败,中止恢复流程"
+                warn "数据库和产物已恢复,但代码仍是当前版本"
+                warn "请手动执行:git -C $PROJECT_DIR checkout $commit"
+                return 1
+            fi
+            info "代码已回退"
         fi
     fi
 
-    # 4. 重启服务
+    # 4. 重启服务(用 up -d 而非 restart,确保重读配置)
     info "重启服务..."
-    docker compose restart 2>/dev/null || docker compose up -d 2>/dev/null || true
+    docker compose up -d 2>/dev/null || docker compose restart 2>/dev/null || true
 
     # 5. 健康检查
     info "等待后端启动..."

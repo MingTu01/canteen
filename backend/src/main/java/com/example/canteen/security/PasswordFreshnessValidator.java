@@ -44,29 +44,33 @@ public class PasswordFreshnessValidator {
         if (role == 0) {
             // 员工
             Employee emp = employeeMapper.selectById(userId);
-            if (emp != null) {
-                // P1-5 软删除/禁用员工后 token 失效
-                if (emp.getIsDeleted() != null && emp.getIsDeleted() == 1) {
-                    return "账号已失效";
-                }
-                if (emp.getStatus() != null && emp.getStatus() != 1) {
-                    return "账号已失效";
-                }
-                passwordUpdatedAt = emp.getPasswordUpdatedAt();
+            if (emp == null) {
+                // fail-closed:员工记录不存在(硬删除)则 token 失效
+                return "账号不存在或已删除";
             }
+            // P1-5 软删除/禁用员工后 token 失效
+            if (emp.getIsDeleted() != null && emp.getIsDeleted() == 1) {
+                return "账号已失效";
+            }
+            if (emp.getStatus() != null && emp.getStatus() != 1) {
+                return "账号已失效";
+            }
+            passwordUpdatedAt = emp.getPasswordUpdatedAt();
         } else if (role == 1 || role == 2
                 || role == SecurityContext.ROLE_FINANCE
                 || role == SecurityContext.ROLE_CHEF
                 || role == SecurityContext.ROLE_STORE_MANAGER) {
             // 管理员(1/2/4/5/6)
             Admin admin = adminMapper.selectById(userId);
-            if (admin != null) {
-                // P1-5 禁用管理员后 token 失效
-                if (admin.getStatus() != null && admin.getStatus() != 1) {
-                    return "账号已失效";
-                }
-                passwordUpdatedAt = admin.getPasswordUpdatedAt();
+            if (admin == null) {
+                // fail-closed:管理员记录不存在(硬删除)则 token 失效
+                return "账号不存在或已删除";
             }
+            // P1-5 禁用管理员后 token 失效
+            if (admin.getStatus() != null && admin.getStatus() != 1) {
+                return "账号已失效";
+            }
+            passwordUpdatedAt = admin.getPasswordUpdatedAt();
         }
         // role=3(终端)或其他:跳过
 

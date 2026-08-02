@@ -31,7 +31,22 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; }
 step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
 ask()   { echo -e "${CYAN}[?]${NC} $1"; }
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 解析符号链接(防御性:deploy.sh 通常直接运行,但通过符号链接调用时也能正确解析)
+resolve_project_dir() {
+    local src="$1"
+    if command -v readlink &>/dev/null; then
+        local resolved
+        resolved=$(readlink -f "$src" 2>/dev/null) && [[ -n "$resolved" ]] && { echo "$(cd "$(dirname "$resolved")" && pwd)"; return; }
+    fi
+    while [[ -L "$src" ]]; do
+        local dir
+        dir=$(cd "$(dirname "$src")" && pwd)
+        src=$(readlink "$src")
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    echo "$(cd "$(dirname "$src")" && pwd)"
+}
+PROJECT_DIR="$(resolve_project_dir "$0")"
 cd "$PROJECT_DIR"
 
 #==============================================================
@@ -93,15 +108,15 @@ read_input() {
     fi
 }
 
-# 读取密码(隐藏输入,带确认)
+# 读取密码(隐藏输入,带确认,-r 防止反斜杠被转义消耗)
 # 用法: read_password "提示信息" -> 输出到 stdout
 read_password() {
     local prompt="$1"
     local pwd1 pwd2
     while true; do
-        read -s -p "$(echo -e "${CYAN}[?]${NC} ${prompt}: ")" pwd1
+        read -r -s -p "$(echo -e "${CYAN}[?]${NC} ${prompt}: ")" pwd1
         echo ""
-        read -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
+        read -r -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
         echo ""
         if [[ "$pwd1" != "$pwd2" ]]; then
             warn "两次输入不一致,请重新输入"
@@ -192,39 +207,62 @@ cmd_restart() {
 #==============================================================
 cmd_reset_admin() {
     step "重置超级管理员账号密码"
-    echo "此操作将设置超管账号密码,需要重启后端服务生效。"
+    echo "此操作将重置超管账号密码并重启后端(同时清除登录锁定)。"
     echo "  - 若账号已存在且为超管:更新密码"
-    echo "  - 若账号不存在:创建新超管(仅在 admin 表为空或只有默认 admin 时)"
+    echo "  - 若账号不存在:强制创建新超管"
     echo ""
 
     local username password
     username=$(read_input "超管账号名" "admin")
     password=$(read_password "输入新密码(至少 8 位)")
 
+    # 检查 .env 可写
+    local envfile="$PROJECT_DIR/.env"
+    if ! touch "$envfile" 2>/dev/null; then
+        error "无法写入 .env 文件: $envfile(权限不足?)"
+        return 1
+    fi
+
     # 写入 .env 并设置 force 标志(AdminInitializer 读取这些变量)
     set_env_var "INIT_ADMIN_USERNAME" "$username"
     set_env_var "INIT_ADMIN_PASSWORD" "$password"
     set_env_var "INIT_ADMIN_FORCE" "true"
 
-    info "正在重启后端服务以应用新账号..."
-    docker compose restart backend
+    info "正在重建后端服务(读取新配置 + 清除登录锁定)..."
+    docker compose up -d --no-deps backend
 
     info "等待后端启动..."
+    local ok=false
     for i in $(seq 1 30); do
         if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
-            info "后端已启动"
-            echo ""
-            echo "  超管账号: ${username}"
-            echo "  请使用新密码登录管理后台"
-            echo ""
-            warn "登录成功后请删除 .env 中的 INIT_ADMIN_FORCE 和 INIT_ADMIN_PASSWORD(避免明文存储)"
-            return
+            ok=true
+            break
         fi
         sleep 2
         printf "."
     done
     echo ""
-    error "后端启动超时,请查看日志: docker compose logs backend"
+
+    if [[ "$ok" == "true" ]]; then
+        # 自动清理 .env 中的敏感变量(密码已在数据库中,无需保留)
+        # 安全清理:先校验过滤结果非空,避免 grep 失败导致空文件覆盖 .env
+        info "清理临时配置..."
+        local tmp
+        tmp=$(mktemp)
+        if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [[ -s "$tmp" ]]; then
+            cp "$envfile" "${envfile}.bak" 2>/dev/null
+            mv "$tmp" "$envfile"
+        else
+            rm -f "$tmp"
+            warn "清理 .env 失败,原文件未修改"
+        fi
+
+        info "密码重置成功!"
+        echo "  超管账号: ${username}"
+        echo "  请使用新密码登录管理后台"
+    else
+        error "后端启动超时,请查看日志: docker compose logs backend"
+    fi
 }
 
 #==============================================================
