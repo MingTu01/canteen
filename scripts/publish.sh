@@ -213,6 +213,10 @@ chmod +x canteen.sh
 # VERSIONS.json
 cp "$PROJECT_DIR/VERSIONS.json" .
 
+# backend/Dockerfile.runtime(docker-compose.yml 构建后端基础镜像需要)
+mkdir -p backend
+cp "$PROJECT_DIR/backend/Dockerfile.runtime" backend/
+
 # 运行时脚本(仅复制服务器需要的,不含 build.sh / publish.sh)
 mkdir -p scripts
 for script in upgrade.sh snapshot.sh backup.sh restore.sh; do
