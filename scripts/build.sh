@@ -80,7 +80,12 @@ build_backend() {
         sh -c "mvn clean package -Dmaven.test.skip=true -B -s settings-aliyun.xml"
 
     # 复制产物
-    cp "$PROJECT_DIR/backend/target/enterprise-canteen-0.0.1.jar" "$DEPLOY_DIR/backend/app.jar"
+    # deploy/ 可能是 sudo 部署时 root 所有,canteen 用户无权覆盖,自动修复权限
+    if ! cp "$PROJECT_DIR/backend/target/enterprise-canteen-0.0.1.jar" "$DEPLOY_DIR/backend/app.jar" 2>/dev/null; then
+        info "deploy/ 目录权限不足,尝试 sudo 修复..."
+        sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" 2>/dev/null || true
+        cp "$PROJECT_DIR/backend/target/enterprise-canteen-0.0.1.jar" "$DEPLOY_DIR/backend/app.jar"
+    fi
     # 清理临时 settings
     rm -f "$settings_file"
     info "后端构建完成: deploy/backend/app.jar ($(du -h "$DEPLOY_DIR/backend/app.jar" | cut -f1))"

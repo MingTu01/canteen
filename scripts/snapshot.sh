@@ -37,9 +37,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-info()  { echo -e "${GREEN}[快照]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
-error() { echo -e "${RED}[错误]${NC} $1"; }
+info()  { echo -e "${GREEN}[快照]${NC} $1" >&2; }
+warn()  { echo -e "${YELLOW}[警告]${NC} $1" >&2; }
+error() { echo -e "${RED}[错误]${NC} $1" >&2; }
 
 # 加载 .env 获取数据库密码
 load_env() {
