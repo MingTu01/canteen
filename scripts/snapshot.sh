@@ -316,7 +316,7 @@ snapshot_restore() {
     # 5. 健康检查
     info "等待后端启动..."
     for i in $(seq 1 60); do
-        if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
+        if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
             info "后端已恢复健康"
             echo ""
             info "快照恢复完成!"

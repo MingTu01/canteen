@@ -57,7 +57,7 @@ fi
 info "健康检查..."
 sleep 5
 if [[ "$TARGET" == "all" ]] || [[ "$TARGET" == "backend" ]]; then
-    if curl -sf http://localhost:8080/api/system/health &> /dev/null; then
+    if curl -sf http://localhost:18082/api/system/health &> /dev/null; then
         info "后端 API: 正常"
     else
         warn "后端启动中,请稍等..."

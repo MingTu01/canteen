@@ -94,12 +94,12 @@ cmd_status() {
     docker compose ps
     echo ""
     info "健康检查..."
-    if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
+    if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
         info "后端 API: 正常"
     else
         warn "后端 API: 未就绪"
     fi
-    for svc in "admin-web:80" "h5:81"; do
+    for svc in "admin-web:18080" "h5:18081"; do
         name="${svc%%:*}"
         port="${svc##*:}"
         code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null || echo "000")
@@ -171,7 +171,7 @@ cmd_reset_admin() {
 
     info "等待后端启动..."
     for i in $(seq 1 30); do
-        if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
+        if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
             info "后端已启动"
             echo ""
             echo "  超管账号: ${username}"
@@ -392,6 +392,29 @@ build_runtime_image() {
 start_services() {
     step "6/9 启动服务"
 
+    # 端口占用预检测(避免启动到一半才报错)
+    local required_ports=("18080" "18081" "18082")
+    local port_busy=false
+    for p in "${required_ports[@]}"; do
+        if ss -tlnp 2>/dev/null | grep -q ":${p} " || netstat -tlnp 2>/dev/null | grep -q ":${p} "; then
+            local proc_info
+            proc_info=$(ss -tlnp 2>/dev/null | grep ":${p} " | head -1 || netstat -tlnp 2>/dev/null | grep ":${p} " | head -1)
+            error "端口 ${p} 已被占用: ${proc_info}"
+            port_busy=true
+        fi
+    done
+    if [[ "$port_busy" == "true" ]]; then
+        echo ""
+        error "端口被占用,无法启动服务。请释放上述端口后重试。"
+        echo ""
+        info "排查建议:"
+        echo "  1) 查看占用进程: sudo ss -tlnp | grep -E '18080|18081|18082'"
+        echo "  2) 停止旧服务:   sudo ./deploy.sh stop"
+        echo "  3) 如是系统 nginx/apache: sudo systemctl stop nginx && sudo systemctl disable nginx"
+        exit 1
+    fi
+    info "端口 18080/18081/18082 可用"
+
     mkdir -p backup uploads logs
 
     info "启动 Docker Compose..."
@@ -495,13 +518,13 @@ verify_and_summary() {
     echo ""
 
     info "健康检查..."
-    if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
+    if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
         info "后端 API: 正常"
     else
         warn "后端 API: 未就绪(可能仍在启动)"
     fi
 
-    for svc in "admin-web:80" "h5:81"; do
+    for svc in "admin-web:18080" "h5:18081"; do
         name="${svc%%:*}"
         port="${svc##*:}"
         if curl -sf -o /dev/null "http://localhost:${port}" >/dev/null 2>&1; then
@@ -520,9 +543,9 @@ verify_and_summary() {
     echo "=========================================="
     echo ""
     echo "  服务访问地址:"
-    echo "    管理后台:   http://${ip}"
-    echo "    H5 订餐端:  http://${ip}:81"
-    echo "    后端 API:   http://${ip}:8080"
+    echo "    管理后台:   http://${ip}:18080"
+    echo "    H5 订餐端:  http://${ip}:18081"
+    echo "    后端 API:   http://${ip}:18082"
     echo ""
     echo "  X86 终端:请使用安装包安装后,在终端设置中填入后端地址"
     echo "            安装包位于 src-python/output/ 目录"

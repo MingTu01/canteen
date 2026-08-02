@@ -126,12 +126,12 @@ chmod +x deploy.sh
 docker compose ps
 
 # 2. 后端健康检查
-curl http://localhost:8080/api/system/health
+curl http://localhost:18082/api/system/health
 # 期望: {"code":200,"data":{"status":"UP",...}}
 
 # 3. 前端访问
-curl -o /dev/null -w "admin: %{http_code}\n"  http://localhost/
-curl -o /dev/null -w "h5: %{http_code}\n"    http://localhost:81/
+curl -o /dev/null -w "admin: %{http_code}\n"  http://localhost:18080/
+curl -o /dev/null -w "h5: %{http_code}\n"    http://localhost:18081/
 # 期望: 两个都返回 200
 ```
 
@@ -201,7 +201,7 @@ docker compose logs -f backend
 #   "Started CanteenApplication in X seconds"
 
 # 5. 健康检查
-curl http://localhost:8080/api/system/health
+curl http://localhost:18082/api/system/health
 ```
 
 #### 3.3.2 更新前端（admin-web / h5）

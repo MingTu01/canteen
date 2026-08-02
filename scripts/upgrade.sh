@@ -56,7 +56,7 @@ wait_backend_healthy() {
     local waited=0
     info "等待后端启动(最多 ${max_wait}s)..."
     while [ "$waited" -lt "$max_wait" ]; do
-        if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
+        if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
             info "后端已健康! (耗时 ${waited}s)"
             return 0
         fi
@@ -300,7 +300,7 @@ main() {
 
     # 前端可达性检查
     if [ "$health_ok" = true ]; then
-        for svc in "admin-web:80" "h5:81"; do
+        for svc in "admin-web:18080" "h5:18081"; do
             name="${svc%%:*}"
             port="${svc##*:}"
             code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null || echo "000")

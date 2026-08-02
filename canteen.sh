@@ -90,13 +90,12 @@ menu_status() {
     echo ""
     info "健康检查..."
     # 后端
-    if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
-        info "后端 API (8080): 正常"
+    if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
+        info "后端 API (18082): 正常"
     else
-        warn "后端 API (8080): 未就绪"
+        warn "后端 API (18082): 未就绪"
     fi
-    # 前端
-    for svc in "管理后台:80" "H5订餐:81"; do
+    for svc in "管理后台:18080" "H5订餐:18081"; do
         name="${svc%%:*}"
         port="${svc##*:}"
         code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null || echo "000")
@@ -286,7 +285,7 @@ menu_reset_admin() {
         info "等待后端启动..."
         local ok=false
         for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/api/system/health >/dev/null 2>&1; then
+            if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
                 ok=true
                 break
             fi

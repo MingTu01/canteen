@@ -141,9 +141,9 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 
 | 端 | 地址 | 说明 |
 |----|------|------|
-| 管理后台 | http://localhost | admin / 123456 |
-| H5 订餐端 | http://localhost:81 | 员工订餐 |
-| 后端 API | http://localhost:8080 | `/api/system/health` 健康检查 |
+| 管理后台 | http://localhost:18080 | admin / 123456 |
+| H5 订餐端 | http://localhost:18081 | 员工订餐 |
+| 后端 API | http://localhost:18082 | `/api/system/health` 健康检查 |
 
 > X86 终端为独立 Windows EXE 安装包,不在 Docker 中部署,默认连接 `https://canteen.908521.xyz`。
 
