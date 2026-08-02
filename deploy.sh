@@ -433,6 +433,12 @@ EOF
     echo ""
     info ".env 已生成"
     warn "请妥善保管 .env 文件,包含敏感信息!"
+
+    # sudo 部署时,.env 会被创建为 root 所有,后续 canteen 用户无法写入
+    # 立即 chown 给实际用户,避免 canteen.sh 重置密码时权限失败
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        chown "$SUDO_USER:$SUDO_USER" .env 2>/dev/null || true
+    fi
 }
 
 # 确认是否覆盖已有 .env

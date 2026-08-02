@@ -286,11 +286,35 @@ menu_reset_admin() {
 
     # 检查 .env 可写(常见失败:符号链接解析错误或权限不足)
     if ! touch "$envfile" 2>/dev/null; then
-        error "无法写入 .env 文件: $envfile"
-        warn "可能原因:权限不足或项目目录不正确"
-        warn "请尝试: sudo canteen  或  cd $(dirname "$PROJECT_DIR") && sudo ./canteen.sh"
-        pause
-        return
+        # .env 不可写,尝试自动修复权限
+        # 常见原因:deploy.sh 用 sudo 运行,.env 被 root 所有
+        if [[ -f "$envfile" ]] && [[ "$(id -u)" != "0" ]]; then
+            local env_owner
+            env_owner=$(stat -c '%U' "$envfile" 2>/dev/null || echo "")
+            if [[ "$env_owner" == "root" ]]; then
+                info "检测到 .env 属于 root,尝试修复权限..."
+                if sudo chown "$(whoami):$(whoami)" "$envfile" 2>/dev/null; then
+                    info "权限已修复"
+                else
+                    error "无法修改 .env 权限(sudo 失败)"
+                    warn "请手动执行: sudo chown $(whoami):$(whoami) $envfile"
+                    pause
+                    return
+                fi
+            else
+                error "无法写入 .env 文件: $envfile"
+                warn "所有者: ${env_owner:-unknown}, 当前用户: $(whoami)"
+                warn "请手动执行: sudo chown $(whoami):$(whoami) $envfile"
+                pause
+                return
+            fi
+        else
+            error "无法写入 .env 文件: $envfile"
+            warn "可能原因:权限不足或项目目录不正确"
+            warn "请尝试: sudo canteen  或  cd $(dirname "$PROJECT_DIR") && sudo ./canteen.sh"
+            pause
+            return
+        fi
     fi
 
     # 写入 INIT_ADMIN_* 环境变量(用 awk 避免 sed 转义问题)
