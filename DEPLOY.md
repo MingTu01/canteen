@@ -14,17 +14,56 @@
 
 ---
 
+## 〇、分支架构说明（v0.0.3+）
+
+本仓库采用**双分支架构**，将源代码与部署产物分离：
+
+| 分支 | 用途 | 内容 | 谁使用 |
+|------|------|------|--------|
+| `main` | 源代码 | backend/admin-web/h5 源码 + 构建脚本 + publish.sh | 开发机 |
+| `deploy` | 部署产物（orphan 分支，独立历史） | 构建产物(jar/dist) + docker-compose.yml + 运行时脚本 | 服务器 |
+
+**核心优势：**
+- 服务器**无需安装 Maven / Node.js**，秒级更新（git pull + docker restart）
+- 杜绝服务器构建失败导致的升级回退（如 TypeScript 严格模式报错）
+- 源码与产物版本原子化绑定（一次 publish 同时推送）
+
+**开发机发布流程（有 Maven/Node.js 环境）：**
+
+```bash
+# 1. 在 main 分支修改代码并提交
+git add -A && git commit -m "feat: xxx"
+git push origin main
+
+# 2. 构建产物并发布到 deploy 分支
+./scripts/publish.sh all          # 全部(后端+前端)
+./scripts/publish.sh backend      # 仅后端
+./scripts/publish.sh frontend     # 仅前端
+```
+
+**服务器更新流程（deploy 分支，免构建）：**
+
+```bash
+canteen          # 菜单 → 1) 升级全部
+# 或
+canteen upgrade all
+```
+
+> `upgrade.sh` 会自动检测当前分支：deploy 分支免构建（5 步），main 分支需构建（6 步）。
+
+---
+
 ## 一、首次部署
 
 ### 1.1 一键部署（推荐）
 
 ```bash
-# 克隆项目到服务器(国内使用 ghproxy 加速)
-git clone https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+# 克隆 deploy 分支到服务器(国内使用 ghproxy 加速)
+git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
 # 赋予执行权限
-chmod +x deploy.sh scripts/*.sh
+chmod +x deploy.sh scripts/*.sh canteen.sh
 
 # 启动部署向导（需要 root 或 sudo）
 sudo ./deploy.sh
@@ -38,12 +77,13 @@ sudo ./deploy.sh
    - MySQL 密码（留空则自动生成随机密码）
    - JWT 密钥（自动生成 64 位随机十六进制）
    - **超管账号密码**（自定义设置，至少 8 位）
-4. **构建产物**（在 Docker 容器中构建，宿主机无需 JDK/Node.js）
-5. **构建运行时镜像**（首次需要，后续更新无需重建）
-6. **启动服务**（Docker Compose 编排）
-7. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
-8. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
-9. **部署验证**（健康检查 + 访问地址输出）
+4. **构建运行时镜像**（首次需要，仅含 JRE+curl，不含业务代码；deploy 分支已含产物，无需构建）
+5. **启动服务**（Docker Compose 编排）
+6. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
+7. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
+8. **部署验证**（健康检查 + 访问地址输出）
+
+> **重要：** 必须克隆 `deploy` 分支（`-b deploy`），不要克隆 `main` 分支。`main` 分支只含源码，服务器构建会因缺少 Maven/Node.js 失败。
 
 ### 1.2 跳过 Docker 安装
 
@@ -67,7 +107,7 @@ sudo ./deploy.sh --skip-env
 
 ### 1.4 canteen 管理命令（部署时自动安装）
 
-部署向导的第 8 步会自动安装 `canteen` 系统命令，无需单独操作。部署完成后在服务器任意目录输入 `canteen` 即可弹出管理面板：
+部署向导的第 7 步会自动安装 `canteen` 系统命令，无需单独操作。部署完成后在服务器任意目录输入 `canteen` 即可弹出管理面板：
 
 ```bash
 canteen              # 打开交互式管理菜单
@@ -181,7 +221,9 @@ canteen
 ╔══════════════════════════════════════════════╗
 ║   企业智慧食堂系统 - 管理面板                 ║
 ╠══════════════════════════════════════════════╣
-║  版本: v1.0.0    状态: ● 全部运行中           ║
+║  系统版本: v0.0.3    状态: ● 全部运行中       ║
+║  后端: v0.0.2  管理后台: v0.0.2  H5: v0.0.2  ║
+║  终端: v1.0.0  分支: deploy                   ║
 ╠══════════════════════════════════════════════╣
 ║                                              ║
 ║  【升级】                                     ║
@@ -202,11 +244,14 @@ canteen
 ║  11) 停止服务                                ║
 ║                                              ║
 ║  【系统】                                     ║
-║  12) 安装 canteen 系统命令                   ║
+║  12) 修复 canteen 系统命令                   ║
+║  13) 查看版本详情与更新日志                  ║
 ║                                              ║
 ║   0) 退出                                     ║
 ╚══════════════════════════════════════════════╝
 ```
+
+> 菜单顶部显示当前分支（`deploy` 或 `main` 或 `detached`），升级步骤会根据分支自动适配。
 
 选择 `1`（升级全部）即可，升级脚本会自动完成安全升级全流程。
 
@@ -228,13 +273,15 @@ sudo canteen uninstall
 
 > `canteen` 是指向项目 `canteen.sh` 的软链接，项目更新后菜单自动更新，无需重新安装。
 
-### 4.3 安全升级链路（自动执行）
+### 4.3 安全升级链路（自动执行，分支感知）
 
-升级是高风险操作，本系统设计了完整的安全链路，**每一步都有保护**：
+升级是高风险操作，本系统设计了完整的安全链路，**每一步都有保护**。
+
+**deploy 分支（服务器，免构建，5 步）：**
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              安全升级流程                        │
+│         安全升级流程 - deploy 分支               │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │  ① 创建升级前快照                               │
@@ -244,13 +291,37 @@ sudo canteen uninstall
 │     └─ 版本号记录                               │
 │           │                                     │
 │           ▼                                     │
-│  ② git pull 拉取最新代码                        │
+│  ② git pull origin deploy (拉取最新产物)        │
+│           │                                     │
+│           ▼                                     │
+│  ③ docker compose up -d ── 失败 ──▶ 自动回退    │
+│           │                                     │
+│           ▼                                     │
+│  ④ 健康检查 (等待 120s) ── 失败 ──▶ 自动回退    │
+│           │                                     │
+│           ▼                                     │
+│  ⑤ 成功 → 清理旧快照(保留最近5个)               │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+**main 分支（开发机，需构建，6 步）：**
+
+```
+┌─────────────────────────────────────────────────┐
+│          安全升级流程 - main 分支                │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  ① 创建升级前快照                               │
+│           │                                     │
+│           ▼                                     │
+│  ② git pull origin main (拉取最新源码)          │
 │           │                                     │
 │           ▼                                     │
 │  ③ build.sh 重建产物 ────── 失败 ──▶ 自动回退   │
 │           │                                     │
 │           ▼                                     │
-│  ④ docker compose restart ── 失败 ──▶ 自动回退  │
+│  ④ docker compose up -d ── 失败 ──▶ 自动回退    │
 │           │                                     │
 │           ▼                                     │
 │  ⑤ 健康检查 (等待 120s) ── 失败 ──▶ 自动回退    │
@@ -261,14 +332,17 @@ sudo canteen uninstall
 └─────────────────────────────────────────────────┘
 ```
 
+**detached HEAD 自动修复：** 如果服务器处于 detached HEAD 状态（历史遗留问题），`upgrade.sh` 会自动切换到 `deploy` 分支并继续升级，无需手动处理。
+
 **自动回退机制：** 当构建失败、重启失败或健康检查超时时，系统自动执行回退：
 1. 恢复 `deploy/` 产物到升级前状态
 2. 恢复数据库到升级前状态
-3. `git checkout` 回退代码到升级前 commit
+3. `git reset --hard` 回退代码到升级前 commit（保持分支上下文，避免 detached HEAD）
 4. 重启所有服务
 5. 回退后健康检查，确认服务恢复正常
 
 > 这意味着即使升级出问题，系统也能自动恢复到升级前的正常状态，不会崩溃。
+> 注意：回退使用 `git reset --hard` 而非 `git checkout`，避免进入 detached HEAD 状态导致后续 `git pull` 失败。
 
 ### 4.4 命令行直接升级
 
@@ -288,7 +362,9 @@ canteen upgrade backend   # 仅升级后端
 canteen upgrade frontend  # 仅升级前端
 ```
 
-### 4.5 快速更新（无备份，开发用）
+### 4.5 快速更新（无备份，仅 main 分支开发用）
+
+> **注意：** `update.sh` 依赖 `build.sh` 本地构建，仅适用于 `main` 分支的开发测试环境。`deploy` 分支服务器请使用 `upgrade.sh` 或 `canteen` 菜单。
 
 如果不需要快照保护（仅开发测试环境），可使用更简洁的更新脚本：
 
@@ -319,7 +395,7 @@ canteen upgrade frontend  # 仅升级前端
 手动恢复会：
 1. 恢复数据库（需输入 `yes` 确认）
 2. 恢复 deploy/ 产物
-3. 回退代码到快照时的 commit
+3. `git reset --hard` 回退代码到快照时的 commit（保持分支上下文）
 4. 重启所有服务
 5. 健康检查
 
@@ -340,6 +416,132 @@ canteen upgrade frontend  # 仅升级前端
 # 查看最新快照 ID
 ./scripts/snapshot.sh latest
 ```
+
+### 4.8 完全清理重部署（从零开始）
+
+当服务器出现严重问题（权限混乱、detached HEAD 无法修复、容器状态异常）时，可执行完全清理重部署。
+
+> **⚠️ 警告：** 此流程会删除所有容器和数据卷（数据库数据将丢失），执行前务必备份！
+
+#### 阶段一：创建 deploy 分支（仅首次需要，已有 deploy 分支可跳过）
+
+如果远程仓库还没有 `deploy` 分支，需要在有 Maven/Node.js 的机器（开发机或服务器）上运行一次 `publish.sh` 创建：
+
+```bash
+# 切换到 main 分支并拉取最新代码
+git checkout main
+git pull origin main
+chmod +x *.sh scripts/*.sh
+
+# 构建全部产物并发布到 deploy 分支
+./scripts/publish.sh all
+```
+
+验证 deploy 分支已创建：
+
+```bash
+git ls-remote origin deploy
+```
+
+应显示一个 commit SHA。
+
+#### 阶段二：备份现有数据
+
+```bash
+# 备份 .env 文件(含生产密码和密钥)
+cp /opt/canteen/.env /tmp/canteen-env-backup
+
+# 备份数据库
+source /opt/canteen/.env
+docker exec canteen-mysql mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD}" --single-transaction canteen > /tmp/canteen-db-backup.sql
+
+# 验证备份文件非空
+ls -lh /tmp/canteen-db-backup.sql
+```
+
+#### 阶段三：清理服务器
+
+```bash
+# 停止并删除所有容器
+cd /opt/canteen
+docker compose down
+
+# 删除旧代码目录
+cd /tmp
+sudo rm -rf /opt/canteen
+
+# (可选)删除 Docker 数据卷 — 会丢失所有数据库数据!
+# 如需保留数据库数据,跳过此步骤,数据卷会在阶段四自动复用
+docker volume rm canteen_mysql_data canteen_redis_data
+```
+
+#### 阶段四：从 deploy 分支重新部署
+
+```bash
+# 克隆 deploy 分支
+sudo git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+
+# 修正目录所有权(关键!避免权限问题)
+sudo chown -R canteen:canteen /opt/canteen
+
+# 配置 Git 忽略目录所有权检查
+sudo git config --global --add safe.directory /opt/canteen
+sudo -u canteen git config --global --add safe.directory /opt/canteen
+
+# 恢复 .env 配置
+cp /tmp/canteen-env-backup /opt/canteen/.env
+chown canteen:canteen /opt/canteen/.env
+chmod 600 /opt/canteen/.env
+
+# 赋予脚本可执行权限
+cd /opt/canteen
+chmod +x *.sh scripts/*.sh
+
+# 创建必要目录
+mkdir -p backup uploads
+
+# 构建后端运行时镜像(首次需要,仅含 JRE+curl,不含业务代码)
+docker compose build backend
+
+# 启动所有服务
+docker compose up -d
+
+# 安装 canteen 系统命令
+sudo ./canteen.sh install
+```
+
+#### 阶段五：验证部署
+
+```bash
+# 检查健康状态
+canteen status
+# 或直接 curl 检查
+curl -s http://localhost:18082/api/system/health
+
+# 验证前端可访问(应返回 200)
+curl -s -o /dev/null -w "%{http_code}" http://localhost:18080/
+curl -s -o /dev/null -w "%{http_code}" http://localhost:18081/
+
+# 恢复数据库(如果阶段三删除了数据卷)
+source /opt/canteen/.env
+docker exec -i canteen-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" canteen < /tmp/canteen-db-backup.sql
+docker compose restart backend
+
+# 验证登录
+# 浏览器访问 http://<服务器IP>:18080 管理后台,使用超管账号登录测试
+```
+
+#### 权限注意事项（历史教训总结）
+
+1. **目录所有权**：`/opt/canteen` 必须归 `canteen:canteen` 所有
+   ```bash
+   sudo chown -R canteen:canteen /opt/canteen
+   ```
+2. **.env 权限**：必须可写，建议 `chmod 600` + `chown canteen:canteen`
+3. **Git safe.directory**：避免 "dubious ownership" 错误
+4. **脚本可执行位**：Windows 仓库不保留 +x，每次 pull 后需 `chmod +x *.sh scripts/*.sh`（`canteen.sh` 和 `upgrade.sh` 已自动处理）
+5. **deploy 目录权限**：不要用 sudo 运行 build，避免 `deploy/` 被 root 所有
+6. **禁止混用 sudo**：要么全程普通用户，要么全程 sudo，混用会导致文件所有权混乱
 
 ---
 
@@ -513,25 +715,29 @@ python build_installer.py
 
 ## 九、目录结构
 
+### main 分支（源代码，开发机）
+
 ```
 enterprise-canteen/
 ├── canteen.sh                 # 服务器管理面板（输入 canteen 打开）
 ├── deploy.sh                  # 部署 CLI 入口
 ├── docker-compose.yml         # Docker 编排配置
+├── VERSIONS.json              # 版本号集中管理
 ├── .env / .env.example        # 环境变量
 ├── scripts/
 │   ├── build.sh              # 构建产物（Docker 容器内构建）
-│   ├── upgrade.sh            # 安全升级（含快照+自动回退）
-│   ├── update.sh             # 快速更新（无备份，开发用）
+│   ├── publish.sh            # 构建并发布到 deploy 分支（开发机用）
+│   ├── upgrade.sh            # 安全升级（分支感知：deploy免构建/main构建）
+│   ├── update.sh             # 快速更新（无备份，仅 main 分支开发用）
 │   ├── snapshot.sh           # 快照管理（创建/列出/恢复/清理）
 │   ├── backup.sh             # 数据库备份（mysqldump）
 │   ├── restore.sh            # 数据库恢复
 │   └── cron_backup.sh        # 定时备份 cron 脚本
-├── backend/                   # Spring Boot 后端
+├── backend/                   # Spring Boot 后端源码 + Dockerfile.runtime
 ├── admin-web/                 # 管理后台前端（Vue 3）
 ├── h5/                        # H5 订餐端前端（Vue 3）
 ├── src-python/               # X86 终端（Python + PyQt5）
-├── deploy/                    # 构建产物输出目录
+├── deploy/                    # 构建产物输出目录（.gitignore 忽略）
 │   ├── backend/app.jar
 │   ├── admin-web/{html,nginx.conf}
 │   └── h5/{html,nginx.conf}
@@ -540,6 +746,30 @@ enterprise-canteen/
 ├── uploads/                   # 上传文件
 └── logs/                      # 日志
 ```
+
+### deploy 分支（部署产物，服务器，orphan 分支独立历史）
+
+```
+enterprise-canteen/            # 服务器 /opt/canteen
+├── canteen.sh                 # 服务器管理面板
+├── deploy.sh                  # 部署 CLI 入口
+├── docker-compose.yml         # Docker 编排配置
+├── VERSIONS.json              # 版本号集中管理
+├── .env.example               # 环境变量模板(.env 不入库)
+├── backend/
+│   └── Dockerfile.runtime     # 后端运行时镜像构建文件
+├── scripts/
+│   ├── upgrade.sh            # 安全升级（分支感知，deploy 分支免构建）
+│   ├── snapshot.sh           # 快照管理
+│   ├── backup.sh             # 数据库备份
+│   └── restore.sh            # 数据库恢复
+└── deploy/                    # 构建产物（直接可用，无需构建）
+    ├── backend/app.jar
+    ├── admin-web/{html,nginx.conf}
+    └── h5/{html,nginx.conf}
+```
+
+> `deploy` 分支不含源码（backend/admin-web/h5 源码目录）、不含 build.sh/publish.sh/update.sh，服务器无需 Maven/Node.js。
 
 ---
 
@@ -582,6 +812,51 @@ docker compose up -d
 ### Q: 升级后前端没变化
 
 A: 浏览器缓存问题。强制刷新（Ctrl+Shift+R）或清除缓存。nginx 已配置 index.html 禁止缓存。
+
+### Q: git pull 报错"您当前不在一个分支上"
+
+A: 服务器处于 detached HEAD 状态（历史遗留问题）。解决方法：
+
+```bash
+# 方法1:运行 upgrade.sh,会自动切换到 deploy 分支
+canteen upgrade all
+
+# 方法2:手动切换到 deploy 分支
+git checkout deploy
+git pull origin deploy
+```
+
+> v0.0.3+ 的 `upgrade.sh` 会自动检测并修复 detached HEAD 状态，无需手动处理。
+
+### Q: git pull 报错 "detected dubious ownership"
+
+A: 项目目录所有权与当前用户不一致。修复：
+
+```bash
+sudo chown -R canteen:canteen /opt/canteen
+git config --global --add safe.directory /opt/canteen
+```
+
+### Q: 部署后 .env 无法写入（权限拒绝）
+
+A: `.env` 被 root 所有（通常因 sudo 运行 deploy.sh 导致）。修复：
+
+```bash
+sudo chown canteen:canteen /opt/canteen/.env
+chmod 600 /opt/canteen/.env
+```
+
+### Q: deploy 分支不存在怎么办
+
+A: `deploy` 分支需要由开发机通过 `publish.sh` 首次创建。在有 Maven/Node.js 的机器上：
+
+```bash
+git checkout main
+git pull origin main
+./scripts/publish.sh all
+```
+
+创建后服务器即可 `git clone -b deploy` 克隆。
 
 ---
 
