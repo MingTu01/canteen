@@ -27,6 +27,8 @@ const rules: FormRules = {
 }
 
 const handleLogin = async () => {
+  // 防止 loading 期间重复提交(按回车键可能触发多次)
+  if (loading.value) return
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 

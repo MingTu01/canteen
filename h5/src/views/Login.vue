@@ -64,6 +64,8 @@ const safeRedirect = (raw: unknown): string => {
 
 /** 手机号登录 */
 const onPhoneSubmit = async (): Promise<void> => {
+  // 防止 loading 期间重复提交
+  if (loading.value) return
   if (!phoneForm.phone) {
     showFailToast('请输入手机号')
     return

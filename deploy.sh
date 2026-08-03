@@ -455,8 +455,10 @@ JWT_EMPLOYEE_EXPIRATION=2592000000
 JWT_TERMINAL_EXPIRATION=31536000000
 
 # 初始超管账号(后端首次启动时读取,初始化后可删除)
+# 注意:FORCE=true 确保重新部署时也能更新已存在超管的密码
 INIT_ADMIN_USERNAME=${admin_user}
 INIT_ADMIN_PASSWORD=${admin_pwd}
+INIT_ADMIN_FORCE=true
 EOF
 
     echo ""
