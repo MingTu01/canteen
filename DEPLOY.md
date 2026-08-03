@@ -102,7 +102,73 @@ exit
 > - 不要用 `sudo git clone`！会让整个项目目录归 root 所有。用普通用户克隆，仅 `sudo ./deploy.sh` 时用 sudo。
 > - 部署完成后必须**重新登录**让 docker 组生效，否则 `canteen` 命令仍需 sudo。
 
-### 1.2 跳过 Docker 安装
+### 1.2 ZIP 包部署（国内服务器推荐）
+
+> **适用场景：** GitHub 加速器下载 deploy 分支慢/失败、或 deploy 分支因含 45MB jar 推送超时无法同步时，使用 ZIP 包手动上传部署。这是**最可靠**的部署方式，不依赖 git。
+
+#### 步骤 1：获取 ZIP 包
+
+开发机构建后生成的 ZIP 包：`canteen-deploy-v0.0.6.zip`（约 47MB），包含全部部署产物。
+
+#### 步骤 2：上传到服务器
+
+```bash
+# 用 scp 上传（替换为你的服务器 IP 和用户名）
+scp canteen-deploy-v0.0.6.zip canteen@<服务器IP>:/tmp/
+
+# 或用 1Panel 面板上传到 /tmp/ 目录
+```
+
+#### 步骤 3：解压并部署
+
+```bash
+# 用普通用户登录(如 canteen / ubuntu),不要用 root
+sudo mkdir -p /opt/canteen
+sudo chown -R $(whoami):$(whoami) /opt/canteen
+
+# 解压 ZIP 包到 /opt/canteen
+cd /opt/canteen
+unzip /tmp/canteen-deploy-v0.0.6.zip
+chmod +x *.sh scripts/*.sh
+
+# 用 sudo 运行 deploy.sh
+sudo ./deploy.sh
+```
+
+#### 步骤 4：后续升级
+
+ZIP 包部署后，服务器**没有 git 仓库**，无法用 `canteen upgrade`（依赖 git pull）。后续升级方式：
+
+```bash
+# 方式一：再次上传新 ZIP 包覆盖升级（最简单）
+# 1. 开发机生成新 ZIP 包
+# 2. 上传到服务器 /tmp/
+# 3. 在服务器执行：
+cd /opt/canteen
+unzip -o /tmp/canteen-deploy-v*.zip
+chmod +x *.sh scripts/*.sh
+docker compose up -d
+# 4. 健康检查
+curl -s http://localhost:18082/api/system/health
+
+# 方式二：初始化 git 仓库跟踪 deploy 分支（一次性，后续可用 canteen upgrade）
+cd /opt/canteen
+git init
+git remote add origin https://gh.llkk.cc/https://github.com/MingTu01/canteen.git
+git fetch origin deploy
+git checkout -b deploy FETCH_HEAD
+# 此后可用 canteen upgrade 正常升级
+```
+
+> **ZIP 包部署 vs git clone 部署：**
+> | 对比 | ZIP 包 | git clone deploy |
+> |------|--------|-----------------|
+> | 下载速度 | 快（单文件 47MB） | 慢（含 jar 的 git 历史） |
+> | 后续升级 | 需重新上传 ZIP 或初始化 git | `canteen upgrade` 一键 |
+> | 可靠性 | 高（不依赖 git） | 受网络影响 |
+> | 推荐场景 | 国内服务器、网络不稳定 | 网络稳定环境 |
+
+### 1.3 跳过 Docker 安装
 
 如果服务器已安装 Docker：
 
@@ -110,7 +176,7 @@ exit
 sudo ./deploy.sh --skip-env
 ```
 
-### 1.3 部署后访问
+### 1.4 部署后访问
 
 部署完成后会输出访问地址（IP 根据服务器自动检测）：
 
@@ -122,7 +188,7 @@ sudo ./deploy.sh --skip-env
 
 使用部署时设置的超管账号密码登录管理后台。
 
-### 1.4 canteen 管理命令（部署时自动安装）
+### 1.5 canteen 管理命令（部署时自动安装）
 
 部署向导的第 7 步会自动安装 `canteen` 系统命令，无需单独操作。部署完成后在服务器任意目录输入 `canteen` 即可弹出管理面板：
 
@@ -492,9 +558,27 @@ sudo rm -rf /opt/canteen
 docker volume rm canteen_mysql_data canteen_redis_data
 ```
 
-#### 阶段四：从 deploy 分支重新部署（避免权限问题版）
+#### 阶段四：重新部署（两种方式任选）
 
 > **权限问题根源：** 历史上多次出现 `.env 被 root 所有`、`deploy/ 目录被 root 所有`、`docker compose 权限拒绝`，根源是混用 sudo 和普通用户。下面的流程严格区分：**系统级操作用 sudo，业务文件归普通用户**。
+
+**方式 A：ZIP 包部署（推荐，不依赖 git，最可靠）**
+
+```bash
+# 用普通用户登录(如 canteen / ubuntu),不要用 root
+sudo mkdir -p /opt/canteen
+sudo chown -R $(whoami):$(whoami) /opt/canteen
+
+# 解压 ZIP 包(已上传到 /tmp/)
+cd /opt/canteen
+unzip /tmp/canteen-deploy-v*.zip
+chmod +x *.sh scripts/*.sh
+
+# 用 sudo 运行 deploy.sh
+sudo ./deploy.sh
+```
+
+**方式 B：git clone deploy 分支**
 
 **步骤 1：用普通用户克隆（不要用 sudo clone）**
 
