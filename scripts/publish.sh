@@ -154,19 +154,16 @@ DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null |
                 git rev-parse --verify "refs/remotes/origin/$DEPLOY_BRANCH" 2>/dev/null || \
                 echo "")
 
-if [ -z "$DEPLOY_EXISTS" ]; then
-    info "deploy 分支不存在,创建 orphan 分支..."
-    # 先基于 main clone,再改造成 orphan 分支
-    git clone --quiet --depth 1 "$REMOTE_URL" "$WORKTREE_DIR"
-    cd "$WORKTREE_DIR"
-    git checkout --orphan "$DEPLOY_BRANCH"
-    git rm -rf . 2>/dev/null || true
-else
-    info "deploy 分支已存在,clone 检出..."
-    # 浅克隆(deploy 分支含大量构建产物,全量克隆极慢)
-    git clone --quiet --depth 1 --single-branch --branch "$DEPLOY_BRANCH" "$REMOTE_URL" "$WORKTREE_DIR"
-    cd "$WORKTREE_DIR"
-fi
+# 不克隆远程 deploy 分支(含大量构建产物,克隆极慢)
+# 直接创建空仓库 + orphan 分支,复制文件后 force push 覆盖远程
+info "创建空 orphan 分支(无需克隆远程 deploy 分支)..."
+mkdir -p "$WORKTREE_DIR"
+cd "$WORKTREE_DIR"
+git init --quiet
+git remote add origin "$REMOTE_URL"
+git checkout --orphan "$DEPLOY_BRANCH" 2>/dev/null || git checkout -B "$DEPLOY_BRANCH"
+# 清空 orphan 分支的暂存区(初始状态下可能残留 main 分支内容)
+git rm -rf . 2>/dev/null || true
 
 info "deploy 工作区就绪: $WORKTREE_DIR"
 
