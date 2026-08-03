@@ -96,9 +96,10 @@ get_status_line() {
         echo -e "${RED}● Docker 未安装${NC}"
         return
     fi
-    local running
-    running=$(docker compose ps --format json 2>/dev/null | grep -c '"running"' || echo "0")
-    local total=5  # backend, admin-web, h5, mysql, redis
+    # 用 docker ps 直接查 canteen- 开头的容器,不依赖 docker-compose.yml 和 .env
+    # 避免 .env 权限不足时 docker compose 命令失败导致误报"未运行"
+    local running total=5  # backend, admin-web, h5, mysql, redis
+    running=$(docker ps --filter "name=canteen-" --format '{{.Names}}' 2>/dev/null | wc -l)
     if [ "$running" -ge 5 ] 2>/dev/null; then
         echo -e "${GREEN}● 全部运行中 (${running}/${total})${NC}"
     elif [ "$running" -gt 0 ] 2>/dev/null; then
@@ -373,23 +374,37 @@ menu_reset_admin() {
         fi
     fi
 
-    # 写入 INIT_ADMIN_* 环境变量(用 awk 避免 sed 转义问题)
+    # 写入 INIT_ADMIN_* 环境变量(用单引号包裹值,避免 $/空格/#/反引号 等特殊字符在 source 时被展开)
     info "写入配置..."
+    # 转义值中的单引号(单引号包裹的值中,单引号用 '\'' 转义)
+    _escape_val() {
+        local v="$1"
+        v="${v//\'/\'\\\'\'}"
+        printf '%s' "$v"
+    }
     for kv in "INIT_ADMIN_USERNAME=$username" "INIT_ADMIN_PASSWORD=$pwd1" "INIT_ADMIN_FORCE=true"; do
         local key="${kv%%=*}"
         local val="${kv#*=}"
+        local escaped_val new_line
+        escaped_val=$(_escape_val "$val")
+        new_line="${key}='${escaped_val}'"
         if grep -q "^${key}=" "$envfile" 2>/dev/null; then
             local tmp
             tmp=$(mktemp)
-            KEY="$key" VALUE="$val" awk '
-                BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VALUE"] }
-                index($0, k "=") == 1 { print k "=" v; next }
+            KEY="$key" LINE="$new_line" awk '
+                BEGIN { k = ENVIRON["KEY"]; line = ENVIRON["LINE"] }
+                index($0, k "=") == 1 { print line; next }
                 { print }
             ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
         else
-            echo "${key}=${val}" >> "$envfile"
+            echo "$new_line" >> "$envfile"
         fi
     done
+    # 写入后强制权限 600 + chown(避免 sudo 运行时 .env 变 root 所有)
+    chmod 600 "$envfile" 2>/dev/null || true
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
+    fi
 
     # 用 up -d 而非 restart:restart 不重读 .env,只有 up -d 才会用新环境变量重建容器
     info "正在重建后端服务(读取新配置 + 清除登录锁定)..."
@@ -427,7 +442,13 @@ menu_reset_admin() {
     tmp=$(mktemp)
     if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [ -s "$tmp" ]; then
         cp "$envfile" "${envfile}.bak" 2>/dev/null
+        chmod 600 "${envfile}.bak" 2>/dev/null || true
         mv "$tmp" "$envfile"
+        # 清理后重新设置权限 600 + chown
+        chmod 600 "$envfile" 2>/dev/null || true
+        if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+            chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
+        fi
     else
         rm -f "$tmp"
         warn "清理 .env 失败,原文件未修改(敏感变量仍保留,建议手动删除 INIT_ADMIN_FORCE/INIT_ADMIN_PASSWORD)"
@@ -468,11 +489,11 @@ menu_logs() {
     echo ""
     info "查看 ${svc} 日志(最近 200 行,Ctrl+C 退出跟踪)..."
     echo ""
-    docker compose logs --tail=200 "$svc" 2>/dev/null
+    docker compose logs --tail=200 "$svc" 2>&1
     echo ""
     info "是否持续跟踪日志?(Ctrl+C 退出)"
     if confirm "跟踪日志?"; then
-        docker compose logs -f "$svc" 2>/dev/null
+        docker compose logs -f "$svc" 2>&1
     fi
     pause
 }
@@ -500,16 +521,23 @@ menu_restart() {
     echo ""
     if confirm "确认重启?"; then
         # 用 up -d 而非 restart:restart 在容器被 down 删除后会失败,up -d 会重建
+        # 不吞错误,失败时显示真实原因
         local ok=true
+        local err_out
         case "$svc" in
-            all)       docker compose up -d 2>/dev/null || ok=false ;;
-            backend)   docker compose up -d --no-deps backend 2>/dev/null || ok=false ;;
-            frontend)  docker compose up -d --no-deps admin-web h5 2>/dev/null || ok=false ;;
+            all)
+                err_out=$(docker compose up -d 2>&1) || { ok=false; echo "$err_out"; } ;;
+            backend)
+                err_out=$(docker compose up -d --no-deps backend 2>&1) || { ok=false; echo "$err_out"; } ;;
+            frontend)
+                err_out=$(docker compose up -d --no-deps admin-web h5 2>&1) || { ok=false; echo "$err_out"; } ;;
         esac
         if [ "$ok" = true ]; then
             info "已重启"
         else
-            error "重启失败,请查看日志:canteen → 9) 查看日志"
+            echo ""
+            error "重启失败,错误信息如上"
+            echo "    完整日志: docker compose logs"
         fi
     else
         info "已取消"

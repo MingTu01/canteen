@@ -132,7 +132,7 @@ echo -e "${GREEN}  deploy.sh 会引导你:${NC}"
 echo -e "${GREEN}    1. 生成安全的 .env(密码/密钥)${NC}"
 echo -e "${GREEN}    2. 构建后端基础镜像${NC}"
 echo -e "${GREEN}    3. 启动所有服务${NC}"
-echo -e "${GREEN}    4. 安全加固(UFW + fail2ban + 入侵检测)${NC}"
+echo -e "${GREEN}    4. 部署验证(健康检查 + 访问地址输出)${NC}"
 echo -e "${GREEN}==========================================${NC}"
 echo ""
 

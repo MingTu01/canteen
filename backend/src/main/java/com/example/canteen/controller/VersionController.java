@@ -4,6 +4,9 @@ import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,10 +30,12 @@ import java.util.Map;
 public class VersionController {
 
     private final JdbcTemplate jdbcTemplate;
+    private final RedisConnectionFactory redisConnectionFactory;
     private final JsonNode versionInfo;
 
-    public VersionController(JdbcTemplate jdbcTemplate) {
+    public VersionController(JdbcTemplate jdbcTemplate, RedisConnectionFactory redisConnectionFactory) {
         this.jdbcTemplate = jdbcTemplate;
+        this.redisConnectionFactory = redisConnectionFactory;
         this.versionInfo = loadVersionInfo();
     }
 
@@ -91,21 +96,37 @@ public class VersionController {
     }
 
     @GetMapping("/health")
-    public ApiResponse<Map<String, Object>> healthCheck() {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> healthCheck() {
         Map<String, Object> result = new HashMap<>();
-        result.put("status", "UP");
         result.put("timestamp", new Date());
         result.put("version", versionInfo.path("version").asText("unknown"));
 
         // 检查数据库连接
+        boolean dbUp;
         try {
             jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+            dbUp = true;
             result.put("database", "UP");
         } catch (Exception e) {
-            // P2-2 不泄漏数据库错误详情,仅标记降级状态
+            // 不泄漏数据库错误详情,仅标记 DOWN
+            dbUp = false;
             result.put("database", "DOWN");
-            result.put("status", "DEGRADED");
         }
+
+        // 检查 Redis 连接
+        boolean redisUp = false;
+        try {
+            redisConnectionFactory.getConnection().ping();
+            redisUp = true;
+            result.put("redis", "UP");
+        } catch (Exception e) {
+            // 不泄漏 Redis 错误详情,仅标记 DOWN
+            result.put("redis", "DOWN");
+        }
+
+        // 综合状态:DB 和 Redis 都 UP 时才为 UP,否则为 DOWN
+        boolean allUp = dbUp && redisUp;
+        result.put("status", allUp ? "UP" : "DOWN");
 
         // JVM 内存
         Runtime runtime = Runtime.getRuntime();
@@ -156,7 +177,9 @@ public class VersionController {
             // 忽略磁盘信息获取失败
         }
 
-        return ApiResponse.success(result);
+        // DB 或 Redis 任一 DOWN 时返回 503,以便 Docker healthcheck / 负载均衡器正确摘除节点
+        HttpStatus httpStatus = allUp ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE;
+        return ResponseEntity.status(httpStatus).body(ApiResponse.success(result));
     }
 
     /**

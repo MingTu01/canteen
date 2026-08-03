@@ -1,10 +1,12 @@
 {
-  "version": "0.0.3",
+  "version": "0.0.5",
   "buildTime": "2026-08-03",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
     "V0.0.1 初始版本: 统一版本号基线,建立部署与更新流程规范",
     "V0.0.2 微信登录/通知推送/V15迁移/默认密码12345678/默认余额5000",
-    "V0.0.3 安全修复P1-P2: 备份脱敏/Mass Assignment修复/密码复杂度校验/Token黑名单fail-closed/手机号脱敏"
+    "V0.0.3 安全修复P1-P2: 备份脱敏/Mass Assignment修复/密码复杂度校验/Token黑名单fail-closed/手机号脱敏",
+    "V0.0.4 修复SchemaMigrationRunner权限:DDL迁移移交Flyway V16/业务表创建不再失败/Flyway用户显式配置",
+    "V0.0.5 深度审查修复:健康检查DB/Redis DOWN返回503/AdminInitializer FORCE竞态(标记文件)/V11/V15/V16迁移幂等性/init-db-user权限收紧"
   ]
 }

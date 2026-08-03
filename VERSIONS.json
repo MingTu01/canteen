@@ -1,9 +1,9 @@
 {
   "backend": {
-    "version": "0.0.3",
+    "version": "0.0.5",
     "name": "后端服务",
     "source": "backend/pom.xml",
-    "changelog": "安全修复P1-P2:备份脱敏/Mass Assignment修复/密码复杂度校验/Token黑名单fail-closed/EmployeeVO手机号脱敏"
+    "changelog": "深度审查修复:健康检查DB/Redis DOWN返回503(修复容器误报健康)/AdminInitializer FORCE竞态(标记文件防重复重置)/V11/V15/V16迁移幂等性(MySQL8兼容)/init-db-user权限收紧(flyway_schema_history只读)"
   },
   "admin-web": {
     "version": "0.0.3",
@@ -24,9 +24,9 @@
     "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
   },
   "system": {
-    "version": "0.0.4",
+    "version": "0.0.6",
     "name": "系统整体版本",
     "source": "VERSIONS.json",
-    "changelog": "安全加固P0-P2:端口127.0.0.1绑定/弱默认值移除/防火墙UFW+fail2ban/Cookie Secure/CORS白名单/备份AES-256加密/Redis密码/MySQL应用用户/容器非root降权/入侵检测auditd+AIDE/.env权限600"
+    "changelog": "部署链路深度审查修复:备份密码sh -c二次展开(密码截断)/init-db-user SQL注入/回退顺序(停服务→代码→DB→产物)/健康检查超时阻断/pipefail+gzip校验/端口检查补全/磁盘检查/依赖检查/rand_hex用urandom/logs chown"
   }
 }

@@ -107,6 +107,9 @@ services:
     container_name: canteen-backend
     restart: always
     logging: *default-logging
+    # P1-5 非 root 降权:用 PUID/PGID 动态指定运行用户(与宿主机用户 UID 对齐)
+    # 由 deploy.sh 自动检测 SUDO_USER 的 UID/GID 写入 .env,默认 1000
+    user: "${PUID:-1000}:${PGID:-1000}"
     depends_on:
       mysql:
         condition: service_healthy

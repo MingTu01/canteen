@@ -27,6 +27,11 @@ spring:
     baseline-on-migrate: false
     validate-on-migrate: true
     encoding: UTF-8
+    # Flyway 迁移用独立用户(需 DDL 权限);未配置 SPRING_FLYWAY_USER 时回退到主数据源用户
+    # Docker 部署:docker-compose.yml 注入 SPRING_FLYWAY_USER=root(DDL 权限)
+    # 非 Docker 部署:若主数据源用 canteen_app(仅 DML),必须显式设置 SPRING_FLYWAY_USER=root
+    user: ${SPRING_FLYWAY_USER:${DB_USERNAME}}
+    password: ${SPRING_FLYWAY_PASSWORD:${DB_PASSWORD}}
 
   # 生产关闭 H2 console
   h2:

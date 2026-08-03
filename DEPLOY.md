@@ -57,7 +57,7 @@ canteen upgrade all
 
 ### 1.1 一键部署（推荐）
 
-> **避免权限问题的关键：** 用普通用户克隆，仅 Docker 安装和系统命令安装用 sudo。`deploy.sh` v0.0.3+ 已自动处理权限（chown 项目目录 + 加入 docker 组）。
+> **避免权限问题的关键：** 用普通用户克隆，仅 Docker 安装和系统命令安装用 sudo。`deploy.sh` v0.0.5+ 已自动处理权限（chown 项目目录 + 加入 docker 组）。
 
 ```bash
 # 1. 用普通用户登录(如 canteen / ubuntu),不要用 root
@@ -516,7 +516,7 @@ chmod +x *.sh scripts/*.sh
 sudo ./deploy.sh
 ```
 
-`deploy.sh` 内部已自动处理权限（v0.0.3+）：
+`deploy.sh` 内部已自动处理权限（v0.0.5+）：
 - `fix_ownership()`：sudo 运行时自动把项目目录 chown 给实际调用者（SUDO_USER）
 - `add_user_to_docker_group()`：自动把 SUDO_USER 加入 docker 组（避免后续 canteen 需要 sudo）
 - `.env` 创建后立即 chown 给 SUDO_USER
@@ -895,7 +895,7 @@ git checkout deploy
 git pull origin deploy
 ```
 
-> v0.0.3+ 的 `upgrade.sh` 会自动检测并修复 detached HEAD 状态，无需手动处理。
+> v0.0.5+ 的 `upgrade.sh` 会自动检测并修复 detached HEAD 状态，无需手动处理。
 
 ### Q: git pull 报错 "detected dubious ownership"
 

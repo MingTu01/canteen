@@ -48,6 +48,28 @@ warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
 error() { echo -e "${RED}[错误]${NC} $1"; }
 step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
 
+# 安全读取 .env 变量(不执行 source,避免密码含 $/空格/#/反引号 时 shell 展开导致值篡改)
+read_env_var() {
+    local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
+    [[ -f "$envfile" ]] || return 1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^${key}= ]]; then
+            value="${line#*=}"
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                value="${value:1:-1}"
+            elif [[ "$value" =~ ^\".*\"$ ]]; then
+                value="${value:1:-1}"
+            fi
+            printf '%s' "$value"
+            return 0
+        fi
+    done < "$envfile"
+    return 1
+}
+
 #==============================================================
 # 分支检测:确定升级模式
 #==============================================================
@@ -239,33 +261,48 @@ auto_rollback() {
         return 1
     fi
 
-    # 加载 .env
-    if [ -f "$PROJECT_DIR/.env" ]; then
-        set -a; . "$PROJECT_DIR/.env" 2>/dev/null || true; set +a
-    fi
+    # 从 .env 读取数据库配置(用 read_env_var 避免 source 时特殊字符被展开)
     # P0-2 安全修复:移除弱默认密码,未配置则失败退出
-    local db_pass="${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
+    local db_pass="${SPRING_DATASOURCE_PASSWORD:-}"
+    if [ -z "$db_pass" ]; then
+        db_pass=$(read_env_var "SPRING_DATASOURCE_PASSWORD" 2>/dev/null) || db_pass=""
+    fi
+    if [ -z "$db_pass" ]; then
+        db_pass="${MYSQL_ROOT_PASSWORD:-}"
+        if [ -z "$db_pass" ]; then
+            db_pass=$(read_env_var "MYSQL_ROOT_PASSWORD" 2>/dev/null) || db_pass=""
+        fi
+    fi
     if [ -z "$db_pass" ]; then
         error "数据库密码未配置,请在 .env 中设置 MYSQL_ROOT_PASSWORD 或 SPRING_DATASOURCE_PASSWORD"
         return 1
     fi
-    local db_name="${MYSQL_DATABASE:-canteen}"
+    local db_name="${MYSQL_DATABASE:-}"
+    if [ -z "$db_name" ]; then
+        db_name=$(read_env_var "MYSQL_DATABASE" 2>/dev/null) || db_name="canteen"
+    fi
 
-    # 1. 恢复 deploy/ 产物(先解压到临时目录,成功后再替换,避免 rm -rf 后 tar 失败导致产物丢失)
-    if [ -s "$snap_path/deploy.tar.gz" ]; then
-        info "回退:恢复 deploy/ 产物..."
-        local tmp_extract
-        tmp_extract=$(mktemp -d)
-        if tar -xzf "$snap_path/deploy.tar.gz" -C "$tmp_extract" 2>/dev/null; then
-            rm -rf "$PROJECT_DIR/deploy"
-            mv "$tmp_extract/deploy" "$PROJECT_DIR/deploy" 2>/dev/null || cp -r "$tmp_extract/deploy" "$PROJECT_DIR/deploy"
-            rm -rf "$tmp_extract"
-            info "产物已恢复"
-        else
-            rm -rf "$tmp_extract"
-            error "产物恢复失败(deploy.tar.gz 可能损坏),deploy 目录未修改"
-            warn "如需手动恢复:tar -xzf $snap_path/deploy.tar.gz -C $PROJECT_DIR"
-            return 1
+    # P0 修复:回退顺序改为 停服务→代码→数据库→产物→重启
+    # (原来是 产物→数据库→代码→重启,后端在数据库恢复期间仍会写入脏数据)
+
+    # 0. 停止后端服务,避免恢复过程中后端写入新数据导致状态不一致
+    info "回退:停止后端服务(避免恢复过程中写入数据)..."
+    docker compose stop backend 2>/dev/null || true
+
+    # 1. 回退代码(用 git reset --hard 保持分支上下文,避免 detached HEAD)
+    if [ -f "$snap_path/git_commit.txt" ]; then
+        local commit
+        commit=$(cat "$snap_path/git_commit.txt")
+        if [ "$commit" != "nongit" ] && [ -d "$PROJECT_DIR/.git" ]; then
+            info "回退:代码回退到 ${commit:0:12}(git reset --hard,保持分支上下文)..."
+            if git -C "$PROJECT_DIR" reset --hard "$commit" 2>/dev/null; then
+                info "代码已回退"
+            else
+                error "代码回退失败,中止回退流程避免状态不一致"
+                warn "请手动执行:git -C $PROJECT_DIR reset --hard $commit"
+                warn "完成后重启服务:docker compose up -d"
+                return 1
+            fi
         fi
     fi
 
@@ -288,21 +325,21 @@ auto_rollback() {
         fi
     fi
 
-    # 3. 回退代码(用 git reset --hard 保持分支上下文,避免 detached HEAD)
-    if [ -f "$snap_path/git_commit.txt" ]; then
-        local commit
-        commit=$(cat "$snap_path/git_commit.txt")
-        if [ "$commit" != "nongit" ] && [ -d "$PROJECT_DIR/.git" ]; then
-            info "回退:代码回退到 ${commit:0:12}(git reset --hard,保持分支上下文)..."
-            if git -C "$PROJECT_DIR" reset --hard "$commit" 2>/dev/null; then
-                info "代码已回退"
-            else
-                error "代码回退失败,中止回退流程避免状态不一致"
-                warn "数据库和产物已恢复到快照状态,但代码仍是当前版本"
-                warn "请手动执行:git -C $PROJECT_DIR reset --hard $commit"
-                warn "完成后重启服务:docker compose up -d"
-                return 1
-            fi
+    # 3. 恢复 deploy/ 产物(先解压到临时目录,成功后再替换,避免 rm -rf 后 tar 失败导致产物丢失)
+    if [ -s "$snap_path/deploy.tar.gz" ]; then
+        info "回退:恢复 deploy/ 产物..."
+        local tmp_extract
+        tmp_extract=$(mktemp -d)
+        if tar -xzf "$snap_path/deploy.tar.gz" -C "$tmp_extract" 2>/dev/null; then
+            rm -rf "$PROJECT_DIR/deploy"
+            mv "$tmp_extract/deploy" "$PROJECT_DIR/deploy" 2>/dev/null || cp -r "$tmp_extract/deploy" "$PROJECT_DIR/deploy"
+            rm -rf "$tmp_extract"
+            info "产物已恢复"
+        else
+            rm -rf "$tmp_extract"
+            error "产物恢复失败(deploy.tar.gz 可能损坏),deploy 目录未修改"
+            warn "如需手动恢复:tar -xzf $snap_path/deploy.tar.gz -C $PROJECT_DIR"
+            return 1
         fi
     fi
 

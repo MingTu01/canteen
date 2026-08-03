@@ -22,27 +22,53 @@ fi
 
 BACKUP_FILE="$1"
 
-# 加载 .env(若存在),获取 MYSQL_ROOT_PASSWORD 等配置
-if [ -f "$PROJECT_DIR/.env" ]; then
-    set -a
-    . "$PROJECT_DIR/.env"
-    set +a
-fi
+# 安全读取 .env 变量(不执行 source,避免密码含 $/空格/#/反引号 时 shell 展开导致崩溃)
+# 用法: read_env_var "KEY" [envfile] -> 输出值(去除外层引号),失败返回非 0
+read_env_var() {
+    local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
+    [[ -f "$envfile" ]] || return 1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^${key}= ]]; then
+            value="${line#*=}"
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                value="${value:1:-1}"
+            elif [[ "$value" =~ ^\".*\"$ ]]; then
+                value="${value:1:-1}"
+            fi
+            printf '%s' "$value"
+            return 0
+        fi
+    done < "$envfile"
+    return 1
+}
 
-# 从环境变量获取数据库配置
+# 从 .env 读取数据库配置(兼容已导出的环境变量优先)
 DB_HOST="${SPRING_DATASOURCE_HOST:-localhost}"
 DB_PORT="${SPRING_DATASOURCE_PORT:-3306}"
 DB_NAME="${MYSQL_DATABASE:-canteen}"
 DB_USER="${SPRING_DATASOURCE_USERNAME:-root}"
 # P0-2 安全修复:移除弱默认密码,未配置则失败退出
-DB_PASS="${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
+DB_PASS="${SPRING_DATASOURCE_PASSWORD:-}"
+if [ -z "$DB_PASS" ]; then
+    DB_PASS=$(read_env_var "MYSQL_ROOT_PASSWORD" 2>/dev/null) || DB_PASS=""
+    if [ -z "$DB_PASS" ]; then
+        DB_PASS=$(read_env_var "SPRING_DATASOURCE_PASSWORD" 2>/dev/null) || DB_PASS=""
+    fi
+fi
 if [ -z "$DB_PASS" ]; then
     echo "[错误] 数据库密码未配置,请检查 .env 文件中的 MYSQL_ROOT_PASSWORD 或 SPRING_DATASOURCE_PASSWORD" >&2
     exit 1
 fi
 
 # P1-1: 备份加密密钥(可选,用于解密 .tar.gz.enc 文件)
+# 优先用环境变量,其次从 .env 读取
 ENCRYPTION_KEY="${BACKUP_ENCRYPTION_KEY:-}"
+if [ -z "$ENCRYPTION_KEY" ]; then
+    ENCRYPTION_KEY=$(read_env_var "BACKUP_ENCRYPTION_KEY" 2>/dev/null) || ENCRYPTION_KEY=""
+fi
 
 # Docker 环境检测
 if command -v docker &> /dev/null && docker ps | grep -q canteen-mysql; then

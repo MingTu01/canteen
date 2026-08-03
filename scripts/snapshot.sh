@@ -41,19 +41,47 @@ info()  { echo -e "${GREEN}[快照]${NC} $1" >&2; }
 warn()  { echo -e "${YELLOW}[警告]${NC} $1" >&2; }
 error() { echo -e "${RED}[错误]${NC} $1" >&2; }
 
-# 加载 .env 获取数据库密码
-load_env() {
-    if [ -f "$PROJECT_DIR/.env" ]; then
-        set -a
-        . "$PROJECT_DIR/.env" 2>/dev/null || true
-        set +a
-    fi
+# 安全读取 .env 变量(不执行 source,避免密码含 $/空格/#/反引号 时 shell 展开导致值篡改)
+read_env_var() {
+    local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
+    [[ -f "$envfile" ]] || return 1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^${key}= ]]; then
+            value="${line#*=}"
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                value="${value:1:-1}"
+            elif [[ "$value" =~ ^\".*\"$ ]]; then
+                value="${value:1:-1}"
+            fi
+            printf '%s' "$value"
+            return 0
+        fi
+    done < "$envfile"
+    return 1
 }
 
-# 获取数据库密码(优先 SPRING_DATASOURCE_PASSWORD,其次 MYSQL_ROOT_PASSWORD)
+# 兼容旧调用(不再 source,保留空函数避免引用错误)
+load_env() {
+    :
+}
+
+# 获取数据库密码(优先环境变量,其次从 .env 读取)
 # P0-2 安全修复:移除弱默认密码,未配置则返回空(调用方需校验)
 get_db_pass() {
-    echo "${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
+    local pass="${SPRING_DATASOURCE_PASSWORD:-}"
+    if [ -z "$pass" ]; then
+        pass=$(read_env_var "SPRING_DATASOURCE_PASSWORD" 2>/dev/null) || pass=""
+    fi
+    if [ -z "$pass" ]; then
+        pass="${MYSQL_ROOT_PASSWORD:-}"
+        if [ -z "$pass" ]; then
+            pass=$(read_env_var "MYSQL_ROOT_PASSWORD" 2>/dev/null) || pass=""
+        fi
+    fi
+    echo "$pass"
 }
 
 # 获取当前版本号
@@ -95,15 +123,29 @@ snapshot_create() {
         rm -rf "$snap_path"
         return 1
     fi
-    local db_name="${MYSQL_DATABASE:-canteen}"
+    local db_name="${MYSQL_DATABASE:-}"
+    if [ -z "$db_name" ]; then
+        db_name=$(read_env_var "MYSQL_DATABASE" 2>/dev/null) || db_name="canteen"
+    fi
 
     if mysql_running; then
-        docker exec canteen-mysql sh -c \
-            "mysqldump -uroot -p\"${db_pass}\" --single-transaction --routines --triggers --events \"${db_name}\" 2>/dev/null" \
+        # P0 修复:去掉 sh -c,避免容器内 shell 对密码二次展开($ 被解析)
+        # 直接通过 docker exec 参数传递,密码由本机 shell 展开后作为单个 argv 传入 mysqldump
+        set -o pipefail
+        docker exec canteen-mysql mysqldump -uroot -p"${db_pass}" \
+            --single-transaction --routines --triggers --events "${db_name}" 2>/dev/null \
             | gzip > "$snap_path/database.sql.gz"
+        local dump_rc=$?
+        set +o pipefail
 
-        if [ ! -s "$snap_path/database.sql.gz" ]; then
-            error "数据库备份失败(文件为空)"
+        if [ $dump_rc -ne 0 ] || [ ! -s "$snap_path/database.sql.gz" ]; then
+            error "数据库备份失败(mysqldump退出码: $dump_rc)"
+            rm -rf "$snap_path"
+            return 1
+        fi
+        # 额外验证gzip完整性,防止管道中断产生损坏文件
+        if ! gzip -t "$snap_path/database.sql.gz" 2>/dev/null; then
+            error "数据库备份文件损坏(gzip校验失败)"
             rm -rf "$snap_path"
             return 1
         fi
@@ -275,7 +317,14 @@ snapshot_restore() {
     load_env
     local db_pass
     db_pass=$(get_db_pass)
-    local db_name="${MYSQL_DATABASE:-canteen}"
+    local db_name="${MYSQL_DATABASE:-}"
+    if [ -z "$db_name" ]; then
+        db_name=$(read_env_var "MYSQL_DATABASE" 2>/dev/null) || db_name="canteen"
+    fi
+
+    # P1 修复:停止后端服务,避免恢复过程中后端写入新数据导致状态不一致
+    info "停止后端服务(避免恢复过程中写入数据)..."
+    docker compose stop backend 2>/dev/null || true
 
     # 1. 恢复数据库(检查退出码,失败不报告成功)
     if [ -s "$snap_path/database.sql.gz" ]; then

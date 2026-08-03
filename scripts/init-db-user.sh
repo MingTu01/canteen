@@ -1,43 +1,112 @@
 #!/bin/bash
 #==============================================================
-# P1-3 MySQL 应用专用用户初始化脚本
+# P1-3 MySQL 应用专用用户初始化脚本(宿主机执行版)
 #==============================================================
-# 此脚本由 MySQL 容器的 docker-entrypoint-initdb.d 在首次初始化时执行
-# 仅当 DB_APP_USERNAME 和 DB_APP_PASSWORD 环境变量同时设置时才创建用户
+# 此脚本在宿主机上运行,通过 docker exec 在 MySQL 容器中创建应用专用用户。
 #
 # 权限策略(最小权限原则):
 #   - canteen_app: 仅 SELECT/INSERT/UPDATE/DELETE(运行时 DML)
+#   - flyway_schema_history: 仅 SELECT(VersionController 需要 COUNT 查询)
+#   - schema_version: 已回收所有权限
 #   - Flyway 迁移使用 root 账号(通过 SPRING_FLYWAY_USER 配置)
 #
-# 注意:
-#   1. 此脚本仅在 MySQL 数据目录为空时(首次创建)执行
-#   2. 对已存在的部署,需手动执行此脚本或用 root 登录 MySQL 创建用户
-#   3. 不配置 DB_APP_USERNAME 时,后端默认使用 root(向后兼容)
+# 安全特性:
+#   - P0 修复:转义密码中的单引号,防止 SQL 注入
+#   - P0 修复:REVOKE 元数据表写权限,防止应用被攻破后伪造迁移记录
+#   - 从 .env 安全读取配置(不 source,避免特殊字符导致 shell 展开)
 #==============================================================
+set -e
 
-# 仅当应用用户名和密码都配置时才创建
-if [ -z "$DB_APP_USERNAME" ] || [ -z "$DB_APP_PASSWORD" ]; then
-    echo "[init-db-user] DB_APP_USERNAME 或 DB_APP_PASSWORD 未配置,跳过应用用户创建(后端将使用 root)"
-    exit 0
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+# 颜色
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+info()  { echo -e "${GREEN}[DB用户]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
+error() { echo -e "${RED}[错误]${NC} $1"; }
+
+# 安全读取 .env 变量(不执行 source,避免密码含 $/空格/#/反引号 时 shell 展开导致值篡改)
+read_env_var() {
+    local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
+    [[ -f "$envfile" ]] || return 1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^${key}= ]]; then
+            value="${line#*=}"
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                value="${value:1:-1}"
+            elif [[ "$value" =~ ^\".*\"$ ]]; then
+                value="${value:1:-1}"
+            fi
+            printf '%s' "$value"
+            return 0
+        fi
+    done < "$envfile"
+    return 1
+}
+
+# 读取配置(优先环境变量,其次从 .env 读取,最后用默认值)
+DB_APP_USERNAME="${DB_APP_USERNAME:-$(read_env_var "DB_APP_USERNAME" 2>/dev/null || echo "canteen_app")}"
+DB_APP_PASSWORD="${DB_APP_PASSWORD:-$(read_env_var "DB_APP_PASSWORD" 2>/dev/null || echo "")}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(read_env_var "MYSQL_ROOT_PASSWORD" 2>/dev/null || echo "")}"
+MYSQL_DATABASE="${MYSQL_DATABASE:-$(read_env_var "MYSQL_DATABASE" 2>/dev/null || echo "canteen")}"
+
+if [ -z "$DB_APP_PASSWORD" ]; then
+    error "DB_APP_PASSWORD 未配置,请在 .env 中设置"
+    exit 1
+fi
+if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+    error "MYSQL_ROOT_PASSWORD 未配置,请在 .env 中设置"
+    exit 1
 fi
 
-echo "[init-db-user] 创建 MySQL 应用专用用户: ${DB_APP_USERNAME}"
+info "创建应用数据库用户: ${DB_APP_USERNAME}@% (数据库: ${MYSQL_DATABASE})"
 
-# 创建用户(若已存在则更新密码)
-mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
+# P0 修复:转义密码中的单引号(mysql 字符串中单引号用 \' 转义,防止 SQL 注入)
+# shell 参数展开 ${var//pattern/replacement} 将所有 ' 替换为 \'
+ESCAPED_USER="${DB_APP_USERNAME//\'/\\\'}"
+ESCAPED_PASS="${DB_APP_PASSWORD//\'/\\\'}"
+
+# 1. 创建用户并授予 DML 权限(必须成功,不忽略错误)
+docker exec -i canteen-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
 -- P1-3 创建应用专用用户(最小权限:仅 DML,无 DDL/GRANT)
-CREATE USER IF NOT EXISTS '${DB_APP_USERNAME}'@'%' IDENTIFIED BY '${DB_APP_PASSWORD}';
-ALTER USER '${DB_APP_USERNAME}'@'%' IDENTIFIED BY '${DB_APP_PASSWORD}';
+-- 幂等:已存在则更新密码
+CREATE USER IF NOT EXISTS '${ESCAPED_USER}'@'%' IDENTIFIED BY '${ESCAPED_PASS}';
+ALTER USER '${ESCAPED_USER}'@'%' IDENTIFIED BY '${ESCAPED_PASS}';
 
--- 授予 canteen 库的 DML 权限(SELECT/INSERT/UPDATE/DELETE)
+-- 授予业务表 DML 权限(SELECT/INSERT/UPDATE/DELETE)
 -- 不授予 CREATE/ALTER/DROP/INDEX/GRANT(防止应用被攻破后修改表结构)
-GRANT SELECT, INSERT, UPDATE, DELETE ON ${MYSQL_DATABASE:-canteen}.* TO '${DB_APP_USERNAME}'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE ON ${MYSQL_DATABASE}.* TO '${ESCAPED_USER}'@'%';
 
 FLUSH PRIVILEGES;
 SQL
 
-if [ $? -eq 0 ]; then
-    echo "[init-db-user] 应用用户 ${DB_APP_USERNAME} 创建成功(仅 DML 权限)"
+main_rc=$?
+
+# 2. 回收元数据表(Flyway 迁移历史)的写权限,防止应用被攻破后伪造迁移记录
+# 表可能不存在(首次部署 Flyway 未运行),用 --force 让 mysql 遇到错误时继续执行后续语句
+docker exec -i canteen-mysql mysql --force -uroot -p"${MYSQL_ROOT_PASSWORD}" 2>/dev/null <<SQL
+-- 回收 flyway_schema_history 的所有权限(撤销 DML GRANT 给的写权限)
+REVOKE ALL PRIVILEGES ON ${MYSQL_DATABASE}.flyway_schema_history FROM '${ESCAPED_USER}'@'%';
+-- 回收 schema_version 的所有权限(如存在)
+REVOKE ALL PRIVILEGES ON ${MYSQL_DATABASE}.schema_version FROM '${ESCAPED_USER}'@'%';
+-- flyway_schema_history 仅授予 SELECT(VersionController 需要 COUNT 查询)
+GRANT SELECT ON ${MYSQL_DATABASE}.flyway_schema_history TO '${ESCAPED_USER}'@'%';
+
+FLUSH PRIVILEGES;
+SQL
+
+if [ $main_rc -eq 0 ]; then
+    info "应用用户 ${DB_APP_USERNAME} 创建成功"
+    info "权限: 业务表 SELECT/INSERT/UPDATE/DELETE, flyway_schema_history 仅 SELECT"
+    warn "元数据表 flyway_schema_history/schema_version 已回收写权限"
 else
-    echo "[init-db-user] 警告:应用用户创建失败,后端将回退到 root 账号" >&2
+    error "应用用户创建失败"
+    exit 1
 fi

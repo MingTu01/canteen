@@ -15,7 +15,7 @@
 # 适用系统: CentOS 7+/8/9, Ubuntu 18.04+/20.04/22.04/24.04, Debian 10+
 #==============================================================
 
-set -e
+set -eo pipefail
 
 # 颜色
 RED='\033[0;31m'
@@ -132,13 +132,52 @@ read_password() {
 }
 
 # 生成随机十六进制字符串
+# P1 修复:fallback 改用 /dev/urandom(比时间戳不可预测)
 rand_hex() {
-    openssl rand -hex "$1" 2>/dev/null || echo "fallback-$(date +%s)-$1"
+    if command -v openssl &>/dev/null; then
+        openssl rand -hex "$1"
+    else
+        # 用 /dev/urandom 作为 fallback(比时间戳安全,不可预测)
+        head -c "$1" /dev/urandom | od -A n -t x1 | tr -d ' \n'
+    fi
 }
 
 # 获取服务器 IP
 get_server_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "服务器IP"
+}
+
+#==============================================================
+# P1 修复:部署前依赖检查
+#==============================================================
+check_dependencies() {
+    local missing=()
+    for cmd in docker curl tar gzip; do
+        command -v "$cmd" &>/dev/null || missing+=("$cmd")
+    done
+    if ! command -v openssl &>/dev/null; then
+        warn "openssl 未安装,随机密钥生成将使用 /dev/urandom fallback"
+    fi
+    if [ ${#missing[@]} -gt 0 ]; then
+        error "缺少必要命令: ${missing[*]}"
+        echo "安装: sudo apt-get install -y ${missing[*]}"
+        exit 1
+    fi
+}
+
+#==============================================================
+# P1 修复:部署前磁盘空间检查
+#==============================================================
+check_disk_space() {
+    local min_gb="${1:-2}"
+    local avail_kb
+    avail_kb=$(df -P "$PROJECT_DIR" | awk 'NR==2{print $4}')
+    local avail_gb=$((avail_kb / 1024 / 1024))
+    if [ "$avail_gb" -lt "$min_gb" ]; then
+        error "磁盘空间不足:剩余 ${avail_gb}GB,需要至少 ${min_gb}GB"
+        exit 1
+    fi
+    info "磁盘空间: 剩余 ${avail_gb}GB"
 }
 
 #==============================================================
@@ -269,8 +308,16 @@ cmd_reset_admin() {
 
 #==============================================================
 # 设置 .env 变量(若不存在则追加,存在则更新)
+# 用单引号包裹值,避免 $/空格/#/反引号 等 shell 特殊字符在 source 时被展开
 # 用 awk + ENVIRON 传递值,彻底避免 sed 对 | & / \ 等特殊字符的转义问题
 #==============================================================
+# 转义值中的单引号(单引号包裹的值中,单引号用 '\'' 转义)
+escape_env_value() {
+    local v="$1"
+    v="${v//\'/\'\\\'\'}"
+    printf '%s' "$v"
+}
+
 set_env_var() {
     local key="$1"
     local value="$2"
@@ -279,22 +326,55 @@ set_env_var() {
     # 确保 .env 存在
     touch "$envfile"
 
+    # 用单引号包裹值,避免特殊字符在 source/读取时被 shell 展开
+    local escaped_value
+    escaped_value=$(escape_env_value "$value")
+    local new_line="${key}='${escaped_value}'"
+
     if grep -q "^${key}=" "$envfile" 2>/dev/null; then
-        # 更新已有行:匹配以 key= 开头的行,整行替换为 key=value
+        # 更新已有行:匹配以 key= 开头的行,整行替换为 key='value'
         local tmp
         tmp=$(mktemp)
-        KEY="$key" VALUE="$value" awk '
-            BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VALUE"] }
-            index($0, k "=") == 1 { print k "=" v; next }
+        KEY="$key" LINE="$new_line" awk '
+            BEGIN { k = ENVIRON["KEY"]; line = ENVIRON["LINE"] }
+            index($0, k "=") == 1 { print line; next }
             { print }
         ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
     else
         # 追加新行
-        echo "${key}=${value}" >> "$envfile"
+        echo "$new_line" >> "$envfile"
     fi
 
     # P2-7 安全修复:每次写入 .env 后强制权限 600
     chmod 600 "$envfile"
+    # sudo 运行时 chown 给实际用户,避免后续 canteen.sh 写入失败
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
+    fi
+}
+
+# 安全读取 .env 变量(不执行 source,避免特殊字符导致 shell 展开/命令执行)
+# 用法: read_env_var "KEY" [envfile] -> 输出值(去除外层引号),失败返回非 0
+read_env_var() {
+    local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
+    [[ -f "$envfile" ]] || return 1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^${key}= ]]; then
+            value="${line#*=}"
+            # 去除外层引号(单引号或双引号)
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                value="${value:1:-1}"
+            elif [[ "$value" =~ ^\".*\"$ ]]; then
+                value="${value:1:-1}"
+            fi
+            printf '%s' "$value"
+            return 0
+        fi
+    done < "$envfile"
+    return 1
 }
 
 #==============================================================
@@ -435,9 +515,33 @@ configure_env() {
         mysql_pwd=$(rand_hex 16)
     fi
 
+    # Redis 密码(P1-4 安全修复:Redis 强制密码,自动生成)
+    local redis_pwd
+    redis_pwd=$(rand_hex 16)
+    info "已生成随机 Redis 密码"
+
     # JWT 密钥(自动生成)
     local jwt_secret
     jwt_secret=$(rand_hex 32)
+
+    # MySQL 应用专用用户(P1-3:最小权限,仅 DML)
+    local db_app_user="canteen_app"
+    local db_app_pwd
+    db_app_pwd=$(rand_hex 16)
+    info "已创建 MySQL 应用专用用户: ${db_app_user}(仅 DML 权限)"
+
+    # 备份加密密钥(P1-1:备份 AES-256 加密,自动生成)
+    local backup_key
+    backup_key=$(rand_hex 32)
+
+    # P1-5 容器降权:检测宿主机运行用户 UID/GID,容器以此 UID 运行(非 root)
+    # 默认 1000(Ubuntu/Debian 第一个普通用户),sudo 运行时取 SUDO_USER 的实际 UID/GID
+    local puid=1000 pgid=1000
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        puid=$(id -u "$SUDO_USER" 2>/dev/null || echo 1000)
+        pgid=$(id -g "$SUDO_USER" 2>/dev/null || echo 1000)
+    fi
+    info "容器将以 UID=${puid} GID=${pgid} 运行(非 root 降权,与宿主机用户对齐)"
 
     # 超管账号
     echo ""
@@ -446,23 +550,50 @@ configure_env() {
     admin_user=$(read_input "超管登录账号" "admin")
     admin_pwd=$(read_password "超管登录密码(至少 8 位)")
 
-    # 写入 .env
+    # 转义所有用户输入值中的单引号(用于 .env 单引号包裹)
+    # 单引号包裹的值中,单引号用 '\'' 转义,避免 $/空格/#/反引号 等在 source 时被 shell 展开
+    local e_mysql_pwd e_db_app_user e_db_app_pwd e_redis_pwd e_jwt_secret e_backup_key e_admin_user e_admin_pwd
+    e_mysql_pwd=$(escape_env_value "$mysql_pwd")
+    e_db_app_user=$(escape_env_value "$db_app_user")
+    e_db_app_pwd=$(escape_env_value "$db_app_pwd")
+    e_redis_pwd=$(escape_env_value "$redis_pwd")
+    e_jwt_secret=$(escape_env_value "$jwt_secret")
+    e_backup_key=$(escape_env_value "$backup_key")
+    e_admin_user=$(escape_env_value "$admin_user")
+    e_admin_pwd=$(escape_env_value "$admin_pwd")
+
+    # 写入 .env(所有用户输入值用单引号包裹,固定数字/布尔值无需引号)
     cat > .env <<EOF
 # MySQL 数据库密码
-MYSQL_ROOT_PASSWORD=${mysql_pwd}
+MYSQL_ROOT_PASSWORD='${e_mysql_pwd}'
+
+# MySQL 应用专用用户(P1-3:仅 DML 权限,无 DDL/GRANT)
+DB_APP_USERNAME='${e_db_app_user}'
+DB_APP_PASSWORD='${e_db_app_pwd}'
+
+# Redis 密码(P1-4 安全修复:Redis 强制密码 + 禁用危险命令)
+REDIS_PASSWORD='${e_redis_pwd}'
 
 # JWT 密钥(自动生成)
-JWT_SECRET=${jwt_secret}
+JWT_SECRET='${e_jwt_secret}'
 
 # Token 过期时间(毫秒)
 JWT_EXPIRATION=86400000
 JWT_EMPLOYEE_EXPIRATION=2592000000
 JWT_TERMINAL_EXPIRATION=31536000000
 
+# 备份加密密钥(P1-1:备份文件 AES-256-CBC 加密)
+BACKUP_ENCRYPTION_KEY='${e_backup_key}'
+
+# P1-5 容器降权:容器以非 root 运行,UID/GID 与宿主机用户对齐
+# 由 deploy.sh 自动检测,无需手动修改
+PUID=${puid}
+PGID=${pgid}
+
 # 初始超管账号(后端首次启动时读取,初始化后可删除)
 # 注意:FORCE=true 确保重新部署时也能更新已存在超管的密码
-INIT_ADMIN_USERNAME=${admin_user}
-INIT_ADMIN_PASSWORD=${admin_pwd}
+INIT_ADMIN_USERNAME='${e_admin_user}'
+INIT_ADMIN_PASSWORD='${e_admin_pwd}'
 INIT_ADMIN_FORCE=true
 EOF
 
@@ -476,7 +607,10 @@ EOF
     # sudo 部署时,.env 会被创建为 root 所有,后续 canteen 用户无法写入
     # 立即 chown 给实际用户,避免 canteen.sh 重置密码时权限失败
     if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
-        chown "$SUDO_USER:$SUDO_USER" .env 2>/dev/null || true
+        if ! chown "$SUDO_USER:$SUDO_USER" .env 2>/dev/null; then
+            warn "无法将 .env 所有权转给 $SUDO_USER,请手动执行: sudo chown $SUDO_USER:$SUDO_USER .env"
+            warn "否则普通用户运行 canteen 时可能无法读写 .env"
+        fi
     fi
 }
 
@@ -543,7 +677,8 @@ start_services() {
     step "6/9 启动服务"
 
     # 端口占用预检测(避免启动到一半才报错)
-    local required_ports=("18080" "18081" "18082")
+    # P1 修复:补全 5 个端口(含 MySQL 13306 / Redis 16379)
+    local required_ports=("18080" "18081" "18082" "13306" "16379")
     local port_busy=false
     for p in "${required_ports[@]}"; do
         if ss -tlnp 2>/dev/null | grep -q ":${p} " || netstat -tlnp 2>/dev/null | grep -q ":${p} "; then
@@ -558,19 +693,30 @@ start_services() {
         error "端口被占用,无法启动服务。请释放上述端口后重试。"
         echo ""
         info "排查建议:"
-        echo "  1) 查看占用进程: sudo ss -tlnp | grep -E '18080|18081|18082'"
+        echo "  1) 查看占用进程: sudo ss -tlnp | grep -E '18080|18081|18082|13306|16379'"
         echo "  2) 停止旧服务:   sudo ./deploy.sh stop"
         echo "  3) 如是系统 nginx/apache: sudo systemctl stop nginx && sudo systemctl disable nginx"
         exit 1
     fi
-    info "端口 18080/18081/18082 可用"
+    info "端口 18080/18081/18082/13306/16379 可用"
 
     mkdir -p backup uploads logs
 
-    # P1-5 容器降权:确保 backup/ 和 uploads/ 目录属主为 1000:1000(容器内 canteen 用户)
-    # 否则非 root 容器无法写入备份文件和上传的图片
-    info "设置 backup/ 和 uploads/ 目录权限(UID=1000,供容器内非 root 用户使用)..."
-    chown -R 1000:1000 backup uploads 2>/dev/null || warn "chown backup/uploads 失败(不影响部署,但容器内可能无法写入)"
+    # P1-5 容器降权:backup/ 和 uploads/ 目录属主必须与容器运行 UID 对齐
+    # 从 .env 读取 PUID/PGID(由 configure_env 自动检测写入),默认 1000
+    # 用 read_env_var 读取(兼容单引号包裹的值),不依赖 grep|cut 管道(避免 pipefail 陷阱)
+    local puid=${PUID:-1000}
+    local pgid=${PGID:-1000}
+    if [[ -f .env ]]; then
+        local env_puid env_pgid
+        env_puid=$(read_env_var "PUID" ".env" 2>/dev/null) || env_puid=""
+        env_pgid=$(read_env_var "PGID" ".env" 2>/dev/null) || env_pgid=""
+        puid="${env_puid:-1000}"
+        pgid="${env_pgid:-1000}"
+    fi
+    info "设置 backup/ uploads/ logs/ 目录权限(UID=${puid},GID=${pgid},与容器运行用户对齐)..."
+    # P1 修复:补全 logs 目录(后端日志写入需要)
+    chown -R "${puid}:${pgid}" backup uploads logs 2>/dev/null || warn "chown backup/uploads/logs 失败(不影响部署,但容器内可能无法写入)"
 
     info "启动 Docker Compose..."
     docker compose up -d
@@ -590,7 +736,16 @@ start_services() {
     echo ""
 
     if [[ $waited -ge $max_wait ]]; then
-        warn "后端启动较慢,请稍后用 ./deploy.sh status 检查状态"
+        # P0 修复:健康检查超时必须阻断部署,不能只 warn 否则会误报部署成功
+        error "后端健康检查超时(${max_wait}s),部署失败!"
+        echo ""
+        info "排查建议:"
+        echo "  1. 查看后端日志: docker compose logs --tail=100 backend"
+        echo "  2. 检查服务状态: docker compose ps"
+        echo "  3. 手动检查健康: curl -v http://localhost:18082/api/system/health"
+        echo ""
+        warn "服务可能已部分启动,可用 ./deploy.sh stop 停止后排查问题"
+        exit 1
     fi
 }
 
@@ -707,7 +862,7 @@ verify_and_summary() {
     echo ""
     if [[ -f .env ]]; then
         local admin_user
-        admin_user=$(grep "^INIT_ADMIN_USERNAME=" .env 2>/dev/null | cut -d= -f2)
+        admin_user=$(read_env_var "INIT_ADMIN_USERNAME" ".env" 2>/dev/null) || admin_user=""
         if [[ -n "$admin_user" ]]; then
             echo "  超管账号: ${admin_user} (密码为你刚才设置的)"
         else
@@ -732,163 +887,10 @@ verify_and_summary() {
 }
 
 #==============================================================
-# P0-3 安全加固:防火墙(UFW)+ SSH 爆破防护(fail2ban)
+# 注:安全加固(UFW/fail2ban/auditd/AIDE)已从 deploy.sh 移除
+# 原因:UFW 自动配置会封锁服务器端口,导致无法访问
+# 如需安全加固,请参考 docs/SERVER_HARDENING.md 手动执行
 #==============================================================
-harden_security() {
-    step "安全加固(防火墙 + SSH 爆破防护)"
-
-    # 仅 apt 系执行(UFW/fail2ban 是 Debian/Ubuntu 工具)
-    if ! command -v apt-get &>/dev/null; then
-        warn "非 Debian/Ubuntu 系统,跳过 UFW/fail2ban 自动配置"
-        warn "请手动配置防火墙和 SSH 爆破防护"
-        return 0
-    fi
-
-    # ---------- 1. fail2ban(SSH 爆破防护) ----------
-    info "配置 fail2ban(SSH 爆破防护)..."
-    if ! command -v fail2ban-client &>/dev/null; then
-        apt-get update -qq && apt-get install -y -qq fail2ban
-    fi
-
-    # SSH 防护:5 次失败封禁 1 小时
-    cat > /etc/fail2ban/jail.d/sshd.local <<'EOF'
-[sshd]
-enabled = true
-port = ssh
-filter = sshd
-logpath = /var/log/auth.log
-maxretry = 5
-findtime = 600
-bantime = 3600
-EOF
-    systemctl enable fail2ban 2>/dev/null && systemctl restart fail2ban
-    info "fail2ban 已配置(SSH 5 次失败封禁 1 小时)"
-
-    # ---------- 2. UFW 防火墙 ----------
-    info "配置 UFW 防火墙..."
-    if ! command -v ufw &>/dev/null; then
-        apt-get install -y -qq ufw
-    fi
-
-    # 先重置,再配置
-    ufw --force reset
-    ufw default deny incoming
-    ufw default allow outgoing
-
-    # 放行必要端口
-    ufw allow 22/tcp comment 'SSH'
-    ufw allow 80/tcp comment 'HTTP-1panel'
-    ufw allow 443/tcp comment 'HTTPS-1panel'
-
-    # 1panel 管理端口(默认随机,从配置读取)
-    local panel_port=""
-    if [ -f /opt/1panel/conf/app.yaml ]; then
-        panel_port=$(grep -m1 "port:" /opt/1panel/conf/app.yaml 2>/dev/null | awk '{print $2}' || echo "")
-    fi
-    if [ -n "$panel_port" ]; then
-        ufw allow ${panel_port}/tcp comment '1panel'
-        info "已放行 1panel 端口: ${panel_port}"
-    fi
-
-    ufw --force enable
-    info "UFW 已启用(仅放行 22/80/443${panel_port:+/$panel_port})"
-
-    # ---------- 3. Docker 绕过 UFW 的补救 ----------
-    # Docker 默认在 iptables nat 表直接 DNAT,绕过 ufw filter 表
-    # 配合 P0-1 的 127.0.0.1 绑定,容器端口不再对外暴露
-    # 额外保险:在 DOCKER-USER 链拒绝外部到容器端口的直接访问
-    if iptables -L DOCKER-USER &>/dev/null 2>&1; then
-        # 获取默认外网网卡
-        local wan_iface
-        wan_iface=$(ip route show default 2>/dev/null | awk '{print $5}' | head -1 || echo "eth0")
-        iptables -I DOCKER-USER -i "${wan_iface}" -p tcp -m multiport \
-            --dports 18080,18081,18082,13306,16379 -j DROP 2>/dev/null || true
-        info "Docker-USER 链已加固(拒绝外部直接访问容器端口)"
-    fi
-
-    # ---------- 4. SSH 加固建议 ----------
-    echo ""
-    warn "建议手动加固 SSH(编辑 /etc/ssh/sshd_config):"
-    echo "  PermitRootLogin prohibit-password   # 禁止 root 密码登录"
-    echo "  PasswordAuthentication no           # 仅密钥登录(需先配置密钥)"
-    echo "  修改后:systemctl restart sshd"
-    echo ""
-}
-
-#==============================================================
-# P2-4 入侵检测与审计:auditd + AIDE + 自动安全更新
-#==============================================================
-install_intrusion_detection() {
-    step "入侵检测与审计(auditd + AIDE)"
-
-    if ! command -v apt-get &>/dev/null; then
-        warn "非 Debian/Ubuntu 系统,跳过入侵检测安装"
-        return 0
-    fi
-
-    # ---------- 1. auditd(系统调用审计) ----------
-    info "安装 auditd(审计守护进程)..."
-    apt-get install -y -qq auditd 2>/dev/null || true
-
-    # 监控关键文件变更
-    cat > /etc/audit/rules.d/canteen.rules <<AUDITEOF
-# P2-4 企业食堂系统关键文件审计规则
-# 监控 .env 文件变更(含数据库密码/JWT 密钥)
--w ${PROJECT_DIR}/.env -p wa -k env_change
-# 监控 app.jar 变更(后端核心产物)
--w ${PROJECT_DIR}/deploy/backend/app.jar -p wa -k jar_change
-# 监控 docker-compose.yml 变更
--w ${PROJECT_DIR}/docker-compose.yml -p wa -k compose_change
-# 监控系统关键文件
--w /etc/passwd -p wa -k passwd_change
--w /etc/shadow -p wa -k shadow_change
--w /etc/ssh/sshd_config -p wa -k ssh_config_change
--w /etc/sudoers -p wa -k sudoers_change
-AUDITEOF
-    augenrules --load 2>/dev/null || true
-    systemctl enable auditd 2>/dev/null && systemctl restart auditd 2>/dev/null || true
-    info "auditd 已配置(监控 .env / app.jar / docker-compose.yml / 系统文件)"
-
-    # ---------- 2. AIDE(文件完整性监控) ----------
-    info "安装 AIDE(文件完整性监控)..."
-    apt-get install -y -qq aide 2>/dev/null || true
-
-    # 初始化 AIDE 数据库(首次较慢,后台执行不阻塞部署)
-    if command -v aideinit &>/dev/null; then
-        info "初始化 AIDE 数据库(后台执行,不影响部署)..."
-        nohup aideinit --force >/dev/null 2>&1 &
-        info "AIDE 初始化在后台进行,完成后自动启用完整性检查"
-    fi
-
-    # 创建每日完整性检查 cron(若 AIDE 数据库就绪)
-    cat > /etc/cron.daily/aide-check <<'CRONEOF'
-#!/bin/bash
-# P2-4 AIDE 每日文件完整性检查
-AIDE_DB="/var/lib/aide/aide.db"
-if [ -f "$AIDE_DB" ] && command -v aide &>/dev/null; then
-    REPORT=$(aide --check 2>&1)
-    if echo "$REPORT" | grep -q "changed\|added\|removed"; then
-        echo "[AIDE] 检测到文件变更:" | logger -t aide-check
-        echo "$REPORT" | logger -t aide-check
-    fi
-fi
-CRONEOF
-    chmod +x /etc/cron.daily/aide-check 2>/dev/null || true
-
-    # ---------- 3. 自动安全更新 ----------
-    info "配置自动安全更新..."
-    apt-get install -y -qq unattended-upgrades 2>/dev/null || true
-    # 非交互式启用自动安全更新
-    echo 'APT::Periodic::Update-Package-Lists "1";' > /etc/apt/apt.conf.d/20auto-upgrades
-    echo 'APT::Periodic::Unattended-Upgrade "1";' >> /etc/apt/apt.conf.d/20auto-upgrades
-    info "自动安全更新已启用"
-
-    echo ""
-    info "入侵检测已安装:auditd + AIDE + 自动安全更新"
-    echo "  审计日志查看:  sudo ausearch -k env_change"
-    echo "  完整性检查:    sudo aide --check"
-    echo ""
-}
 
 #==============================================================
 # P2-8 部署后清理 .env 中的临时敏感变量
@@ -926,6 +928,10 @@ cmd_deploy() {
     echo "=========================================="
     echo ""
 
+    # P1 修复:部署前检查依赖和磁盘空间(快速失败,避免部署到一半才报错)
+    check_dependencies
+    check_disk_space
+
     # root 权限检查
     if [[ $EUID -ne 0 ]] && [[ "$SKIP_ENV" == "false" ]]; then
         if ! command -v docker &> /dev/null; then
@@ -949,18 +955,15 @@ cmd_deploy() {
     setup_autostart
     install_canteen_command
 
-    # P0-3 + P2-4:安全加固(防火墙 + SSH 爆破防护 + 入侵检测)
-    harden_security
-    install_intrusion_detection
-
-    # P2-8:部署成功后清理 .env 中的临时敏感变量(密码已在数据库中)
-    if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
-        cleanup_sensitive_env
-    fi
-
     # 部署结束前:再次修正所有权和权限(确保新建目录和脚本可用)
     fix_ownership
     fix_permissions
+
+    # .env 由 configure_env 在 sudo 权限下创建(归 root),必须 chown 给 SUDO_USER
+    # 否则普通用户运行 docker compose 会报 "open .env: permission denied"
+    if [[ -f "$PROJECT_DIR/.env" ]] && [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        chown "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR/.env" 2>/dev/null || true
+    fi
 
     # P2-7:确保 .env 权限为 600(仅属主可读写)
     if [[ -f "$PROJECT_DIR/.env" ]]; then
