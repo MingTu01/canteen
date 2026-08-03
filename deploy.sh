@@ -479,6 +479,33 @@ confirm_overwrite_env() {
 }
 
 build_artifacts() {
+    # 检测当前分支(deploy 分支已含产物,无需构建)
+    local current_branch=""
+    if [ -d ".git" ]; then
+        current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    fi
+
+    # 判断产物是否已存在(deploy 分支或手动复制过产物)
+    local has_artifacts=false
+    if [ -f "deploy/backend/app.jar" ] && [ -f "deploy/admin-web/html/index.html" ] && [ -f "deploy/h5/html/index.html" ]; then
+        has_artifacts=true
+    fi
+
+    if [ "$current_branch" = "deploy" ] || [ "$has_artifacts" = true ]; then
+        step "4/9 跳过构建(deploy 分支已含产物)"
+        if [ "$current_branch" = "deploy" ]; then
+            info "当前为 deploy 分支,产物已预构建,无需宿主机 JDK/Node.js"
+        else
+            info "检测到 deploy/ 目录已有产物,跳过构建"
+        fi
+        info "  后端:    $(du -h deploy/backend/app.jar 2>/dev/null | cut -f1 || echo '?')"
+        info "  管理后台: $(du -sh deploy/admin-web/html 2>/dev/null | cut -f1 || echo '?')"
+        info "  H5:      $(du -sh deploy/h5/html 2>/dev/null | cut -f1 || echo '?')"
+        echo ""
+        info "如需强制重新构建,请切换到 main 分支运行: ./scripts/build.sh all"
+        return 0
+    fi
+
     step "4/9 构建业务产物(在 Docker 容器中,无需宿主机 JDK/Node)"
 
     info "拉取构建镜像(首次较慢,使用国内源加速)..."
