@@ -62,5 +62,8 @@ __pycache__/
 # Maven 本地缓存(仅本地构建用,不提交)
 .m2-cache/
 
+# publish.sh 临时 clone 目录(deploy 分支发布用)
+.deploy-tmp/
+
 # Python 打包产物输出(由 build_installer.py 生成)
 src-python/output/

@@ -47,7 +47,7 @@ step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
 cleanup() {
     if [ -n "$WORKTREE_DIR" ] && [ -d "$WORKTREE_DIR" ]; then
         info "清理临时工作区..."
-        git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || rm -rf "$WORKTREE_DIR"
+        rm -rf "$WORKTREE_DIR"
     fi
 }
 trap cleanup EXIT
@@ -125,14 +125,15 @@ fi
 info "产物构建完成"
 
 #==============================================================
-# 步骤 2:准备 deploy 分支(worktree)
+# 步骤 2:准备 deploy 分支(本地 clone)
 #==============================================================
+# 使用 git clone 代替 git worktree:
+#   - worktree 不能放在主仓库工作树内部,Windows 沙箱又限制项目外部目录
+#   - clone 到项目内部临时目录(.deploy-tmp),可绕过两个限制
 step "步骤 2/5 准备 deploy 分支"
 
-# Windows Git Bash 的 /tmp 映射到受限目录,改用项目父目录下的临时工作区
-WORKTREE_DIR="$PROJECT_DIR/../.canteen-deploy-worktree"
+WORKTREE_DIR="$PROJECT_DIR/.deploy-tmp"
 rm -rf "$WORKTREE_DIR"
-mkdir -p "$WORKTREE_DIR"
 
 # 检查 deploy 分支是否存在(本地或远程)
 DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null || \
@@ -141,18 +142,14 @@ DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null |
 
 if [ -z "$DEPLOY_EXISTS" ]; then
     info "deploy 分支不存在,创建 orphan 分支..."
-    # 创建 orphan 分支(无历史)
-    git worktree add --detach "$WORKTREE_DIR" HEAD 2>/dev/null
+    # 先基于 main clone,再改造成 orphan 分支
+    git clone --quiet --no-local "$PROJECT_DIR" "$WORKTREE_DIR"
     cd "$WORKTREE_DIR"
     git checkout --orphan "$DEPLOY_BRANCH"
     git rm -rf . 2>/dev/null || true
 else
-    info "deploy 分支已存在,检出..."
-    # 使用已有分支
-    git worktree add "$WORKTREE_DIR" "$DEPLOY_BRANCH" 2>/dev/null || {
-        # 如果本地分支不存在但远程存在,基于远程创建
-        git worktree add "$WORKTREE_DIR" -b "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH" 2>/dev/null
-    }
+    info "deploy 分支已存在,clone 检出..."
+    git clone --quiet --no-local --branch "$DEPLOY_BRANCH" "$PROJECT_DIR" "$WORKTREE_DIR"
     cd "$WORKTREE_DIR"
 fi
 
@@ -272,10 +269,14 @@ H5: v${H5_VER}
 
 info "提交完成"
 
-# 推送
+# 推送(clone 的 origin 指向本地项目目录,需重置为真实远程)
+REMOTE_URL=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
+if [ -n "$REMOTE_URL" ]; then
+    git remote set-url origin "$REMOTE_URL"
+fi
 info "推送 deploy 分支到远程..."
-git push origin "$DEPLOY_BRANCH" --force-with-lease 2>/dev/null || {
-    warn "force-with-lease 失败,尝试普通推送..."
+git push origin "$DEPLOY_BRANCH" --force 2>/dev/null || {
+    warn "force 推送失败,尝试普通推送..."
     git push origin "$DEPLOY_BRANCH"
 }
 info "推送完成"
