@@ -124,6 +124,11 @@ if [ "$SCOPE" = "frontend" ] || [ "$SCOPE" = "all" ]; then
 fi
 info "产物构建完成"
 
+# 构建步骤完成后,恢复 MSYS 路径转换(构建时禁用以避免 docker 挂载路径被篡改,
+# 但 git/文件操作需要路径转换以正确处理中文路径)
+unset MSYS_NO_PATHCONV
+unset MSYS2_ARG_CONV_EXCL
+
 # 捕获主仓库信息(此时仍在 PROJECT_DIR 目录,避免中文路径 + MSYS_NO_PATHCONV 冲突)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
 if [ -z "$REMOTE_URL" ]; then
