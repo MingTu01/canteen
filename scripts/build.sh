@@ -95,8 +95,7 @@ build_backend() {
         sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" 2>/dev/null || true
         cp "$jar_file" "$DEPLOY_DIR/backend/app.jar"
     fi
-    # 清理临时 settings
-    rm -f "$settings_file"
+    # settings-aliyun.xml 保留为 tracked 文件(下次构建会覆盖),避免 git 误报删除
     info "后端构建完成: deploy/backend/app.jar ($(du -h "$DEPLOY_DIR/backend/app.jar" | cut -f1))"
 }
 
