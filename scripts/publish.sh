@@ -231,7 +231,7 @@ cp "$PROJECT_DIR/backend/Dockerfile.runtime" backend/
 
 # 运行时脚本(仅复制服务器需要的,不含 build.sh / publish.sh)
 mkdir -p scripts
-for script in upgrade.sh snapshot.sh backup.sh restore.sh; do
+for script in upgrade.sh snapshot.sh backup.sh restore.sh clean-redeploy.sh; do
     if [ -f "$PROJECT_DIR/scripts/$script" ]; then
         cp "$PROJECT_DIR/scripts/$script" scripts/
         chmod +x "scripts/$script"
