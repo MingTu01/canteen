@@ -157,13 +157,14 @@ DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null |
 if [ -z "$DEPLOY_EXISTS" ]; then
     info "deploy 分支不存在,创建 orphan 分支..."
     # 先基于 main clone,再改造成 orphan 分支
-    git clone --quiet "$REMOTE_URL" "$WORKTREE_DIR"
+    git clone --quiet --depth 1 "$REMOTE_URL" "$WORKTREE_DIR"
     cd "$WORKTREE_DIR"
     git checkout --orphan "$DEPLOY_BRANCH"
     git rm -rf . 2>/dev/null || true
 else
     info "deploy 分支已存在,clone 检出..."
-    git clone --quiet --branch "$DEPLOY_BRANCH" "$REMOTE_URL" "$WORKTREE_DIR"
+    # 浅克隆(deploy 分支含大量构建产物,全量克隆极慢)
+    git clone --quiet --depth 1 --single-branch --branch "$DEPLOY_BRANCH" "$REMOTE_URL" "$WORKTREE_DIR"
     cd "$WORKTREE_DIR"
 fi
 
