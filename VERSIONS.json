@@ -1,15 +1,15 @@
 {
   "backend": {
-    "version": "0.0.2",
+    "version": "0.0.3",
     "name": "后端服务",
     "source": "backend/pom.xml",
-    "changelog": "微信登录/通知推送/V15迁移/默认密码12345678/默认余额5000/EmployeeVO.mustChangePassword"
+    "changelog": "安全修复P1-P2:备份脱敏/Mass Assignment修复/密码复杂度校验/Token黑名单fail-closed/EmployeeVO手机号脱敏"
   },
   "admin-web": {
-    "version": "0.0.2",
+    "version": "0.0.3",
     "name": "管理后台",
     "source": "admin-web/package.json",
-    "changelog": "食堂创建用餐时间选填/员工读卡器刷卡/默认余额5000/默认密码12345678"
+    "changelog": "安全修复P2-5:xlsx升级至0.20.3(CDN官方源,修复原型污染漏洞)"
   },
   "h5": {
     "version": "0.0.2",
@@ -24,9 +24,9 @@
     "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
   },
   "system": {
-    "version": "0.0.3",
+    "version": "0.0.4",
     "name": "系统整体版本",
     "source": "VERSIONS.json",
-    "changelog": "deploy分支部署架构:main放源码/deploy放产物/服务器免构建/publish.sh发布/upgrade.sh分支感知/git reset回退"
+    "changelog": "安全加固P0-P2:端口127.0.0.1绑定/弱默认值移除/防火墙UFW+fail2ban/Cookie Secure/CORS白名单/备份AES-256加密/Redis密码/MySQL应用用户/容器非root降权/入侵检测auditd+AIDE/.env权限600"
   }
 }

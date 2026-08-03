@@ -252,6 +252,8 @@ cmd_reset_admin() {
         if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [[ -s "$tmp" ]]; then
             cp "$envfile" "${envfile}.bak" 2>/dev/null
             mv "$tmp" "$envfile"
+            # P2-7 安全修复:清理后重新设置权限 600
+            chmod 600 "$envfile"
         else
             rm -f "$tmp"
             warn "清理 .env 失败,原文件未修改"
@@ -290,6 +292,9 @@ set_env_var() {
         # 追加新行
         echo "${key}=${value}" >> "$envfile"
     fi
+
+    # P2-7 安全修复:每次写入 .env 后强制权限 600
+    chmod 600 "$envfile"
 }
 
 #==============================================================
@@ -461,6 +466,9 @@ INIT_ADMIN_PASSWORD=${admin_pwd}
 INIT_ADMIN_FORCE=true
 EOF
 
+    # P2-7 安全修复:.env 包含敏感信息,强制权限 600(仅属主可读写)
+    chmod 600 .env
+
     echo ""
     info ".env 已生成"
     warn "请妥善保管 .env 文件,包含敏感信息!"
@@ -558,6 +566,11 @@ start_services() {
     info "端口 18080/18081/18082 可用"
 
     mkdir -p backup uploads logs
+
+    # P1-5 容器降权:确保 backup/ 和 uploads/ 目录属主为 1000:1000(容器内 canteen 用户)
+    # 否则非 root 容器无法写入备份文件和上传的图片
+    info "设置 backup/ 和 uploads/ 目录权限(UID=1000,供容器内非 root 用户使用)..."
+    chown -R 1000:1000 backup uploads 2>/dev/null || warn "chown backup/uploads 失败(不影响部署,但容器内可能无法写入)"
 
     info "启动 Docker Compose..."
     docker compose up -d
@@ -719,6 +732,191 @@ verify_and_summary() {
 }
 
 #==============================================================
+# P0-3 安全加固:防火墙(UFW)+ SSH 爆破防护(fail2ban)
+#==============================================================
+harden_security() {
+    step "安全加固(防火墙 + SSH 爆破防护)"
+
+    # 仅 apt 系执行(UFW/fail2ban 是 Debian/Ubuntu 工具)
+    if ! command -v apt-get &>/dev/null; then
+        warn "非 Debian/Ubuntu 系统,跳过 UFW/fail2ban 自动配置"
+        warn "请手动配置防火墙和 SSH 爆破防护"
+        return 0
+    fi
+
+    # ---------- 1. fail2ban(SSH 爆破防护) ----------
+    info "配置 fail2ban(SSH 爆破防护)..."
+    if ! command -v fail2ban-client &>/dev/null; then
+        apt-get update -qq && apt-get install -y -qq fail2ban
+    fi
+
+    # SSH 防护:5 次失败封禁 1 小时
+    cat > /etc/fail2ban/jail.d/sshd.local <<'EOF'
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+findtime = 600
+bantime = 3600
+EOF
+    systemctl enable fail2ban 2>/dev/null && systemctl restart fail2ban
+    info "fail2ban 已配置(SSH 5 次失败封禁 1 小时)"
+
+    # ---------- 2. UFW 防火墙 ----------
+    info "配置 UFW 防火墙..."
+    if ! command -v ufw &>/dev/null; then
+        apt-get install -y -qq ufw
+    fi
+
+    # 先重置,再配置
+    ufw --force reset
+    ufw default deny incoming
+    ufw default allow outgoing
+
+    # 放行必要端口
+    ufw allow 22/tcp comment 'SSH'
+    ufw allow 80/tcp comment 'HTTP-1panel'
+    ufw allow 443/tcp comment 'HTTPS-1panel'
+
+    # 1panel 管理端口(默认随机,从配置读取)
+    local panel_port=""
+    if [ -f /opt/1panel/conf/app.yaml ]; then
+        panel_port=$(grep -m1 "port:" /opt/1panel/conf/app.yaml 2>/dev/null | awk '{print $2}' || echo "")
+    fi
+    if [ -n "$panel_port" ]; then
+        ufw allow ${panel_port}/tcp comment '1panel'
+        info "已放行 1panel 端口: ${panel_port}"
+    fi
+
+    ufw --force enable
+    info "UFW 已启用(仅放行 22/80/443${panel_port:+/$panel_port})"
+
+    # ---------- 3. Docker 绕过 UFW 的补救 ----------
+    # Docker 默认在 iptables nat 表直接 DNAT,绕过 ufw filter 表
+    # 配合 P0-1 的 127.0.0.1 绑定,容器端口不再对外暴露
+    # 额外保险:在 DOCKER-USER 链拒绝外部到容器端口的直接访问
+    if iptables -L DOCKER-USER &>/dev/null 2>&1; then
+        # 获取默认外网网卡
+        local wan_iface
+        wan_iface=$(ip route show default 2>/dev/null | awk '{print $5}' | head -1 || echo "eth0")
+        iptables -I DOCKER-USER -i "${wan_iface}" -p tcp -m multiport \
+            --dports 18080,18081,18082,13306,16379 -j DROP 2>/dev/null || true
+        info "Docker-USER 链已加固(拒绝外部直接访问容器端口)"
+    fi
+
+    # ---------- 4. SSH 加固建议 ----------
+    echo ""
+    warn "建议手动加固 SSH(编辑 /etc/ssh/sshd_config):"
+    echo "  PermitRootLogin prohibit-password   # 禁止 root 密码登录"
+    echo "  PasswordAuthentication no           # 仅密钥登录(需先配置密钥)"
+    echo "  修改后:systemctl restart sshd"
+    echo ""
+}
+
+#==============================================================
+# P2-4 入侵检测与审计:auditd + AIDE + 自动安全更新
+#==============================================================
+install_intrusion_detection() {
+    step "入侵检测与审计(auditd + AIDE)"
+
+    if ! command -v apt-get &>/dev/null; then
+        warn "非 Debian/Ubuntu 系统,跳过入侵检测安装"
+        return 0
+    fi
+
+    # ---------- 1. auditd(系统调用审计) ----------
+    info "安装 auditd(审计守护进程)..."
+    apt-get install -y -qq auditd 2>/dev/null || true
+
+    # 监控关键文件变更
+    cat > /etc/audit/rules.d/canteen.rules <<AUDITEOF
+# P2-4 企业食堂系统关键文件审计规则
+# 监控 .env 文件变更(含数据库密码/JWT 密钥)
+-w ${PROJECT_DIR}/.env -p wa -k env_change
+# 监控 app.jar 变更(后端核心产物)
+-w ${PROJECT_DIR}/deploy/backend/app.jar -p wa -k jar_change
+# 监控 docker-compose.yml 变更
+-w ${PROJECT_DIR}/docker-compose.yml -p wa -k compose_change
+# 监控系统关键文件
+-w /etc/passwd -p wa -k passwd_change
+-w /etc/shadow -p wa -k shadow_change
+-w /etc/ssh/sshd_config -p wa -k ssh_config_change
+-w /etc/sudoers -p wa -k sudoers_change
+AUDITEOF
+    augenrules --load 2>/dev/null || true
+    systemctl enable auditd 2>/dev/null && systemctl restart auditd 2>/dev/null || true
+    info "auditd 已配置(监控 .env / app.jar / docker-compose.yml / 系统文件)"
+
+    # ---------- 2. AIDE(文件完整性监控) ----------
+    info "安装 AIDE(文件完整性监控)..."
+    apt-get install -y -qq aide 2>/dev/null || true
+
+    # 初始化 AIDE 数据库(首次较慢,后台执行不阻塞部署)
+    if command -v aideinit &>/dev/null; then
+        info "初始化 AIDE 数据库(后台执行,不影响部署)..."
+        nohup aideinit --force >/dev/null 2>&1 &
+        info "AIDE 初始化在后台进行,完成后自动启用完整性检查"
+    fi
+
+    # 创建每日完整性检查 cron(若 AIDE 数据库就绪)
+    cat > /etc/cron.daily/aide-check <<'CRONEOF'
+#!/bin/bash
+# P2-4 AIDE 每日文件完整性检查
+AIDE_DB="/var/lib/aide/aide.db"
+if [ -f "$AIDE_DB" ] && command -v aide &>/dev/null; then
+    REPORT=$(aide --check 2>&1)
+    if echo "$REPORT" | grep -q "changed\|added\|removed"; then
+        echo "[AIDE] 检测到文件变更:" | logger -t aide-check
+        echo "$REPORT" | logger -t aide-check
+    fi
+fi
+CRONEOF
+    chmod +x /etc/cron.daily/aide-check 2>/dev/null || true
+
+    # ---------- 3. 自动安全更新 ----------
+    info "配置自动安全更新..."
+    apt-get install -y -qq unattended-upgrades 2>/dev/null || true
+    # 非交互式启用自动安全更新
+    echo 'APT::Periodic::Update-Package-Lists "1";' > /etc/apt/apt.conf.d/20auto-upgrades
+    echo 'APT::Periodic::Unattended-Upgrade "1";' >> /etc/apt/apt.conf.d/20auto-upgrades
+    info "自动安全更新已启用"
+
+    echo ""
+    info "入侵检测已安装:auditd + AIDE + 自动安全更新"
+    echo "  审计日志查看:  sudo ausearch -k env_change"
+    echo "  完整性检查:    sudo aide --check"
+    echo ""
+}
+
+#==============================================================
+# P2-8 部署后清理 .env 中的临时敏感变量
+#==============================================================
+cleanup_sensitive_env() {
+    local envfile="$PROJECT_DIR/.env"
+    if [[ ! -f "$envfile" ]]; then
+        return 0
+    fi
+
+    info "清理 .env 中的临时敏感变量(INIT_ADMIN_PASSWORD / INIT_ADMIN_FORCE)..."
+
+    local tmp
+    tmp=$(mktemp)
+    # 删除 INIT_ADMIN_FORCE 和 INIT_ADMIN_PASSWORD,保留 INIT_ADMIN_USERNAME 供参考
+    if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null \
+        | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [[ -s "$tmp" ]]; then
+        cp "$envfile" "${envfile}.bak" 2>/dev/null
+        mv "$tmp" "$envfile"
+        chmod 600 "$envfile"
+        info "已清理 INIT_ADMIN_PASSWORD 和 INIT_ADMIN_FORCE(密码已在数据库中)"
+    else
+        rm -f "$tmp"
+        warn "清理 .env 失败,请手动删除 INIT_ADMIN_PASSWORD"
+    fi
+}
+
+#==============================================================
 # 子命令: deploy
 #==============================================================
 cmd_deploy() {
@@ -751,9 +949,23 @@ cmd_deploy() {
     setup_autostart
     install_canteen_command
 
+    # P0-3 + P2-4:安全加固(防火墙 + SSH 爆破防护 + 入侵检测)
+    harden_security
+    install_intrusion_detection
+
+    # P2-8:部署成功后清理 .env 中的临时敏感变量(密码已在数据库中)
+    if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
+        cleanup_sensitive_env
+    fi
+
     # 部署结束前:再次修正所有权和权限(确保新建目录和脚本可用)
     fix_ownership
     fix_permissions
+
+    # P2-7:确保 .env 权限为 600(仅属主可读写)
+    if [[ -f "$PROJECT_DIR/.env" ]]; then
+        chmod 600 "$PROJECT_DIR/.env"
+    fi
 
     verify_and_summary
 }

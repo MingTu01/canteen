@@ -32,7 +32,8 @@ public class EmployeeVO {
         vo.setId(e.getId());
         vo.setStoreId(e.getStoreId());
         vo.setCardNo(e.getCardNo());
-        vo.setPhone(e.getPhone());
+        // P2-6 手机号脱敏:138****0001,防止列表接口泄露完整手机号
+        vo.setPhone(maskPhone(e.getPhone()));
         vo.setName(e.getName());
         vo.setAvatar(e.getAvatar());
         vo.setDepartmentId(e.getDepartmentId());
@@ -42,5 +43,14 @@ public class EmployeeVO {
         vo.setCreatedAt(e.getCreatedAt());
         vo.setUpdatedAt(e.getUpdatedAt());
         return vo;
+    }
+
+    /**
+     * P2-6 手机号脱敏:保留前 3 后 4,中间 4 位用 * 替换。
+     * 长度不足 11 位时原样返回(兼容短号/测试数据)。
+     */
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.length() < 11) return phone;
+        return phone.substring(0, 3) + "****" + phone.substring(7);
     }
 }

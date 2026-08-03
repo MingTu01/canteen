@@ -1,6 +1,9 @@
 # 生产环境配置:强制依赖外部注入的环境变量,关闭调试功能
 server:
   port: 8080
+  # P0-4: 启用 forward-headers,让后端正确识别反代后的真实协议/域名/IP
+  # 配合 nginx 的 X-Forwarded-Proto 头,Cookie 的 Secure 标志才能在 HTTPS 反代下生效
+  forward-headers-strategy: NATIVE
 
 spring:
   datasource:

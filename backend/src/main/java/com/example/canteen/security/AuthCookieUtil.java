@@ -3,6 +3,7 @@ package com.example.canteen.security;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Component;
  * 安全策略:
  * - HttpOnly:禁止 JS 读取,防 XSS 窃取
  * - SameSite=Strict:防 CSRF
- * - Secure:仅 HTTPS 下传输(prod 强制要求)
+ * - Secure:仅 HTTPS 下传输(prod 强制要求,不依赖 request.isSecure())
  * - Path=/:全站可见
  * - maxAge:与 JWT 过期时间对齐
  */
@@ -33,6 +34,13 @@ public class AuthCookieUtil {
     private static final int EMPLOYEE_COOKIE_MAXAGE = 30 * 24 * 3600;
     /** terminal:365 天 */
     private static final int TERMINAL_COOKIE_MAXAGE = 365 * 24 * 3600;
+
+    /**
+     * P0-4: 注入当前 profile,生产环境强制 Cookie Secure=true,
+     * 不再依赖 request.isSecure()(反代后可能返回 false)
+     */
+    @Value("${spring.profiles.active:default}")
+    private String activeProfile;
 
     /** 登录成功时写入 Cookie(管理端,会话级)。 */
     public void setAuthCookie(HttpServletResponse response, String token, HttpServletRequest request) {
@@ -69,7 +77,14 @@ public class AuthCookieUtil {
     private void setCookie(HttpServletResponse response, String name, String token, HttpServletRequest request, int maxAge) {
         Cookie cookie = new Cookie(name, token);
         cookie.setHttpOnly(true);
-        cookie.setSecure(request.isSecure());
+        // P0-4: 生产环境强制 Secure=true,不依赖 request.isSecure()
+        // 原因:nginx 反代若未透传 X-Forwarded-Proto,request.isSecure() 返回 false,
+        // 导致 Cookie 的 Secure 标志不生效,可在 HTTP 明文传输被中间人窃取。
+        if (isProdProfile()) {
+            cookie.setSecure(true);
+        } else {
+            cookie.setSecure(request.isSecure());
+        }
         cookie.setPath("/");
         cookie.setMaxAge(maxAge);
         cookie.setAttribute("SameSite", "Strict");
@@ -87,10 +102,21 @@ public class AuthCookieUtil {
     private void clearCookie(HttpServletResponse response, String name, HttpServletRequest request) {
         Cookie cookie = new Cookie(name, "");
         cookie.setHttpOnly(true);
-        cookie.setSecure(request.isSecure());
+        // P0-4: 生产环境强制 Secure,与写入时保持一致
+        if (isProdProfile()) {
+            cookie.setSecure(true);
+        } else {
+            cookie.setSecure(request.isSecure());
+        }
         cookie.setPath("/");
         cookie.setMaxAge(0);
         cookie.setAttribute("SameSite", "Strict");
         response.addCookie(cookie);
     }
+
+    /** 判断是否生产 profile */
+    private boolean isProdProfile() {
+        return "prod".equalsIgnoreCase(activeProfile);
+    }
 }
+

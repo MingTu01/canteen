@@ -10,6 +10,7 @@ import com.example.canteen.mapper.AdminMapper;
 import com.example.canteen.security.JwtAuthenticationFilter;
 import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.LoginRateLimiter;
+import com.example.canteen.security.PasswordValidator;
 import com.example.canteen.security.SecurityContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -69,9 +70,11 @@ public class AdminService {
         if (count > 0) {
             throw new BusinessException("用户名已存在");
         }
-        if (admin.getPassword() == null || admin.getPassword().length() < 8) {
-            throw new BusinessException("密码至少8位");
+        if (admin.getPassword() == null) {
+            throw new BusinessException("密码不能为空");
         }
+        // P2-1 密码复杂度校验(管理员创建时必须满足复杂度要求)
+        PasswordValidator.validate(admin.getPassword());
         admin.setPassword(passwordEncoder.encode(admin.getPassword()));
         // 初始化密码更新时间
         if (admin.getPasswordUpdatedAt() == null) {
@@ -142,9 +145,11 @@ public class AdminService {
             rateLimiter.recordFail(rateLimitKey);
             throw new BusinessException("原密码错误");
         }
-        if (newPassword == null || newPassword.length() < 8) {
-            throw new BusinessException("新密码至少8位");
+        if (newPassword == null) {
+            throw new BusinessException("新密码不能为空");
         }
+        // P2-1 密码复杂度校验
+        PasswordValidator.validate(newPassword);
         admin.setPassword(passwordEncoder.encode(newPassword));
         // 同步更新密码修改时间,使旧 token 失效
         admin.setPasswordUpdatedAt(LocalDateTime.now());

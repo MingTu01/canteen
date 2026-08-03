@@ -51,8 +51,9 @@ load_env() {
 }
 
 # 获取数据库密码(优先 SPRING_DATASOURCE_PASSWORD,其次 MYSQL_ROOT_PASSWORD)
+# P0-2 安全修复:移除弱默认密码,未配置则返回空(调用方需校验)
 get_db_pass() {
-    echo "${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-canteen2026}}"
+    echo "${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
 }
 
 # 获取当前版本号
@@ -89,6 +90,11 @@ snapshot_create() {
     load_env
     local db_pass
     db_pass=$(get_db_pass)
+    if [ -z "$db_pass" ]; then
+        error "数据库密码未配置,请在 .env 中设置 MYSQL_ROOT_PASSWORD 或 SPRING_DATASOURCE_PASSWORD"
+        rm -rf "$snap_path"
+        return 1
+    fi
     local db_name="${MYSQL_DATABASE:-canteen}"
 
     if mysql_running; then

@@ -243,7 +243,12 @@ auto_rollback() {
     if [ -f "$PROJECT_DIR/.env" ]; then
         set -a; . "$PROJECT_DIR/.env" 2>/dev/null || true; set +a
     fi
-    local db_pass="${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-canteen2026}}"
+    # P0-2 安全修复:移除弱默认密码,未配置则失败退出
+    local db_pass="${SPRING_DATASOURCE_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
+    if [ -z "$db_pass" ]; then
+        error "数据库密码未配置,请在 .env 中设置 MYSQL_ROOT_PASSWORD 或 SPRING_DATASOURCE_PASSWORD"
+        return 1
+    fi
     local db_name="${MYSQL_DATABASE:-canteen}"
 
     # 1. 恢复 deploy/ 产物(先解压到临时目录,成功后再替换,避免 rm -rf 后 tar 失败导致产物丢失)

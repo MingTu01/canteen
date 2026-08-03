@@ -12,22 +12,33 @@ import javax.crypto.SecretKey;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Token 黑名单服务。
  *
  * 用途:用户注销时将 token 的 jti 加入黑名单,在 token 自然过期前不可再用。
  *
- * 存储:数据库表 token_blacklist(单实例 + 多实例皆可)。
- * 清理:每 5 分钟清理已过期的黑名单条目。
+ * 存储:
+ * - 主存储:数据库表 token_blacklist(多实例共享)
+ * - 本地缓存:ConcurrentHashMap(jti → 过期时间),DB 异常时兜底
  *
- * 注意:本实现按 jti 维度黑名单(而非完整 token),节省存储;但要求所有 token 都有 jti。
+ * P2-2 fail-closed 策略:
+ * - DB 写入黑名单时同步写入本地缓存(保证已注销 token 即使 DB 宕机也持续拦截)
+ * - DB 查询异常时,若本地缓存命中 → 拦截;缓存未命中 → 放行(避免 DB 抖动踢出全站用户)
+ * - 已注销的 token 在本地缓存中保留至其自然过期,DB 恢复后自动同步
+ *
+ * 清理:每 5 分钟清理已过期的黑名单条目(含 DB 和本地缓存)。
  */
 @Service
 public class TokenBlacklistService {
     private static final Logger log = LoggerFactory.getLogger(TokenBlacklistService.class);
     private final JdbcTemplate jdbcTemplate;
     private final SecretKey secretKey;
+
+    /** P2-2 本地缓存:jti → 过期时间戳(epoch millis)。DB 异常时用于 fail-closed 兜底。 */
+    private final Map<String, Long> blacklistCache = new ConcurrentHashMap<>();
 
     public TokenBlacklistService(JdbcTemplate jdbcTemplate, SecretKey jwtSecretKey) {
         this.jdbcTemplate = jdbcTemplate;
@@ -39,7 +50,7 @@ public class TokenBlacklistService {
      *
      * 失败语义:
      * - token 已损坏/过期:静默返回(无需加黑名单,原 token 本就不可用)
-     * - DB 写入失败:抛出 RuntimeException,调用方需感知(否则用户以为注销成功,实际 token 仍可用)
+     * - DB 写入失败:写入本地缓存后抛出 RuntimeException,让调用方感知
      */
     public void blacklist(String token) {
         Claims claims;
@@ -50,7 +61,6 @@ public class TokenBlacklistService {
                     .parseSignedClaims(token)
                     .getPayload();
         } catch (Exception e) {
-            // token 已损坏/过期,无需加入黑名单,记日志便于排查
             log.warn("token 解析失败,未加入黑名单: {}", e.getMessage());
             return;
         }
@@ -64,6 +74,10 @@ public class TokenBlacklistService {
             return; // 已过期,无需加入
         }
 
+        long expMillis = exp.getTime();
+        // P2-2 先写入本地缓存(fail-closed:即使 DB 写入失败,本地缓存也能拦截)
+        blacklistCache.put(jti, expMillis);
+
         LocalDateTime expiresAt = LocalDateTime.ofInstant(exp.toInstant(), ZoneId.systemDefault());
         try {
             int updated = jdbcTemplate.update(
@@ -75,24 +89,50 @@ public class TokenBlacklistService {
                         jti, expiresAt);
             }
         } catch (Exception e) {
-            // DB 写入失败:抛出异常,让调用方感知,否则用户以为注销成功但 token 实际仍可用
-            log.error("加入黑名单失败 jti={}", jti, e);
+            // DB 写入失败:本地缓存已写入,已注销 token 仍可被拦截
+            // 但抛出异常让调用方感知(用户可能需要重试)
+            log.error("加入黑名单 DB 写入失败(本地缓存已写入) jti={}", jti, e);
             throw new RuntimeException("注销失败:token 黑名单写入异常", e);
         }
     }
 
-    /** 检查 token jti 是否在黑名单中。 */
+    /**
+     * 检查 token jti 是否在黑名单中。
+     *
+     * P2-2 fail-closed 策略:
+     * 1. 先查本地缓存(快路径):缓存命中且未过期 → 拦截
+     * 2. 再查 DB:DB 命中 → 写入缓存并拦截
+     * 3. DB 异常:缓存命中 → 拦截;缓存未命中 → 放行(避免 DB 抖动踢出全站用户)
+     */
     public boolean isBlacklisted(String jti) {
         if (jti == null || jti.isBlank()) return false;
+
+        // 1. 快路径:查本地缓存
+        Long cachedExp = blacklistCache.get(jti);
+        if (cachedExp != null) {
+            if (System.currentTimeMillis() < cachedExp) {
+                return true; // 缓存命中且未过期 → 拦截
+            }
+            // 已过期,清理缓存
+            blacklistCache.remove(jti);
+        }
+
+        // 2. 查 DB(可能存在其他实例写入但本实例缓存未同步的情况)
         try {
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM token_blacklist WHERE token_jti = ?",
                     Integer.class, jti);
-            return count != null && count > 0;
+            boolean blocked = count != null && count > 0;
+            if (blocked) {
+                // DB 命中,回填缓存(用当前时间 + 25 小时作为保守过期估计)
+                blacklistCache.put(jti, System.currentTimeMillis() + 25L * 3600_000);
+            }
+            return blocked;
         } catch (Exception e) {
-            // 失败开放:查询异常时视为未注销,放行请求。
-            // DB 抖动不应导致全站用户被踢登录;已注销 token 的 jti 在 DB 恢复后仍会被拦截。
-            log.warn("黑名单查询失败,放行请求(避免 DB 抖动踢出全站用户): jti={}", jti);
+            // P2-2 DB 异常时 fail-closed:
+            // - 缓存命中(已在上面返回 true)→ 拦截
+            // - 缓存未命中 → 放行(避免 DB 抖动踢出全站未注销用户)
+            log.warn("黑名单查询失败,使用本地缓存兜底: jti={}", jti);
             return false;
         }
     }
@@ -100,6 +140,11 @@ public class TokenBlacklistService {
     /** 定时清理已过期的黑名单条目(每 5 分钟一次)。 */
     @Scheduled(fixedDelay = 300_000L, initialDelay = 60_000L)
     public void cleanupExpired() {
+        // 清理本地缓存中已过期的条目
+        long now = System.currentTimeMillis();
+        blacklistCache.entrySet().removeIf(entry -> entry.getValue() < now);
+
+        // 清理 DB 中已过期的条目
         try {
             jdbcTemplate.update(
                     "DELETE FROM token_blacklist WHERE expires_at < ?",

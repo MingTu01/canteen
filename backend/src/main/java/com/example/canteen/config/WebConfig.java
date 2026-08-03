@@ -2,6 +2,7 @@ package com.example.canteen.config;
 
 import com.example.canteen.security.StoreAccessInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -74,11 +75,22 @@ public class WebConfig implements WebMvcConfigurer {
  * - 浏览器可能通过内网 IP、外网域名、反代域名访问,origin 不固定
  * - X86 终端(Tauri EXE)直接跨域调用后端 API
  *
- * 策略:放行所有 origin。安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制。
- * allowedOriginPatterns("*") 兼容 allowCredentials=true(allowedOrigins("*") 不兼容)。
+ * 策略(兼容项目硬约束:CORS 必须支持所有源跨域访问):
+ * - 默认:allowedOriginPatterns("*") 放行所有 origin,支持 allowCredentials=true
+ * - 可选:通过 CORS_ALLOWED_ORIGINS 环境变量配置精确白名单(逗号分隔),
+ *         配置后仅放行白名单内的 origin,收紧生产环境攻击面
+ * - 安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制
  */
 @Configuration
 class CorsConfig implements WebMvcConfigurer {
+
+    /**
+     * P0-5: 可选 CORS 白名单(逗号分隔的精确 origin 列表)。
+     * 留空(默认)则放行所有 origin(向后兼容内网多 origin 部署)。
+     * 配置示例:CORS_ALLOWED_ORIGINS=https://dm.canteen.example.com,https://admin.canteen.example.com
+     */
+    @Value("${cors.allowed-origins:}")
+    private String allowedOriginsConfig;
 
     /**
      * CORS 配置:允许 localhost / 127.0.0.1 端口(admin-web 3000、H5 5174、终端 5175 等),
@@ -92,14 +104,37 @@ class CorsConfig implements WebMvcConfigurer {
         // - admin-web / H5 通过 nginx 反代同源访问(浏览器仍带 Origin 头,Spring CORS 需放行)
         // - 浏览器可能通过内网 IP、外网域名、反代域名访问,origin 不固定
         // - X86 终端(Tauri)直接跨域调用后端 API
-        // 因此放行所有 origin,credentials 仍可用(allowedOriginPatterns 支持通配)。
+        // 因此默认放行所有 origin,credentials 仍可用(allowedOriginPatterns 支持通配)。
         // 安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制。
-        registry.addMapping("/api/**")
-                .allowedOriginPatterns("*")
+        var apiMapping = registry.addMapping("/api/**")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true)
                 .maxAge(3600);
+
+        // P0-5: 若配置了精确白名单,则收紧为白名单模式
+        if (allowedOriginsConfig != null && !allowedOriginsConfig.isBlank()) {
+            String[] origins = allowedOriginsConfig.split(",");
+            // trim 并过滤空值
+            java.util.List<String> originList = new java.util.ArrayList<>();
+            for (String o : origins) {
+                String trimmed = o.trim();
+                if (!trimmed.isEmpty()) {
+                    originList.add(trimmed);
+                }
+            }
+            if (!originList.isEmpty()) {
+                // 使用精确 allowedOrigins(非通配),仅放行白名单内的 origin
+                apiMapping.allowedOrigins(originList.toArray(new String[0]));
+            } else {
+                // 白名单解析后为空,回退到放行所有
+                apiMapping.allowedOriginPatterns("*");
+            }
+        } else {
+            // 默认:放行所有 origin(向后兼容内网多 origin 部署)
+            apiMapping.allowedOriginPatterns("*");
+        }
+
         // 静态资源(头像/菜品图片)CORS
         // 终端前端运行在 http://127.0.0.1:1287,fetch 后端 /uploads/xxx.jpg 需要 CORS 头
         // 否则 imageCache.ts 中 fetch 头像图片会被浏览器拦截,无法缓存到 IndexedDB

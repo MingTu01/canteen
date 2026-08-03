@@ -99,3 +99,9 @@ wechat:
 logging:
   level:
     com.example.canteen: INFO
+
+# P0-5: CORS 允许的 Origin 白名单(逗号分隔)
+# 留空(默认)则放行所有 origin(兼容内网多 origin 部署)
+# 配置示例:https://dm.canteen.example.com,https://admin.canteen.example.com
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:}

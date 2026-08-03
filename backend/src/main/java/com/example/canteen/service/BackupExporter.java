@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 备份数据导出器。
@@ -21,9 +22,16 @@ import java.util.Map;
  * - 门店名查询(getStoreName)
  *
  * 从 BackupService 拆分,让 BackupService 退化为协调器。
+ *
+ * P1-2 安全修复:导出时自动脱敏敏感字段(password / wx_openid 完全遮蔽,phone 部分遮蔽)。
  */
 @Service
 public class BackupExporter {
+
+    /** P1-2 导出时完全遮蔽的敏感字段(值替换为 ***REDACTED***) */
+    private static final Set<String> FULL_REDACT_COLUMNS = Set.of(
+            "password", "wx_openid", "wx_unionid"
+    );
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -45,6 +53,12 @@ public class BackupExporter {
             } else {
                 rows = exportStoreTable(table, storeId);
             }
+            // P1-2 导出脱敏:遮蔽 password / wx_openid / wx_unionid,部分遮蔽 phone
+            if (rows != null) {
+                for (Map<String, Object> row : rows) {
+                    desensitizeRow(row);
+                }
+            }
             data.put(table, rows != null ? rows : new ArrayList<>());
         }
         return data;
@@ -53,22 +67,55 @@ public class BackupExporter {
     /** 按门店导出单表数据。menu_item/order_item 通过关联表过滤。 */
     public List<Map<String, Object>> exportStoreTable(String table, Long storeId) {
         String sql;
+        List<Map<String, Object>> rows;
         switch (table) {
             case "store":
                 sql = "SELECT * FROM store WHERE id = ?";
-                return jdbcTemplate.queryForList(sql, storeId);
+                rows = jdbcTemplate.queryForList(sql, storeId);
+                break;
             case "menu_item":
                 sql = "SELECT mi.* FROM menu_item mi INNER JOIN menu m ON mi.menu_id = m.id WHERE m.store_id = ?";
-                return jdbcTemplate.queryForList(sql, storeId);
+                rows = jdbcTemplate.queryForList(sql, storeId);
+                break;
             case "order_item":
                 sql = "SELECT oi.* FROM order_item oi INNER JOIN `order` o ON oi.order_id = o.id WHERE o.store_id = ?";
-                return jdbcTemplate.queryForList(sql, storeId);
+                rows = jdbcTemplate.queryForList(sql, storeId);
+                break;
             default:
                 if (BackupConstants.STORE_DIRECT_TABLES.contains(table)) {
                     sql = "SELECT * FROM " + quoteTable(table) + " WHERE store_id = ?";
-                    return jdbcTemplate.queryForList(sql, storeId);
+                    rows = jdbcTemplate.queryForList(sql, storeId);
+                } else {
+                    return new ArrayList<>();
                 }
-                return new ArrayList<>();
+        }
+        // P1-2 导出脱敏
+        if (rows != null) {
+            for (Map<String, Object> row : rows) {
+                desensitizeRow(row);
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * P1-2 行级脱敏:
+     * - password / wx_openid / wx_unionid → "***REDACTED***"
+     * - phone → 138****0001(保留前 3 后 4)
+     */
+    private void desensitizeRow(Map<String, Object> row) {
+        if (row == null) return;
+        for (String col : FULL_REDACT_COLUMNS) {
+            if (row.containsKey(col) && row.get(col) != null) {
+                row.put(col, "***REDACTED***");
+            }
+        }
+        Object phoneVal = row.get("phone");
+        if (phoneVal != null) {
+            String phone = phoneVal.toString();
+            if (phone.length() >= 11) {
+                row.put("phone", phone.substring(0, 3) + "****" + phone.substring(7));
+            }
         }
     }
 

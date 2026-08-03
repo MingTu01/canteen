@@ -301,7 +301,7 @@ public class EmployeeController {
         for (Employee e : list) {
             sb.append(csvEscape(e.getName())).append(',');
             sb.append(csvEscape(e.getCardNo())).append(',');
-            sb.append(csvEscape(e.getPhone() == null ? "" : e.getPhone())).append(',');
+            sb.append(csvEscape(maskPhone(e.getPhone()))).append(',');
             sb.append(csvEscape(e.getDepartmentId() == null ? "" : deptNameMap.getOrDefault(e.getDepartmentId(), ""))).append(',');
             sb.append(e.getBalance() == null ? "0" : e.getBalance().toPlainString()).append(',');
             sb.append(e.getStatus() != null && e.getStatus() == 1 ? "启用" : "禁用").append(',');
@@ -329,6 +329,12 @@ public class EmployeeController {
             return "\"" + v.replace("\"", "\"\"") + "\"";
         }
         return v;
+    }
+
+    /** P2-6 手机号脱敏:保留前 3 后 4,中间 4 位用 * 替换 */
+    private String maskPhone(String phone) {
+        if (phone == null || phone.length() < 11) return phone == null ? "" : phone;
+        return phone.substring(0, 3) + "****" + phone.substring(7);
     }
 
     /**

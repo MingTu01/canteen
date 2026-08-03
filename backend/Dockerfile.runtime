@@ -4,6 +4,10 @@
 # 仅安装系统依赖(tzdata/curl),不含业务代码
 # 业务 jar 通过卷映射挂入(docker-compose.yml: ./deploy/backend/app.jar:/app/app.jar)
 # 此镜像只需在首次部署时构建一次,后续更新后端代码无需重建镜像
+#
+# P1-5 安全修复:以非 root 用户(canteen, UID=1000)运行,降低 RCE 后的权限
+# 部署时需确保宿主机 backup/ 和 uploads/ 目录属主为 1000:1000
+# (deploy.sh 的 start_services 函数会自动 chown)
 # =============================================================================
 FROM eclipse-temurin:25-jre
 LABEL maintainer="Enterprise Canteen System"
@@ -11,9 +15,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl && 
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
     rm -rf /var/lib/apt/lists/*
+
+# P1-5 创建非 root 用户(UID=1000,固定 UID 便于宿主机目录权限对齐)
+RUN groupadd -r canteen -g 1000 && \
+    useradd -r -g canteen -u 1000 -d /app -s /sbin/nologin canteen && \
+    mkdir -p /app/uploads /app/backup && \
+    chown -R canteen:canteen /app
+
 WORKDIR /app
-RUN mkdir -p /app/uploads
 EXPOSE 8080
+
+# P1-5 切换为非 root 用户
+USER canteen
+
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8080/api/system/health || exit 1
 # app.jar 由卷映射提供,不 COPY 进镜像

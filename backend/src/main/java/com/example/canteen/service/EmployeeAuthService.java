@@ -6,6 +6,7 @@ import com.example.canteen.exception.BusinessException;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.LoginRateLimiter;
+import com.example.canteen.security.PasswordValidator;
 import com.example.canteen.security.SecurityContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -103,9 +104,11 @@ public class EmployeeAuthService {
                 throw new BusinessException("原密码错误");
             }
         }
-        if (newPassword == null || newPassword.length() < 8) {
-            throw new BusinessException("新密码至少 8 位");
+        if (newPassword == null) {
+            throw new BusinessException("新密码不能为空");
         }
+        // P2-1 密码复杂度校验(员工修改密码时必须满足复杂度要求)
+        PasswordValidator.validate(newPassword);
         employee.setPassword(passwordEncoder.encode(newPassword));
         // 同步更新密码修改时间,使旧 token 失效(JwtAuthenticationFilter 校验 iat < passwordUpdatedAt)
         employee.setPasswordUpdatedAt(LocalDateTime.now());

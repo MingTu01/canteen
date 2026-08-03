@@ -10,6 +10,7 @@ import com.example.canteen.exception.BusinessException;
 import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.RechargeRecordMapper;
+import com.example.canteen.security.PasswordValidator;
 import com.example.canteen.security.SecurityContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -57,9 +58,10 @@ public class EmployeeService {
 
     public Employee createEmployee(Employee employee) {
         SecurityContext.checkStoreAccess(employee.getStoreId());
-        if (employee.getIsDeleted() == null) {
-            employee.setIsDeleted(0);
-        }
+        // P1-6 修复 Mass Assignment:强制重置敏感字段,防止前端注入
+        employee.setId(null);               // 防止覆盖已有记录
+        employee.setIsDeleted(0);           // 防止创建即删除
+        employee.setPasswordUpdatedAt(LocalDateTime.now()); // 防止绕过 JWT 失效
         // P1-5 密码哈希:若未提供则使用默认密码 12345678;若已是 BCrypt 则保留
         boolean usedDefaultPassword = false;
         String pwd = employee.getPassword();
@@ -68,7 +70,10 @@ public class EmployeeService {
             usedDefaultPassword = true;
         }
         if (!pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
-            if (pwd.length() < 8) {
+            // P2-1 密码复杂度校验:仅对用户显式提供的密码校验(默认密码跳过,首次登录强制修改)
+            if (!usedDefaultPassword) {
+                PasswordValidator.validate(pwd);
+            } else if (pwd.length() < 8) {
                 throw new BusinessException("密码至少8位");
             }
             pwd = passwordEncoder.encode(pwd);
@@ -76,10 +81,6 @@ public class EmployeeService {
         employee.setPassword(pwd);
         // 使用了默认密码 → 标记首次登录必须修改
         employee.setMustChangePassword(usedDefaultPassword ? 1 : 0);
-        // 初始化密码更新时间(用于 JWT 失效校验)
-        if (employee.getPasswordUpdatedAt() == null) {
-            employee.setPasswordUpdatedAt(LocalDateTime.now());
-        }
         employeeMapper.insert(employee);
         return employee;
     }
@@ -109,10 +110,8 @@ public class EmployeeService {
         String pwd = employee.getPassword();
         if (pwd != null && !pwd.isBlank()
                 && !pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
-            // P1-6 校验密码长度(与全局策略一致:至少 8 位)
-            if (pwd.length() < 8) {
-                throw new BusinessException("密码至少8位");
-            }
+            // P2-1 密码复杂度校验(用户显式修改密码时必须满足复杂度要求)
+            PasswordValidator.validate(pwd);
             employee.setPassword(passwordEncoder.encode(pwd));
             // P1-1 同步更新密码修改时间,使旧 token 失效
             employee.setPasswordUpdatedAt(LocalDateTime.now());
@@ -159,7 +158,10 @@ public class EmployeeService {
                     throw new BusinessException("卡号已存在");
                 }
                 e.setStoreId(storeId);
-                if (e.getIsDeleted() == null) e.setIsDeleted(0);
+                // P1-6 修复 Mass Assignment:批量导入也强制重置敏感字段
+                e.setId(null);
+                e.setIsDeleted(0);
+                e.setPasswordUpdatedAt(LocalDateTime.now());
                 if (e.getStatus() == null) e.setStatus(1);
                 if (e.getBalance() == null) {
                     e.setBalance(java.math.BigDecimal.ZERO);
@@ -176,7 +178,10 @@ public class EmployeeService {
                     usedDefault = true;
                 }
                 if (!pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
-                    if (pwd.length() < 8) {
+                    // P2-1 密码复杂度校验:仅对用户显式提供的密码校验(默认密码跳过)
+                    if (!usedDefault) {
+                        PasswordValidator.validate(pwd);
+                    } else if (pwd.length() < 8) {
                         throw new BusinessException("密码至少8位");
                     }
                     pwd = passwordEncoder.encode(pwd);
@@ -322,13 +327,13 @@ public class EmployeeService {
         return result;
     }
 
-    /** 简易员工 VO(脱敏,不含密码) */
+    /** 简易员工 VO(脱敏,不含密码;P2-6 手机号脱敏) */
     private Map<String, Object> employeeToVO(Employee e) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", e.getId());
         m.put("storeId", e.getStoreId());
         m.put("cardNo", e.getCardNo());
-        m.put("phone", e.getPhone());
+        m.put("phone", maskPhone(e.getPhone()));
         m.put("name", e.getName());
         m.put("avatar", e.getAvatar());
         m.put("departmentId", e.getDepartmentId());
@@ -337,5 +342,11 @@ public class EmployeeService {
         m.put("createdAt", e.getCreatedAt());
         m.put("updatedAt", e.getUpdatedAt());
         return m;
+    }
+
+    /** P2-6 手机号脱敏:保留前 3 后 4 */
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.length() < 11) return phone;
+        return phone.substring(0, 3) + "****" + phone.substring(7);
     }
 }
