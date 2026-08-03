@@ -140,16 +140,24 @@ DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null |
                 git rev-parse --verify "refs/remotes/origin/$DEPLOY_BRANCH" 2>/dev/null || \
                 echo "")
 
+# 从远程仓库 clone(避免本地路径含中文导致 clone 失败)
+REMOTE_URL=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
+if [ -z "$REMOTE_URL" ]; then
+    error "无法获取远程仓库地址(origin remote 未配置)"
+    exit 1
+fi
+info "远程仓库: $REMOTE_URL"
+
 if [ -z "$DEPLOY_EXISTS" ]; then
     info "deploy 分支不存在,创建 orphan 分支..."
     # 先基于 main clone,再改造成 orphan 分支
-    git clone --quiet --no-local "$PROJECT_DIR" "$WORKTREE_DIR"
+    git clone --quiet "$REMOTE_URL" "$WORKTREE_DIR"
     cd "$WORKTREE_DIR"
     git checkout --orphan "$DEPLOY_BRANCH"
     git rm -rf . 2>/dev/null || true
 else
     info "deploy 分支已存在,clone 检出..."
-    git clone --quiet --no-local --branch "$DEPLOY_BRANCH" "$PROJECT_DIR" "$WORKTREE_DIR"
+    git clone --quiet --branch "$DEPLOY_BRANCH" "$REMOTE_URL" "$WORKTREE_DIR"
     cd "$WORKTREE_DIR"
 fi
 
@@ -269,11 +277,7 @@ H5: v${H5_VER}
 
 info "提交完成"
 
-# 推送(clone 的 origin 指向本地项目目录,需重置为真实远程)
-REMOTE_URL=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
-if [ -n "$REMOTE_URL" ]; then
-    git remote set-url origin "$REMOTE_URL"
-fi
+# 推送(clone 的 origin 已指向 GitHub 远程)
 info "推送 deploy 分支到远程..."
 git push origin "$DEPLOY_BRANCH" --force 2>/dev/null || {
     warn "force 推送失败,尝试普通推送..."
