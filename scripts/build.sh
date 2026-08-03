@@ -79,12 +79,21 @@ build_backend() {
         "$MAVEN_IMAGE" \
         sh -c "mvn clean package -Dmaven.test.skip=true -B -s settings-aliyun.xml"
 
-    # 复制产物
+    # 复制产物(jar 文件名含版本号,用通配符匹配避免版本耦合)
+    # 排除 -sources.jar / -javadoc.jar / plain.jar(原 jar)
+    local jar_file
+    jar_file=$(ls "$PROJECT_DIR/backend/target/enterprise-canteen-"*.jar 2>/dev/null | grep -v -E 'sources|javadoc|plain' | head -1)
+    if [ -z "$jar_file" ]; then
+        error "未找到后端构建产物: enterprise-canteen-*.jar"
+        error "请检查 backend/target/ 目录"
+        exit 1
+    fi
+    info "构建产物: $(basename "$jar_file")"
     # deploy/ 可能是 sudo 部署时 root 所有,canteen 用户无权覆盖,自动修复权限
-    if ! cp "$PROJECT_DIR/backend/target/enterprise-canteen-0.0.1.jar" "$DEPLOY_DIR/backend/app.jar" 2>/dev/null; then
+    if ! cp "$jar_file" "$DEPLOY_DIR/backend/app.jar" 2>/dev/null; then
         info "deploy/ 目录权限不足,尝试 sudo 修复..."
         sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" 2>/dev/null || true
-        cp "$PROJECT_DIR/backend/target/enterprise-canteen-0.0.1.jar" "$DEPLOY_DIR/backend/app.jar"
+        cp "$jar_file" "$DEPLOY_DIR/backend/app.jar"
     fi
     # 清理临时 settings
     rm -f "$settings_file"
