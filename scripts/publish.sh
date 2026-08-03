@@ -129,7 +129,10 @@ info "产物构建完成"
 #==============================================================
 step "步骤 2/5 准备 deploy 分支"
 
-WORKTREE_DIR=$(mktemp -d /tmp/canteen-deploy.XXXXXX)
+# Windows Git Bash 的 /tmp 映射到受限目录,改用项目父目录下的临时工作区
+WORKTREE_DIR="$PROJECT_DIR/../.canteen-deploy-worktree"
+rm -rf "$WORKTREE_DIR"
+mkdir -p "$WORKTREE_DIR"
 
 # 检查 deploy 分支是否存在(本地或远程)
 DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null || \
