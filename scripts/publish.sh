@@ -124,6 +124,15 @@ if [ "$SCOPE" = "frontend" ] || [ "$SCOPE" = "all" ]; then
 fi
 info "产物构建完成"
 
+# 捕获主仓库信息(此时仍在 PROJECT_DIR 目录,避免中文路径 + MSYS_NO_PATHCONV 冲突)
+REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+if [ -z "$REMOTE_URL" ]; then
+    error "无法获取远程仓库地址(origin remote 未配置)"
+    exit 1
+fi
+MAIN_SHA=$(git rev-parse --short HEAD)
+info "远程仓库: $REMOTE_URL  主分支 SHA: $MAIN_SHA"
+
 #==============================================================
 # 步骤 2:准备 deploy 分支(本地 clone)
 #==============================================================
@@ -139,14 +148,6 @@ rm -rf "$WORKTREE_DIR"
 DEPLOY_EXISTS=$(git rev-parse --verify "refs/heads/$DEPLOY_BRANCH" 2>/dev/null || \
                 git rev-parse --verify "refs/remotes/origin/$DEPLOY_BRANCH" 2>/dev/null || \
                 echo "")
-
-# 从远程仓库 clone(避免本地路径含中文导致 clone 失败)
-REMOTE_URL=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
-if [ -z "$REMOTE_URL" ]; then
-    error "无法获取远程仓库地址(origin remote 未配置)"
-    exit 1
-fi
-info "远程仓库: $REMOTE_URL"
 
 if [ -z "$DEPLOY_EXISTS" ]; then
     info "deploy 分支不存在,创建 orphan 分支..."
@@ -273,7 +274,7 @@ git commit -m "deploy: v${VERSION} (${SCOPE})
 H5: v${H5_VER}
 
 发布时间: $(date '+%Y-%m-%d %H:%M:%S')
-源码: main@$(git -C "$PROJECT_DIR" rev-parse --short HEAD)" --allow-empty
+源码: main@${MAIN_SHA}" --allow-empty
 
 info "提交完成"
 
@@ -297,7 +298,7 @@ echo -e "${GREEN}==========================================${NC}"
 echo "  系统版本: v${VERSION}"
 echo "  后端: v${BE_VER}  管理后台: v${HW_VER}  H5: v${H5_VER}"
 echo "  发布范围: ${SCOPE}"
-echo "  源码提交: main@$(git -C "$PROJECT_DIR" rev-parse --short HEAD)"
+echo "  源码提交: main@${MAIN_SHA}"
 echo ""
 echo "  服务器更新方式:"
 echo "    canteen → 1) 升级全部"
