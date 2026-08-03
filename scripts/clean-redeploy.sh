@@ -16,7 +16,8 @@
 set -e
 
 PROJECT_DIR="/opt/canteen"
-REPO_URL="https://github.com/MingTu01/canteen.git"
+# 国内服务器使用 gh.llkk.cc 加速(ghproxy.net 不稳定,易断流)
+REPO_URL="https://gh.llkk.cc/https://github.com/MingTu01/canteen.git"
 BRANCH="deploy"
 
 # 颜色

@@ -66,7 +66,7 @@ sudo mkdir -p /opt/canteen
 sudo chown -R $(whoami):$(whoami) /opt/canteen
 
 # 2. 用普通用户克隆 deploy 分支(不要 sudo clone!)
-git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone -b deploy https://gh.llkk.cc/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
 # 3. 赋予执行权限
@@ -505,7 +505,7 @@ sudo mkdir -p /opt/canteen
 sudo chown -R $(whoami):$(whoami) /opt/canteen
 
 # 用普通用户克隆(这样 /opt/canteen 直接归你所有,无需后续 chown)
-git clone -b deploy https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone -b deploy https://gh.llkk.cc/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 chmod +x *.sh scripts/*.sh
 ```
