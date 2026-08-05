@@ -87,9 +87,11 @@ services:
       --rename-command CONFIG \"\""
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?必须配置 REDIS_PASSWORD}
+      # P2 修复:REDISCLI_AUTH 避免命令行 -a 参数产生 stderr 警告噪音
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?必须配置 REDIS_PASSWORD}
     healthcheck:
-      # P1-4:带密码的 ping 检查
-      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      # P1-4:带密码的 ping 检查(使用 REDISCLI_AUTH 环境变量,无需 -a 参数)
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -1,9 +1,9 @@
 {
   "backend": {
-    "version": "0.0.5",
+    "version": "0.0.6",
     "name": "后端服务",
     "source": "backend/pom.xml",
-    "changelog": "深度审查修复:健康检查DB/Redis DOWN返回503(修复容器误报健康)/AdminInitializer FORCE竞态(标记文件防重复重置)/V11/V15/V16迁移幂等性(MySQL8兼容)/init-db-user权限收紧(flyway_schema_history只读)"
+    "changelog": "P0修复Redis DOWN:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x要求)/健康检查Redis连接资源泄漏(try-with-resources)/分阶段启动消除backend与init-db-user竞争/flyway_schema_history权限回收检查表存在性"
   },
   "admin-web": {
     "version": "0.0.3",
@@ -24,9 +24,9 @@
     "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
   },
   "system": {
-    "version": "0.0.7",
+    "version": "0.0.8",
     "name": "系统整体版本",
     "source": "VERSIONS.json",
-    "changelog": "P0修复:init-db-user.sh未执行(canteen_app用户未创建导致后端无法连接DB)/移除docker-compose错误挂载/init-db-user由deploy.sh在MySQL healthy后调用/统一GitHub加速器为api.gitproxy.dev"
+    "changelog": "P0修复Redis连接:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x)/deploy.sh分阶段启动(MySQL→init-db-user→backend→回收权限)/init-db-user.sh检查表存在性/set -e死代码修复/Redis healthcheck消除密码警告"
   }
 }

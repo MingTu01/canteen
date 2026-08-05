@@ -27,6 +27,14 @@ spring:
     port: 6379
     password:
     database: 0
+  # P0 修复:Spring Boot 3.x 已将 spring.redis.* 迁移到 spring.data.redis.*
+  # 保留上方 spring.redis 兼容旧文档,实际配置见 spring.data.redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
 
   # 优雅停机:每个阶段最长等待时间
   lifecycle:

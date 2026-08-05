@@ -718,12 +718,15 @@ start_services() {
     # P1 修复:补全 logs 目录(后端日志写入需要)
     chown -R "${puid}:${pgid}" backup uploads logs 2>/dev/null || warn "chown backup/uploads/logs 失败(不影响部署,但容器内可能无法写入)"
 
-    info "启动 Docker Compose..."
-    docker compose up -d
+    # P0 修复:分阶段启动,消除 backend 与 init-db-user.sh 竞争
+    # 之前 docker compose up -d 一次性启动所有服务,backend 在 MySQL healthy 后
+    # 立即启动,与 init-db-user.sh 同时执行,可能导致 backend 用未创建的用户连接失败
 
-    # P0 修复:等待 MySQL healthy 后创建应用专用用户(canteen_app)
-    # init-db-user.sh 设计为宿主机执行(通过 docker exec 操作 MySQL),
-    # 不能挂载到 /docker-entrypoint-initdb.d/(容器内无 docker 命令会静默失败)
+    # 阶段 1:仅启动 MySQL 和 Redis(不启动 backend/admin-web/h5)
+    info "阶段 1/3:启动 MySQL 和 Redis..."
+    docker compose up -d mysql redis
+
+    # 等待 MySQL healthy
     info "等待 MySQL 健康检查通过..."
     local mysql_wait=0
     while [[ $mysql_wait -lt 60 ]]; do
@@ -739,8 +742,12 @@ start_services() {
         error "MySQL 启动超时,无法创建应用用户"
         exit 1
     fi
+
+    # 阶段 2:创建应用专用用户(此时 backend 尚未启动,无竞争)
+    # init-db-user.sh 设计为宿主机执行(通过 docker exec 操作 MySQL),
+    # 不能挂载到 /docker-entrypoint-initdb.d/(容器内无 docker 命令会静默失败)
     if [[ -f scripts/init-db-user.sh ]]; then
-        info "创建 MySQL 应用专用用户(canteen_app,最小权限)..."
+        info "阶段 2/3:创建 MySQL 应用专用用户(canteen_app,最小权限)..."
         chmod +x scripts/init-db-user.sh 2>/dev/null || true
         if ! bash scripts/init-db-user.sh; then
             error "init-db-user.sh 执行失败,canteen_app 用户未创建,后端将无法连接数据库"
@@ -750,8 +757,12 @@ start_services() {
         warn "scripts/init-db-user.sh 不存在,跳过应用用户创建(后端可能无法连接数据库)"
     fi
 
+    # 阶段 3:启动 backend 和前端服务(Flyway 将创建 flyway_schema_history 表)
+    info "阶段 3/3:启动后端和前端服务..."
+    docker compose up -d
+
     info "等待后端健康检查通过..."
-    local max_wait=120
+    local max_wait=180
     local waited=0
     while [[ $waited -lt $max_wait ]]; do
         if docker compose ps backend | grep -q "healthy"; then
@@ -775,6 +786,13 @@ start_services() {
         echo ""
         warn "服务可能已部分启动,可用 ./deploy.sh stop 停止后排查问题"
         exit 1
+    fi
+
+    # 阶段 4:backend healthy 后,Flyway 已建表,重新执行 init-db-user.sh 回收元数据表权限
+    # 首次部署时 flyway_schema_history 表不存在,权限回收被跳过;此时表已存在,需补回收
+    if [[ -f scripts/init-db-user.sh ]]; then
+        info "回收 Flyway 元数据表写权限(首次部署后补执行)..."
+        bash scripts/init-db-user.sh 2>/dev/null || warn "元数据表权限回收失败(不影响运行,但建议手动执行 init-db-user.sh)"
     fi
 }
 

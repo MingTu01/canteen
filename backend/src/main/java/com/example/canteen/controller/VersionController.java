@@ -115,8 +115,8 @@ public class VersionController {
 
         // 检查 Redis 连接
         boolean redisUp = false;
-        try {
-            redisConnectionFactory.getConnection().ping();
+        try (org.springframework.data.redis.connection.RedisConnection conn = redisConnectionFactory.getConnection()) {
+            conn.ping();
             redisUp = true;
             result.put("redis", "UP");
         } catch (Exception e) {

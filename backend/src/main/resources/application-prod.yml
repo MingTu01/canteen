@@ -20,6 +20,14 @@ spring:
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD:}
     database: 0
+  # P0 修复:Spring Boot 3.x 已将 spring.redis.* 迁移到 spring.data.redis.*
+  # 上方 spring.redis.* 不会被识别,实际生效的是 spring.data.redis.*
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
 
   flyway:
     enabled: true
