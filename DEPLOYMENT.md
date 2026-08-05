@@ -85,11 +85,8 @@
 
 ```bash
 # 1. 克隆项目（使用 GitHub 加速器，国内推荐）
-# 加速器任选其一：
-#   https://ghproxy.net/https://github.com/MingTu01/canteen.git
-#   https://gh.llkk.cc/https://github.com/MingTu01/canteen.git
-#   https://hub.gitmirror.com/https://github.com/MingTu01/canteen.git
-git clone https://ghproxy.net/https://github.com/MingTu01/canteen.git /opt/canteen
+# 加速器：https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git
+git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
 # 2. 一键部署（自动安装 Docker + 配置国内源 + 构建 + 启动）
@@ -113,7 +110,7 @@ sudo ./deploy.sh
 如果服务器已安装 Docker，可跳过环境安装：
 
 ```bash
-git clone https://gh.llkk.cc/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 chmod +x deploy.sh
 ./deploy.sh --skip-env
@@ -313,22 +310,19 @@ sudo systemctl restart docker
 
 ### 4.4 GitHub 加速器（克隆代码）
 
-国内克隆 GitHub 仓库推荐使用以下加速器（任选其一）：
+国内克隆 GitHub 仓库推荐使用以下加速器：
 
 | 加速器 | 克隆命令 | 稳定性 |
 |--------|----------|--------|
-| **gh.llkk.cc** | `git clone https://gh.llkk.cc/https://github.com/MingTu01/canteen.git` | ★★★ 推荐 |
-| gitmirror | `git clone https://hub.gitmirror.com/https://github.com/MingTu01/canteen.git` | ★★ |
-| ghproxy.net | `git clone https://ghproxy.net/https://github.com/MingTu01/canteen.git` | ★ 易断流 |
-| gitclone | `git clone https://gitclone.com/github.com/MingTu01/canteen.git` | ★★ |
+| **gitproxy.dev** | `git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git` | ★★★ 推荐 |
 
-> **注意：** 克隆大仓库（如 deploy 分支含构建产物）时,ghproxy.net 经常出现 `HTTP/2 stream was not closed cleanly` 错误,建议优先使用 gh.llkk.cc。
+> **注意：** 克隆大仓库（如 deploy 分支含构建产物）时,优先使用 api.gitproxy.dev。
 
 全局配置（一劳永逸）：
 ```bash
-git config --global url."https://gh.llkk.cc/https://github.com/".insteadOf "https://github.com/"
+git config --global url."https://api.gitproxy.dev/https://github.com/".insteadOf "https://github.com/"
 # 取消配置:
-# git config --global --unset url."https://gh.llkk.cc/https://github.com/".insteadOf
+# git config --global --unset url."https://api.gitproxy.dev/https://github.com/".insteadOf
 ```
 
 ---

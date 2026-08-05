@@ -8,7 +8,7 @@
 
 ```bash
 # 国内推荐使用 GitHub 加速器克隆（任选其一）
-git clone https://gh.llkk.cc/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
 # 一键部署（自动安装 Docker + 国内源 + 构建 + 启动）
@@ -95,7 +95,7 @@ canteen/
 
 ```bash
 # 1. 克隆项目（国内使用 GitHub 加速器）
-git clone https://gh.llkk.cc/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
 # 2. 一键部署（自动安装 Docker + 配置国内源 + 构建 + 启动）
