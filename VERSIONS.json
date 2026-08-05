@@ -24,9 +24,9 @@
     "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
   },
   "system": {
-    "version": "0.0.6",
+    "version": "0.0.7",
     "name": "系统整体版本",
     "source": "VERSIONS.json",
-    "changelog": "部署链路深度审查修复:备份密码sh -c二次展开(密码截断)/init-db-user SQL注入/回退顺序(停服务→代码→DB→产物)/健康检查超时阻断/pipefail+gzip校验/端口检查补全/磁盘检查/依赖检查/rand_hex用urandom/logs chown"
+    "changelog": "P0修复:init-db-user.sh未执行(canteen_app用户未创建导致后端无法连接DB)/移除docker-compose错误挂载/init-db-user由deploy.sh在MySQL healthy后调用/统一GitHub加速器为api.gitproxy.dev"
   }
 }

@@ -48,8 +48,9 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backup:/backup
-      # P1-3: MySQL 应用专用用户初始化脚本(仅首次初始化时执行)
-      - ./scripts/init-db-user.sh:/docker-entrypoint-initdb.d/init-db-user.sh:ro
+      # 注:init-db-user.sh 不挂载到 docker-entrypoint-initdb.d/
+      # 因为该脚本通过 docker exec 操作 MySQL(宿主机执行),容器内无 docker 命令
+      # init-db-user.sh 由 deploy.sh 的 start_services() 在 MySQL healthy 后调用
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci

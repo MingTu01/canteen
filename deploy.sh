@@ -721,6 +721,35 @@ start_services() {
     info "启动 Docker Compose..."
     docker compose up -d
 
+    # P0 修复:等待 MySQL healthy 后创建应用专用用户(canteen_app)
+    # init-db-user.sh 设计为宿主机执行(通过 docker exec 操作 MySQL),
+    # 不能挂载到 /docker-entrypoint-initdb.d/(容器内无 docker 命令会静默失败)
+    info "等待 MySQL 健康检查通过..."
+    local mysql_wait=0
+    while [[ $mysql_wait -lt 60 ]]; do
+        if docker compose ps mysql 2>/dev/null | grep -q "healthy"; then
+            break
+        fi
+        sleep 3
+        mysql_wait=$((mysql_wait + 3))
+        printf "."
+    done
+    echo ""
+    if [[ $mysql_wait -ge 60 ]]; then
+        error "MySQL 启动超时,无法创建应用用户"
+        exit 1
+    fi
+    if [[ -f scripts/init-db-user.sh ]]; then
+        info "创建 MySQL 应用专用用户(canteen_app,最小权限)..."
+        chmod +x scripts/init-db-user.sh 2>/dev/null || true
+        if ! bash scripts/init-db-user.sh; then
+            error "init-db-user.sh 执行失败,canteen_app 用户未创建,后端将无法连接数据库"
+            exit 1
+        fi
+    else
+        warn "scripts/init-db-user.sh 不存在,跳过应用用户创建(后端可能无法连接数据库)"
+    fi
+
     info "等待后端健康检查通过..."
     local max_wait=120
     local waited=0
