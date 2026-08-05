@@ -152,7 +152,9 @@ get_server_ip() {
 #==============================================================
 check_dependencies() {
     local missing=()
-    for cmd in docker curl tar gzip; do
+    # 注意:Docker 由 install_docker() 自动安装,此处不校验 docker,
+    # 否则全新服务器会因缺少 docker 而在此处直接退出,无法触发后续一键安装。
+    for cmd in curl tar gzip; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if ! command -v openssl &>/dev/null; then
@@ -1016,6 +1018,10 @@ cmd_deploy() {
     if [[ -f "$PROJECT_DIR/.env" ]]; then
         chmod 600 "$PROJECT_DIR/.env"
     fi
+
+    # P2-8:部署完成后清理 .env 中的临时敏感变量(INIT_ADMIN_PASSWORD / INIT_ADMIN_FORCE)
+    # 密码已在数据库中,无需在 .env 明文保留,避免后续重启后端时被 INIT_ADMIN_FORCE 覆盖
+    cleanup_sensitive_env
 
     verify_and_summary
 }

@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl && 
     echo "Asia/Shanghai" > /etc/timezone && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=builder /build/target/enterprise-canteen-0.0.1.jar app.jar
+# 使用通配符匹配 jar(文件名含版本号),避免版本升级后(如 0.0.1→0.0.7)构建失败
+COPY --from=builder /build/target/enterprise-canteen-*.jar app.jar
 # 显式创建 uploads 目录:FileController 写入 ./uploads/(容器内 /app/uploads/)
 # 运行时也会兜底创建,但显式创建可避免未来切换非 root 用户时权限问题
 RUN mkdir -p /app/uploads

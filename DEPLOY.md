@@ -90,11 +90,12 @@ exit
    - JWT 密钥（自动生成 64 位随机十六进制）
    - **超管账号密码**（自定义设置，至少 8 位）
    - 自动 chown `.env` 给当前用户
-4. **构建运行时镜像**（首次需要，仅含 JRE+curl，不含业务代码；deploy 分支已含产物，无需构建）
-5. **启动服务**（Docker Compose 编排）
-6. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
-7. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
-8. **部署验证**（健康检查 + 访问地址输出）
+4. **构建业务产物**（deploy 分支已含产物时自动跳过；main 分支则在 Docker 容器中构建 jar/dist）
+5. **构建运行时镜像**（首次需要，仅含 JRE+curl，不含业务代码；deploy 分支已含产物，无需构建）
+6. **启动服务**（Docker Compose 分阶段启动：MySQL→创建应用用户→backend→回收元数据权限）
+7. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
+8. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
+9. **部署验证**（健康检查 + 访问地址输出）
    - 自动 chown 项目目录给当前用户（避免 dubious ownership）
 
 > **重要：** 
@@ -108,13 +109,13 @@ exit
 
 #### 步骤 1：获取 ZIP 包
 
-开发机构建后生成的 ZIP 包：`canteen-deploy-v0.0.6.zip`（约 47MB），包含全部部署产物。
+开发机构建后生成的 ZIP 包：`canteen-deploy-v0.0.8.zip`（约 47MB），包含全部部署产物。
 
 #### 步骤 2：上传到服务器
 
 ```bash
 # 用 scp 上传（替换为你的服务器 IP 和用户名）
-scp canteen-deploy-v0.0.6.zip canteen@<服务器IP>:/tmp/
+scp canteen-deploy-v0.0.8.zip canteen@<服务器IP>:/tmp/
 
 # 或用 1Panel 面板上传到 /tmp/ 目录
 ```
@@ -128,7 +129,7 @@ sudo chown -R $(whoami):$(whoami) /opt/canteen
 
 # 解压 ZIP 包到 /opt/canteen
 cd /opt/canteen
-unzip /tmp/canteen-deploy-v0.0.6.zip
+unzip /tmp/canteen-deploy-v0.0.8.zip
 chmod +x *.sh scripts/*.sh
 
 # 用 sudo 运行 deploy.sh
@@ -304,8 +305,8 @@ canteen
 ╔══════════════════════════════════════════════╗
 ║   企业智慧食堂系统 - 管理面板                 ║
 ╠══════════════════════════════════════════════╣
-║  系统版本: v0.0.3    状态: ● 全部运行中       ║
-║  后端: v0.0.2  管理后台: v0.0.2  H5: v0.0.2  ║
+║  系统版本: v0.0.8    状态: ● 全部运行中       ║
+║  后端: v0.0.7  管理后台: v0.0.3  H5: v0.0.2  ║
 ║  终端: v1.0.0  分支: deploy                   ║
 ╠══════════════════════════════════════════════╣
 ║                                              ║

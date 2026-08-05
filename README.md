@@ -159,7 +159,7 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 
 ## 版本规范
 
-- 当前版本：**V0.0.1**
+- 当前版本：**V0.0.8**（各模块版本号集中管理于 `VERSIONS.json`）
 - 版本号统一管理：`MAJOR.MINOR.PATCH`（语义化版本）
 - 版本号文件（修改时必须同步更新）：
   - `backend/src/main/resources/version.json`

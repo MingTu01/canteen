@@ -1,9 +1,9 @@
 {
   "backend": {
-    "version": "0.0.6",
+    "version": "0.0.7",
     "name": "后端服务",
     "source": "backend/pom.xml",
-    "changelog": "P0修复Redis DOWN:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x要求)/健康检查Redis连接资源泄漏(try-with-resources)/分阶段启动消除backend与init-db-user竞争/flyway_schema_history权限回收检查表存在性"
+    "changelog": "V0.0.7 二轮安全审查(攻击面):日志手机号脱敏(P2)/V0.0.6 P0修复Redis DOWN:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x要求)/健康检查Redis连接资源泄漏(try-with-resources)/分阶段启动消除backend与init-db-user竞争/flyway_schema_history权限回收检查表存在性"
   },
   "admin-web": {
     "version": "0.0.3",

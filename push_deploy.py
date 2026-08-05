@@ -50,6 +50,7 @@ def main():
     be_ver = versions["backend"]["version"]
     hw_ver = versions["admin-web"]["version"]
     h5_ver = versions["h5"]["version"]
+    zip_name = f"canteen-deploy-v{version}.zip"
     print(f"  系统版本: v{version}")
     print(f"  后端: v{be_ver}  管理后台: v{hw_ver}  H5: v{h5_ver}")
 
@@ -145,7 +146,7 @@ def main():
         print("\n[错误] deploy 分支推送失败(3次重试后仍失败)")
         print("  可能原因:网络不稳定或 jar 文件太大(45MB)")
         print("  解决方案:")
-        print("    1. 使用 zip 包手动部署: canteen-deploy-v0.0.6.zip")
+        print("    1. 使用 zip 包手动部署: " + zip_name)
         print("    2. 稍后重试: python push_deploy.py")
         print("    3. 在网络稳定时重试")
         # 不退出,继续清理

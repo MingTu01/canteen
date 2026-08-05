@@ -165,7 +165,8 @@ public class WechatAuthService {
         bindTokenCache.remove(bindToken);
         rateLimiter.recordSuccess(lockKey);
 
-        log.info("员工 {}({}) 绑定微信 openid 成功", employee.getName(), employee.getPhone());
+        // P2 数据安全:日志中手机号脱敏(保留前 3 后 4),避免 PII 明文泄漏到日志文件
+        log.info("员工 {}({}) 绑定微信 openid 成功", employee.getName(), maskPhone(employee.getPhone()));
         String token = jwtTokenProvider.generateEmployeeToken(employee);
         return EmployeeAuthService.LoginResult.success(token, employee);
     }
@@ -204,6 +205,12 @@ public class WechatAuthService {
             log.error("调用微信 API 换取 openid 失败: {}", e.getMessage());
             return null;
         }
+    }
+
+    /** P2 手机号脱敏:保留前 3 后 4,不足 11 位原样返回(日志用) */
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.length() < 11) return phone;
+        return phone.substring(0, 3) + "****" + phone.substring(7);
     }
 
     /** 绑定令牌缓存条目 */

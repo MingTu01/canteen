@@ -7,7 +7,19 @@ import zipfile
 import sys
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_ZIP = os.path.join(os.path.dirname(PROJECT_DIR), "canteen-deploy-v0.0.6.zip")
+
+
+def get_system_version():
+    """从 VERSIONS.json 读取系统整体版本,用于生成 zip 文件名"""
+    try:
+        import json
+        with open(os.path.join(PROJECT_DIR, "VERSIONS.json"), encoding="utf-8") as f:
+            return json.load(f)["system"]["version"]
+    except Exception:
+        return "x"
+
+
+OUTPUT_ZIP = os.path.join(os.path.dirname(PROJECT_DIR), f"canteen-deploy-v{get_system_version()}.zip")
 
 # 需要打包的文件/目录(相对于项目根目录)
 # 格式: (相对路径, 在zip中的路径)

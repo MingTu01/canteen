@@ -16,10 +16,14 @@
 #   docker-compose.yml         # 编排配置
 #   .env.example               # 环境变量模板
 #   canteen.sh                 # 管理面板
+#   deploy.sh                  # 一键部署 CLI(服务器用)
 #   scripts/upgrade.sh         # 服务器升级脚本(免构建版)
 #   scripts/snapshot.sh        # 快照脚本
 #   scripts/backup.sh          # 备份脚本
 #   scripts/restore.sh         # 恢复脚本
+#   scripts/clean-redeploy.sh  # 完全清理重部署脚本
+#   scripts/init-db-user.sh    # 应用数据库用户初始化(deploy.sh 分阶段启动依赖)
+#   scripts/cron_backup.sh     # 定时备份脚本
 #   VERSIONS.json              # 版本信息
 #==============================================================
 set -e
@@ -222,6 +226,10 @@ cp "$PROJECT_DIR/.env.example" .
 cp "$PROJECT_DIR/canteen.sh" .
 chmod +x canteen.sh
 
+# deploy.sh(一键部署 CLI,服务器克隆 deploy 分支后依赖它;pack_deploy_zip.py / push_deploy.py 均包含)
+cp "$PROJECT_DIR/deploy.sh" .
+chmod +x deploy.sh
+
 # VERSIONS.json
 cp "$PROJECT_DIR/VERSIONS.json" .
 
@@ -230,8 +238,9 @@ mkdir -p backend
 cp "$PROJECT_DIR/backend/Dockerfile.runtime" backend/
 
 # 运行时脚本(仅复制服务器需要的,不含 build.sh / publish.sh)
+# 注意:init-db-user.sh 必须包含,deploy.sh 分阶段启动依赖它创建应用数据库用户
 mkdir -p scripts
-for script in upgrade.sh snapshot.sh backup.sh restore.sh clean-redeploy.sh; do
+for script in upgrade.sh snapshot.sh backup.sh restore.sh clean-redeploy.sh init-db-user.sh cron_backup.sh; do
     if [ -f "$PROJECT_DIR/scripts/$script" ]; then
         cp "$PROJECT_DIR/scripts/$script" scripts/
         chmod +x "scripts/$script"

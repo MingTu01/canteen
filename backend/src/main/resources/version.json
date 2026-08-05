@@ -1,5 +1,5 @@
 {
-  "version": "0.0.6",
+  "version": "0.0.7",
   "buildTime": "2026-08-05",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
@@ -8,6 +8,7 @@
     "V0.0.3 安全修复P1-P2: 备份脱敏/Mass Assignment修复/密码复杂度校验/Token黑名单fail-closed/手机号脱敏",
     "V0.0.4 修复SchemaMigrationRunner权限:DDL迁移移交Flyway V16/业务表创建不再失败/Flyway用户显式配置",
     "V0.0.5 深度审查修复:健康检查DB/Redis DOWN返回503/AdminInitializer FORCE竞态(标记文件)/V11/V15/V16迁移幂等性/init-db-user权限收紧",
-    "V0.0.6 P0修复Redis DOWN:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x要求)/健康检查Redis连接资源泄漏(try-with-resources)/deploy.sh分阶段启动消除backend与init-db-user竞争"
+    "V0.0.6 P0修复Redis DOWN:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x要求)/健康检查Redis连接资源泄漏(try-with-resources)/deploy.sh分阶段启动消除backend与init-db-user竞争",
+    "V0.0.7 二轮安全审查(攻击面):日志手机号脱敏(P2)/确认注入/授权/脱敏/配置/并发各项防护均无遗漏"
   ]
 }

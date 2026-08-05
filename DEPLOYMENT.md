@@ -86,7 +86,7 @@
 ```bash
 # 1. 克隆项目（使用 GitHub 加速器，国内推荐）
 # 加速器：https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git
-git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 
 # 2. 一键部署（自动安装 Docker + 配置国内源 + 构建 + 启动）
@@ -110,7 +110,7 @@ sudo ./deploy.sh
 如果服务器已安装 Docker，可跳过环境安装：
 
 ```bash
-git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 chmod +x deploy.sh
 ./deploy.sh --skip-env
