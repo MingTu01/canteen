@@ -6,16 +6,16 @@
     "changelog": "V0.0.7 二轮安全审查(攻击面):日志手机号脱敏(P2)/V0.0.6 P0修复Redis DOWN:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x要求)/健康检查Redis连接资源泄漏(try-with-resources)/分阶段启动消除backend与init-db-user竞争/flyway_schema_history权限回收检查表存在性"
   },
   "admin-web": {
-    "version": "0.0.3",
+    "version": "0.0.4",
     "name": "管理后台",
     "source": "admin-web/package.json",
-    "changelog": "安全修复P2-5:xlsx升级至0.20.3(CDN官方源,修复原型污染漏洞)"
+    "changelog": "V0.0.4 补HSTS安全头(Strict-Transport-Security)/V0.0.3 安全修复P2-5:xlsx升级至0.20.3(CDN官方源,修复原型污染漏洞)"
   },
   "h5": {
-    "version": "0.0.2",
+    "version": "0.0.3",
     "name": "H5订餐端",
     "source": "h5/package.json",
-    "changelog": "首次登录强制改密/修复我的页面退出登录/微信登录/通知公告活动展示优化"
+    "changelog": "V0.0.3 补HSTS安全头(Strict-Transport-Security)/V0.0.2 首次登录强制改密/修复我的页面退出登录/微信登录/通知公告活动展示优化"
   },
   "terminal": {
     "version": "1.0.0",
@@ -24,9 +24,9 @@
     "changelog": "正式版V1.0.0(独立EXE安装包,不参与Docker升级)"
   },
   "system": {
-    "version": "0.0.8",
+    "version": "0.0.9",
     "name": "系统整体版本",
     "source": "VERSIONS.json",
-    "changelog": "P0修复Redis连接:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x)/deploy.sh分阶段启动(MySQL→init-db-user→backend→回收权限)/init-db-user.sh检查表存在性/set -e死代码修复/Redis healthcheck消除密码警告"
+    "changelog": "V0.0.9 补admin-web/h5 HSTS安全头,P0修复版本一致/V0.0.8 P0修复Redis连接:spring.redis.*改为spring.data.redis.*(Spring Boot 3.x)"
   }
 }
