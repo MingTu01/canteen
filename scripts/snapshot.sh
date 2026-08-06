@@ -111,7 +111,19 @@ snapshot_create() {
 
     info "创建升级前快照: $ts"
     info "说明: $desc"
-    mkdir -p "$snap_path"
+
+    # 创建快照目录(失败时输出诊断信息,不因 set -e 直接退出)
+    if ! mkdir -p "$snap_path" 2>/dev/null; then
+        error "快照目录创建失败(权限不足)"
+        warn "  目标路径: $snap_path"
+        warn "  当前用户: $(whoami 2>/dev/null || echo unknown) (uid=$(id -u 2>/dev/null || echo '?'))"
+        warn "  父目录 backup/ 权限: $(ls -ld "$PROJECT_DIR/backup" 2>/dev/null || echo '不存在')"
+        warn ""
+        warn "修复方法:"
+        warn "  sudo chown -R \$(whoami):\$(whoami) backup/"
+        warn "  或: sudo chmod 777 backup/"
+        return 1
+    fi
 
     # 1. 数据库备份
     info "备份数据库..."
