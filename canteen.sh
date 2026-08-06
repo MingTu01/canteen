@@ -35,6 +35,28 @@ resolve_project_dir() {
 PROJECT_DIR="$(resolve_project_dir "$0")"
 cd "$PROJECT_DIR" || { echo "无法进入项目目录 $PROJECT_DIR"; exit 1; }
 
+# 确保运行时目录存在且可写(普通用户运行 canteen upgrade 时,backup/snapshots 创建不被拒绝)
+# 问题场景:sudo ./deploy.sh 部署后,backup/ uploads/ logs/ 属主是 root,
+# 后续普通用户运行 canteen upgrade 时,snapshot.sh 在 backup/ 下创建子目录会被 Permission denied。
+# 解决:启动时检查并创建(若已存在属主不对,提示用户 sudo chown)。
+ensure_runtime_dirs() {
+    for d in backup uploads logs; do
+        if [[ ! -d "$PROJECT_DIR/$d" ]]; then
+            mkdir -p "$PROJECT_DIR/$d" 2>/dev/null || {
+                echo -e "${RED}[ERROR]${NC} 无法创建 $PROJECT_DIR/$d (权限不足)"
+                echo "  请执行: sudo chown -R \$(whoami):\$(whoami) $PROJECT_DIR"
+                exit 1
+            }
+        fi
+        # 检查可写性
+        if [[ ! -w "$PROJECT_DIR/$d" ]]; then
+            echo -e "${YELLOW}[WARN]${NC} $PROJECT_DIR/$d 不可写(属主可能是 root)"
+            echo "  修复: sudo chown -R \$(whoami):\$(whoami) $PROJECT_DIR/$d"
+        fi
+    done
+}
+ensure_runtime_dirs
+
 # 颜色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
