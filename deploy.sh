@@ -57,6 +57,12 @@ cd "$PROJECT_DIR"
 # "detected dubious ownership" 错误。
 # 解决:sudo 运行时自动把项目目录所有权交给实际调用者(SUDO_USER),
 # root 仍有权限读写普通用户文件,不影响后续 sudo 部署。
+# P1 修复:显式覆盖 backup/uploads/logs 子目录
+# 原因:start_services() 中用 chown -R ${PUID}:${PGID} 修改这三个目录的属主,
+# 但若 PUID/PGID 与 SUDO_USER 的 UID/GID 不一致(如手动改过 .env),
+# 会导致后续普通用户运行 canteen upgrade 时 snapshot.sh 写入 backup/ 被拒绝。
+# 此处在部署结束时(chown 所有项目目录后)再次显式 chown 这三个运行时目录,
+# 确保它们归 SUDO_USER 所有(与 canteen 命令的运行用户一致)。
 fix_ownership() {
     if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
         local current_owner
@@ -65,6 +71,20 @@ fix_ownership() {
             info "修正项目目录所有权: ${current_owner} -> ${SUDO_USER}"
             chown -R "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR" 2>/dev/null || true
         fi
+
+        # 显式确保运行时子目录属主正确
+        # 这些目录可能由 start_services() 创建并 chown 给 PUID/PGID,
+        # 若 PUID/PGID 与 SUDO_USER 不一致,会导致后续 canteen upgrade 写入失败
+        for d in backup uploads logs; do
+            if [[ -d "$PROJECT_DIR/$d" ]]; then
+                local dir_owner
+                dir_owner=$(stat -c '%U' "$PROJECT_DIR/$d" 2>/dev/null || echo "")
+                if [[ -n "$dir_owner" ]] && [[ "$dir_owner" != "$SUDO_USER" ]]; then
+                    info "修正 ${d}/ 目录所有权: ${dir_owner} -> ${SUDO_USER}"
+                    chown -R "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR/$d" 2>/dev/null || true
+                fi
+            fi
+        done
     fi
 }
 

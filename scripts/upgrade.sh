@@ -30,7 +30,31 @@
 #==============================================================
 
 # 不用 set -e,因为我们要在失败时执行回退而非直接退出
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# 解析符号链接:支持通过 /usr/local/bin/canteen 软链接调用 canteen.sh,
+# 再由 canteen.sh 调用本脚本时,$0 仍是绝对路径;但若直接通过软链接调用,
+# 需用 readlink -f 解析真实路径,避免 dirname 得到 /usr/local/bin。
+resolve_project_dir() {
+    local src="$1"
+    # readlink -f 能解析多级符号链接(GNU coreutils, CentOS/Ubuntu 自带)
+    if command -v readlink &>/dev/null; then
+        local resolved
+        resolved=$(readlink -f "$src" 2>/dev/null) && [[ -n "$resolved" ]] && {
+            # upgrade.sh 在 scripts/ 目录下,父目录就是 PROJECT_DIR
+            echo "$(cd "$(dirname "$resolved")/.." && pwd)"
+            return
+        }
+    fi
+    # 回退:手动遍历 symlink(BSD/老旧系统)
+    while [[ -L "$src" ]]; do
+        local dir
+        dir=$(cd "$(dirname "$src")" && pwd)
+        src=$(readlink "$src")
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    echo "$(cd "$(dirname "$src")/.." && pwd)"
+}
+PROJECT_DIR="$(resolve_project_dir "$0")"
 cd "$PROJECT_DIR"
 
 SCOPE="${1:-all}"
@@ -68,6 +92,189 @@ read_env_var() {
         fi
     done < "$envfile"
     return 1
+}
+
+# 生成随机十六进制字符串(用于自动补全缺失的密码/密钥)
+rand_hex() {
+    if command -v openssl &>/dev/null; then
+        openssl rand -hex "$1"
+    else
+        # fallback: /dev/urandom(比时间戳安全,不可预测)
+        head -c "$1" /dev/urandom | od -A n -t x1 | tr -d ' \n'
+    fi
+}
+
+# 转义值中的单引号(单引号包裹的值中,单引号用 '\'' 转义)
+escape_env_value() {
+    local v="$1"
+    v="${v//\'/\'\\\'\'}"
+    printf '%s' "$v"
+}
+
+# 设置 .env 变量(若不存在则追加,存在则更新)
+# 用单引号包裹值,避免 $/空格/#/反引号 等 shell 特殊字符在 source 时被展开
+set_env_var() {
+    local key="$1"
+    local value="$2"
+    local envfile="$PROJECT_DIR/.env"
+
+    touch "$envfile"
+
+    local escaped_value
+    escaped_value=$(escape_env_value "$value")
+    local new_line="${key}='${escaped_value}'"
+
+    if grep -q "^${key}=" "$envfile" 2>/dev/null; then
+        # 更新已有行
+        local tmp
+        tmp=$(mktemp)
+        KEY="$key" LINE="$new_line" awk '
+            BEGIN { k = ENVIRON["KEY"]; line = ENVIRON["LINE"] }
+            index($0, k "=") == 1 { print line; next }
+            { print }
+        ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
+    else
+        # 追加新行(确保文件以换行符结尾,避免新行与旧行粘连)
+        # 用 printf 避免多余空行:仅在文件非空且末尾无换行时补一个换行
+        if [[ -s "$envfile" ]] && [[ "$(tail -c1 "$envfile" 2>/dev/null)" != $'\n' ]]; then
+            echo "" >> "$envfile"
+        fi
+        echo "$new_line" >> "$envfile"
+    fi
+
+    chmod 600 "$envfile"
+    # sudo 运行时 chown 给实际用户,避免后续 canteen.sh 写入失败
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
+    fi
+}
+
+#==============================================================
+# 校验 .env 完整性:检查 docker-compose.yml 需要的必需变量是否都存在
+# 缺失敏感变量(密码/密钥)自动生成随机值并追加
+# 缺失非敏感变量(如 PUID/PGID)用默认值追加
+# 返回: 0 = 成功(或已自动修复), 1 = 失败(无法修复)
+#==============================================================
+validate_env_completeness() {
+    local envfile="$PROJECT_DIR/.env"
+
+    if [[ ! -f "$envfile" ]]; then
+        error ".env 文件不存在: $envfile"
+        warn "请先运行 ./deploy.sh 部署,或从 .env.example 复制并配置"
+        return 1
+    fi
+
+    # 检查 .env 可写(自动修复需要写入)
+    if [[ ! -w "$envfile" ]]; then
+        error ".env 文件不可写: $envfile"
+        warn "  所有者: $(stat -c '%U' "$envfile" 2>/dev/null || echo '?'), 当前用户: $(whoami)"
+        warn "  请执行: sudo chown $(whoami):$(whoami) $envfile"
+        return 1
+    fi
+
+    # docker-compose.yml 中用 ${VAR:?...} 强制校验的必需变量(敏感:密码/密钥)
+    # 值为生成的随机字节数
+    local sensitive_keys=("MYSQL_ROOT_PASSWORD:16" "REDIS_PASSWORD:16" "JWT_SECRET:32")
+    # 可选但推荐配置的敏感变量(有默认空值,但配置后更安全)
+    local optional_sensitive_keys=("BACKUP_ENCRYPTION_KEY:32")
+    # 非敏感变量(有默认值,缺失则用默认值追加)
+    local default_keys=("PUID:1000" "PGID:1000" "JWT_EXPIRATION:86400000" "JWT_EMPLOYEE_EXPIRATION:2592000000" "JWT_TERMINAL_EXPIRATION:31536000000")
+
+    local missing_sensitive=()
+    local missing_default=()
+    local fixed_count=0
+
+    # 检查必需敏感变量
+    for entry in "${sensitive_keys[@]}"; do
+        local key="${entry%%:*}"
+        local val
+        val=$(read_env_var "$key" "$envfile" 2>/dev/null) || val=""
+        # 空值或仍是 change-me 占位符都视为缺失
+        if [[ -z "$val" ]] || [[ "$val" == "change-me"* ]]; then
+            missing_sensitive+=("$entry")
+        fi
+    done
+
+    # 检查可选敏感变量(仅提示,不强制)
+    for entry in "${optional_sensitive_keys[@]}"; do
+        local key="${entry%%:*}"
+        local val
+        val=$(read_env_var "$key" "$envfile" 2>/dev/null) || val=""
+        if [[ -z "$val" ]] || [[ "$val" == "change-me"* ]]; then
+            # 可选变量缺失,自动生成(备份加密密钥缺失会导致备份脚本无法加密)
+            missing_sensitive+=("$entry")
+        fi
+    done
+
+    # 检查非敏感变量
+    for entry in "${default_keys[@]}"; do
+        local key="${entry%%:*}"
+        local val
+        val=$(read_env_var "$key" "$envfile" 2>/dev/null) || val=""
+        if [[ -z "$val" ]]; then
+            missing_default+=("$entry")
+        fi
+    done
+
+    # 自动修复缺失的敏感变量(生成随机值)
+    if [[ ${#missing_sensitive[@]} -gt 0 ]]; then
+        warn "检测到缺失敏感配置变量,自动生成随机值并追加到 .env..."
+        for entry in "${missing_sensitive[@]}"; do
+            local key="${entry%%:*}"
+            local bytes="${entry##*:}"
+            local new_val
+            new_val=$(rand_hex "$bytes")
+            set_env_var "$key" "$new_val"
+            info "  已生成 ${key}(随机 ${bytes} 字节)"
+            fixed_count=$((fixed_count + 1))
+        done
+    fi
+
+    # 自动修复缺失的非敏感变量(用默认值)
+    if [[ ${#missing_default[@]} -gt 0 ]]; then
+        warn "检测到缺失非敏感配置变量,用默认值追加到 .env..."
+        for entry in "${missing_default[@]}"; do
+            local key="${entry%%:*}"
+            local default_val="${entry##*:}"
+            set_env_var "$key" "$default_val"
+            info "  已追加 ${key}=${default_val}"
+            fixed_count=$((fixed_count + 1))
+        done
+    fi
+
+    if [[ $fixed_count -gt 0 ]]; then
+        info "已自动修复 ${fixed_count} 个缺失变量,.env 现已完整"
+        # 确保权限正确
+        chmod 600 "$envfile"
+    else
+        info ".env 配置完整,所有必需变量均已配置"
+    fi
+
+    return 0
+}
+
+#==============================================================
+# 确保运行时目录存在且可写(backup/uploads/logs)
+# 问题场景:sudo ./deploy.sh 部署后,backup/ uploads/ logs/ 属主可能是 root,
+# 普通用户运行 canteen upgrade 时,snapshot.sh 在 backup/ 下创建子目录会被 Permission denied。
+#==============================================================
+ensure_runtime_dirs() {
+    for d in backup uploads logs; do
+        if [[ ! -d "$PROJECT_DIR/$d" ]]; then
+            mkdir -p "$PROJECT_DIR/$d" 2>/dev/null || {
+                error "无法创建 $PROJECT_DIR/$d (权限不足)"
+                warn "  请执行: sudo chown -R $(whoami):$(whoami) $PROJECT_DIR"
+                return 1
+            }
+        fi
+        if [[ ! -w "$PROJECT_DIR/$d" ]]; then
+            error "$PROJECT_DIR/$d 不可写(属主可能是 root)"
+            warn "  当前用户: $(whoami), 目录属主: $(stat -c '%U' "$PROJECT_DIR/$d" 2>/dev/null || echo '?')"
+            warn "  修复: sudo chown -R $(whoami):$(whoami) $PROJECT_DIR/$d"
+            return 1
+        fi
+    done
+    return 0
 }
 
 #==============================================================
@@ -117,17 +324,25 @@ elif [ "$CURRENT_BRANCH" = "deploy" ]; then
 fi
 
 # 获取当前系统版本号(从 VERSIONS.json 读取)
+# 修复:python3 不可用时回退到 grep+sed,避免显示 vunknown
 get_version() {
     if [ -f "$PROJECT_DIR/VERSIONS.json" ]; then
-        python3 -c "import json; print(json.load(open('$PROJECT_DIR/VERSIONS.json'))['system']['version'])" 2>/dev/null || \
-        grep -A1 '"system"' "$PROJECT_DIR/VERSIONS.json" 2>/dev/null | grep '"version"' \
-            | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "unknown"
+        # 优先用 python3 解析(最可靠)
+        if command -v python3 &>/dev/null; then
+            local ver
+            ver=$(python3 -c "import json; print(json.load(open('$PROJECT_DIR/VERSIONS.json'))['system']['version'])" 2>/dev/null) && \
+                [[ -n "$ver" ]] && { echo "$ver"; return; }
+        fi
+        # fallback:grep 提取 system 块的 version 字段
+        grep -A5 '"system"' "$PROJECT_DIR/VERSIONS.json" 2>/dev/null | grep '"version"' | head -1 \
+            | sed 's/.*"version" *: *"\([^"]*\)".*/\1/' || echo "unknown"
     else
         echo "unknown"
     fi
 }
 
 # 获取指定模块版本号
+# 修复:python3 不可用时回退到 grep+sed,避免显示 vunknown
 get_module_version() {
     local module="$1"
     local versions_file="$PROJECT_DIR/VERSIONS.json"
@@ -135,8 +350,22 @@ get_module_version() {
         echo "unknown"
         return
     fi
-    python3 -c "import json; print(json.load(open('$versions_file')).get('$module',{}).get('version','unknown'))" 2>/dev/null || \
-    echo "unknown"
+    # 优先用 python3 解析(最可靠)
+    if command -v python3 &>/dev/null; then
+        local ver
+        ver=$(python3 -c "import json; print(json.load(open('$versions_file')).get('$module',{}).get('version','unknown'))" 2>/dev/null) && \
+            [[ -n "$ver" ]] && { echo "$ver"; return; }
+    fi
+    # fallback:grep 提取模块块中的 version 字段
+    # 匹配 "module": { 后续若干行内的 "version": "x.x.x"
+    local ver
+    ver=$(grep -A5 "\"${module}\":" "$versions_file" 2>/dev/null | grep '"version"' | head -1 \
+        | sed 's/.*"version" *: *"\([^"]*\)".*/\1/')
+    if [[ -n "$ver" ]]; then
+        echo "$ver"
+    else
+        echo "unknown"
+    fi
 }
 
 # 显示升级前版本信息(本地当前版本 + 远程最新版本 + git 提交差异)
@@ -409,6 +638,31 @@ main() {
         error "未检测到 Docker,请先安装"
         exit 1
     fi
+
+    #==========================================================
+    # 预检查:校验 .env 完整性 + 运行时目录可写
+    # 必须在创建快照前完成,避免:
+    #   1. .env 缺失 REDIS_PASSWORD 等变量 → docker compose up -d 因 ${VAR:?} 强制校验失败
+    #   2. backup/ 不可写 → snapshot.sh mkdir Permission denied
+    # 若缺失变量则自动修复(敏感变量生成随机值,非敏感用默认值),不让用户进入会失败的重启步骤
+    #==========================================================
+    step "预检查 .env 完整性与运行时目录"
+
+    info "校验 .env 配置完整性..."
+    if ! validate_env_completeness; then
+        error ".env 配置不完整且无法自动修复,中止升级"
+        warn "请手动检查 .env 文件,或重新运行 ./deploy.sh 配置"
+        exit 1
+    fi
+
+    info "检查运行时目录(backup/uploads/logs)..."
+    if ! ensure_runtime_dirs; then
+        error "运行时目录不可写,中止升级"
+        warn "请修复目录权限后重试"
+        exit 1
+    fi
+    info "预检查通过"
+    echo ""
 
     #==========================================================
     # 步骤 1:创建升级前快照(关键!)

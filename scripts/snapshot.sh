@@ -24,7 +24,30 @@
 
 set -e
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# 解析符号链接:支持通过 /usr/local/bin/canteen 软链接调用 canteen.sh,
+# 再由 canteen.sh 调用本脚本时,$0 仍是绝对路径;但若直接通过软链接调用,
+# 需用 readlink -f 解析真实路径,避免 dirname 得到 /usr/local/bin。
+resolve_project_dir() {
+    local src="$1"
+    # readlink -f 能解析多级符号链接(GNU coreutils, CentOS/Ubuntu 自带)
+    if command -v readlink &>/dev/null; then
+        local resolved
+        resolved=$(readlink -f "$src" 2>/dev/null) && [[ -n "$resolved" ]] && {
+            # snapshot.sh 在 scripts/ 目录下,父目录就是 PROJECT_DIR
+            echo "$(cd "$(dirname "$resolved")/.." && pwd)"
+            return
+        }
+    fi
+    # 回退:手动遍历 symlink(BSD/老旧系统)
+    while [[ -L "$src" ]]; do
+        local dir
+        dir=$(cd "$(dirname "$src")" && pwd)
+        src=$(readlink "$src")
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    echo "$(cd "$(dirname "$src")/.." && pwd)"
+}
+PROJECT_DIR="$(resolve_project_dir "$0")"
 cd "$PROJECT_DIR"
 
 SNAPSHOT_DIR="$PROJECT_DIR/backup/snapshots"
