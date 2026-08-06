@@ -53,7 +53,8 @@ public class DishCategoryService {
             throw new BusinessException("分类不存在");
         }
         SecurityContext.checkStoreAccess(existing.getStoreId());
-        existing.setIsDeleted(1);
-        dishCategoryMapper.updateById(existing);
+        // 注意:不能手动 setIsDeleted(1)+updateById(逻辑删除字段被全局配置托管,updateById 会跳过)。
+        // 用 deleteById,MyBatis-Plus 自动转换为 UPDATE SET is_deleted=1。
+        dishCategoryMapper.deleteById(id);
     }
 }

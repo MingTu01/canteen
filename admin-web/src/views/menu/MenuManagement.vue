@@ -126,9 +126,15 @@ const totalDishes = computed(() =>
   dayMenus.value.reduce((sum, m) => sum + (m.items?.length || 0), 0)
 )
 
+/** 解析菜品适用餐次(逗号分隔,缺失时默认早中晚都适用) */
+const dishMealTypes = (d: Dish): number[] => {
+  if (!d.mealTypes) return [1, 2, 3]
+  return d.mealTypes.split(',').map((x) => Number(x)).filter((x) => !isNaN(x))
+}
+
 const transferData = computed(() =>
   dishes.value
-    .filter((d) => d.status === 1)
+    .filter((d) => d.status === 1 && dishMealTypes(d).includes(form.value.mealType))
     .map((d) => ({
       key: d.id as number,
       label: `${d.name}  ¥${Number(d.price).toFixed(2)}`,

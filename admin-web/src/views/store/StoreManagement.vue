@@ -3,8 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ElButton,
-  ElCollapse,
-  ElCollapseItem,
   ElDialog,
   ElForm,
   ElFormItem,
@@ -13,7 +11,6 @@ import {
   ElMessageBox,
   ElPagination,
   ElTag,
-  ElTimePicker,
 } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Plus, Pencil, Trash2, Store as StoreIcon, KeyRound, Copy, Eye, ArrowRight, Image as ImageIcon } from 'lucide-vue-next'
@@ -65,12 +62,6 @@ function defaultStore(): Store {
     phone: '',
     status: 1,
     description: '',
-    breakfastStart: '',
-    breakfastEnd: '',
-    lunchStart: '',
-    lunchEnd: '',
-    dinnerStart: '',
-    dinnerEnd: '',
   }
 }
 
@@ -94,18 +85,6 @@ const openEdit = (row: Store) => {
 const handleSave = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  // 校验营业时间
-  const timePairs = [
-    { name: '早餐', start: form.value.breakfastStart, end: form.value.breakfastEnd },
-    { name: '午餐', start: form.value.lunchStart, end: form.value.lunchEnd },
-    { name: '晚餐', start: form.value.dinnerStart, end: form.value.dinnerEnd },
-  ]
-  for (const pair of timePairs) {
-    if (pair.start && pair.end && pair.start >= pair.end) {
-      ElMessage.error(`${pair.name}时间设置无效：开始时间不能晚于结束时间`)
-      return
-    }
-  }
   dialogLoading.value = true
   try {
     if (isEdit.value && form.value.id) {
@@ -381,73 +360,6 @@ onMounted(fetchStores)
           <ElFormItem label="联系电话">
             <ElInput v-model="form.phone" placeholder="请输入联系电话" maxlength="20" />
           </ElFormItem>
-          <ElCollapse class="meal-time-collapse">
-            <ElCollapseItem name="mealTime" title="用餐时间（选填，点击展开）">
-              <ElFormItem label="早餐时段">
-                <div class="flex items-center gap-2">
-                  <ElTimePicker
-                    v-model="form.breakfastStart"
-                    value-format="HH:mm"
-                    format="HH:mm"
-                    placeholder="开始时间"
-                    aria-label="早餐开始时间"
-                    class="flex-1"
-                  />
-                  <span class="text-text-muted">至</span>
-                  <ElTimePicker
-                    v-model="form.breakfastEnd"
-                    value-format="HH:mm"
-                    format="HH:mm"
-                    placeholder="结束时间"
-                    aria-label="早餐结束时间"
-                    class="flex-1"
-                  />
-                </div>
-              </ElFormItem>
-              <ElFormItem label="午餐时段">
-                <div class="flex items-center gap-2">
-                  <ElTimePicker
-                    v-model="form.lunchStart"
-                    value-format="HH:mm"
-                    format="HH:mm"
-                    placeholder="开始时间"
-                    aria-label="午餐开始时间"
-                    class="flex-1"
-                  />
-                  <span class="text-text-muted">至</span>
-                  <ElTimePicker
-                    v-model="form.lunchEnd"
-                    value-format="HH:mm"
-                    format="HH:mm"
-                    placeholder="结束时间"
-                    aria-label="午餐结束时间"
-                    class="flex-1"
-                  />
-                </div>
-              </ElFormItem>
-              <ElFormItem label="晚餐时段">
-                <div class="flex items-center gap-2">
-                  <ElTimePicker
-                    v-model="form.dinnerStart"
-                    value-format="HH:mm"
-                    format="HH:mm"
-                    placeholder="开始时间"
-                    aria-label="晚餐开始时间"
-                    class="flex-1"
-                  />
-                  <span class="text-text-muted">至</span>
-                  <ElTimePicker
-                    v-model="form.dinnerEnd"
-                    value-format="HH:mm"
-                    format="HH:mm"
-                    placeholder="结束时间"
-                    aria-label="晚餐结束时间"
-                    class="flex-1"
-                  />
-                </div>
-              </ElFormItem>
-            </ElCollapseItem>
-          </ElCollapse>
           <ElFormItem label="食堂简介">
             <ElInput v-model="form.description" type="textarea" :rows="2" placeholder="一句话介绍食堂" maxlength="200" />
           </ElFormItem>
@@ -482,6 +394,7 @@ onMounted(fetchStores)
               label="Logo"
               hint="显示在 H5 顶部、取餐终端顶栏、admin-web 侧栏(建议 1:1 正方形,请上传 PNG 格式以保留透明背景)"
               :preview-size="80"
+              loose
             />
           </div>
 
@@ -492,6 +405,7 @@ onMounted(fetchStores)
               label="食堂图片"
               hint="显示在食堂列表卡片、H5 登录页选择(建议 16:9 横图)"
               :preview-size="120"
+              loose
             />
           </div>
 
@@ -502,6 +416,7 @@ onMounted(fetchStores)
               label="终端背景"
               hint="取餐终端待机页的主图/背景(建议 16:9 横图,留白以显示按钮)"
               :preview-size="120"
+              loose
             />
           </div>
 
@@ -512,6 +427,7 @@ onMounted(fetchStores)
               label="H5 Banner"
               hint="H5 订餐端首页顶部 banner(可选,留空则显示食堂名)"
               :preview-size="120"
+              loose
             />
           </div>
 
@@ -574,26 +490,3 @@ onMounted(fetchStores)
     </PageContainer>
   </Layout>
 </template>
-
-<style scoped>
-.meal-time-collapse {
-  border: none;
-  margin-bottom: 8px;
-}
-.meal-time-collapse :deep(.el-collapse-item__header) {
-  background: var(--el-fill-color-light);
-  border-radius: 8px;
-  padding: 0 12px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  border: none;
-  height: 36px;
-  line-height: 36px;
-}
-.meal-time-collapse :deep(.el-collapse-item__wrap) {
-  border: none;
-}
-.meal-time-collapse :deep(.el-collapse-item__content) {
-  padding-top: 8px;
-}
-</style>

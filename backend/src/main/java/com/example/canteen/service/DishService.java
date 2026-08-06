@@ -20,7 +20,7 @@ import java.util.List;
  * 菜品服务,带 Redis 缓存 + SSE 广播。
  *
  * 缓存策略:
- * - getDishesByStore / getNewDishesByStore 走 Redis,TTL 30 分钟
+ * - getDishesByStore 走 Redis,TTL 30 分钟
  * - 写操作(create/update/delete/toggle/batch)主动失效缓存 + 广播 SSE
  *
  * 容错:
@@ -32,7 +32,6 @@ import java.util.List;
 public class DishService {
 
     private static final String CACHE_KEY_DISHES = "dish:store:%s:list";
-    private static final String CACHE_KEY_NEW = "dish:store:%s:new";
     private static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
     private final DishMapper dishMapper;
@@ -86,7 +85,6 @@ public class DishService {
         if (tpl == null) return;
         try {
             tpl.delete(String.format(CACHE_KEY_DISHES, storeId));
-            tpl.delete(String.format(CACHE_KEY_NEW, storeId));
             // 同时清除全量菜品缓存(含已下架菜品,供终端使用)
             tpl.delete(String.format(CACHE_KEY_DISHES, storeId) + ":all");
         } catch (Exception e) {
@@ -140,19 +138,6 @@ public class DishService {
         return list;
     }
 
-    public List<Dish> getNewDishesByStore(Long storeId) {
-        String key = String.format(CACHE_KEY_NEW, storeId);
-        List<Dish> cached = cacheGet(key, List.class);
-        if (cached != null) return cached;
-        List<Dish> list = dishMapper.selectList(new LambdaQueryWrapper<Dish>()
-                .eq(Dish::getStoreId, storeId)
-                .eq(Dish::getIsNew, 1)
-                .eq(Dish::getStatus, 1)
-                .eq(Dish::getIsDeleted, 0));
-        cachePut(key, list);
-        return list;
-    }
-
     public Dish getDishById(Long id) {
         return dishMapper.selectById(id);
     }
@@ -184,13 +169,15 @@ public class DishService {
     }
 
     public void deleteDish(Long id) {
+        // 注意:不能手动 setIsDeleted(1)+updateById,因为逻辑删除字段被全局配置托管,
+        // updateById 的 SET 子句会跳过 is_deleted 字段,导致删除无效。
+        // 必须用 deleteById,MyBatis-Plus 会自动转换为 UPDATE SET is_deleted=1。
         Dish dish = dishMapper.selectById(id);
         if (dish == null) {
             throw new BusinessException("菜品不存在");
         }
         SecurityContext.checkStoreAccess(dish.getStoreId());
-        dish.setIsDeleted(1);
-        dishMapper.updateById(dish);
+        dishMapper.deleteById(id);
         cacheEvictByStore(dish.getStoreId());
         broadcastSse(dish.getStoreId(), id, "delete");
     }
@@ -271,8 +258,10 @@ public class DishService {
             throw new BusinessException("菜品不存在");
         }
         SecurityContext.checkStoreAccess(dish.getStoreId());
-        dish.setIsDeleted(0);
-        dishMapper.updateById(dish);
+        // 恢复需把 is_deleted 置 0:不能用 updateById(逻辑删除字段被跳过),
+        // 也不能用 wrapper(逻辑删除拦截器会给 WHERE 追加 is_deleted=0,匹配不到已删除记录)。
+        // 用自定义 SQL 绕过逻辑删除拦截器。
+        dishMapper.restoreById(id);
         cacheEvictByStore(dish.getStoreId());
         broadcastSse(dish.getStoreId(), id, "restore");
     }

@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import postcsspxtoviewport from 'postcss-px-to-viewport'
 import { viteVConsole } from 'vite-plugin-vconsole'
 
@@ -9,6 +9,30 @@ import { viteVConsole } from 'vite-plugin-vconsole'
 const pkgVersion = JSON.parse(
   readFileSync(resolve(__dirname, 'package.json'), 'utf-8'),
 ).version || '0.0.0'
+
+/** 构建后生成 version.json 到 dist 根目录(供前端版本检测拉取) */
+function generateVersionJson() {
+  return {
+    name: 'generate-version-json',
+    closeBundle() {
+      const outDir = resolve(__dirname, 'dist')
+      try {
+        mkdirSync(outDir, { recursive: true })
+      } catch { /* dir exists */ }
+      writeFileSync(
+        resolve(outDir, 'version.json'),
+        JSON.stringify(
+          {
+            version: pkgVersion,
+            buildTime: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+      )
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -18,6 +42,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       vue(),
+      generateVersionJson(),
       // 仅 dev 环境启用 vconsole,便于移动端调试
       isDev &&
         viteVConsole({

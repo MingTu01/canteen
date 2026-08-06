@@ -55,7 +55,6 @@ CREATE TABLE IF NOT EXISTS dish (
     image VARCHAR(255),
     category VARCHAR(50),
     meal_types VARCHAR(20) DEFAULT '1,2,3',
-    is_new INT DEFAULT 0,
     stock INT DEFAULT -1,
     max_per_order INT DEFAULT 5,
     status INT DEFAULT 1,
@@ -230,28 +229,28 @@ INSERT INTO employee (store_id, card_no, phone, name, department_id, balance, pa
 (1, 'CARD004', '13800000004', '赵敏', 3, 800.00, '$2b$10$ZYbFA3pByvcxS1/wrlSDP.i8ElgaAIyviU5Pp26Ev8PVJcM2GOMaC', 0),
 (2, 'CARD005', '13800000005', '陈静', 4, 400.00, '$2b$10$ZYbFA3pByvcxS1/wrlSDP.i8ElgaAIyviU5Pp26Ev8PVJcM2GOMaC', 0);
 
-INSERT INTO dish (store_id, name, price, image, category, meal_types, is_new, stock, max_per_order, is_deleted) VALUES
-(1, '红烧排骨', 15.00, 'https://images.unsplash.com/photo-1525755662778-989d0524087e?w=400&q=80', '荤菜', '2,3', 0, 100, 5, 0),
-(1, '宫保鸡丁', 12.00, 'https://images.unsplash.com/photo-1525755662778-989d0524087e?w=400&q=80', '荤菜', '2,3', 0, 100, 5, 0),
-(1, '青椒肉丝', 11.00, 'https://images.unsplash.com/photo-1606756790138-261d2b21cd75?w=400&q=80', '荤菜', '2,3', 0, 100, 5, 0),
-(1, '麻婆豆腐', 10.00, 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=400&q=80', '素菜', '2,3', 0, 100, 5, 0),
-(1, '蒜蓉西兰花', 8.00, 'https://images.unsplash.com/photo-1583663848850-46af132dc08e?w=400&q=80', '素菜', '2,3', 0, 100, 5, 0),
-(1, '番茄蛋汤', 4.00, 'https://images.unsplash.com/photo-1547592180-85f173990554?w=400&q=80', '汤类', '1,2,3', 0, 100, 5, 0),
-(1, '白粥', 2.00, 'https://images.unsplash.com/photo-1582452459900-7e0bb4d46937?w=400&q=80', '主食', '1', 0, 100, 5, 0),
-(1, '煎蛋', 3.00, 'https://images.unsplash.com/photo-1567652731832-5ce5e6d8e1c5?w=400&q=80', '主食', '1', 0, 100, 5, 0),
-(1, '清蒸鲈鱼', 18.00, 'https://images.unsplash.com/photo-1535140728325-a4d3707eee96?w=400&q=80', '荤菜', '3', 0, 100, 5, 0),
-(1, '蛋炒饭', 8.00, 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=400&q=80', '主食', '2,3', 0, 100, 5, 0),
-(1, '绿豆沙', 3.00, 'https://images.unsplash.com/photo-1571212515416-fef07fee64b9?w=400&q=80', '饮品', '1,2,3', 1, 100, 5, 0),
-(1, '凉拌黄瓜', 5.00, 'https://images.unsplash.com/photo-1604152135912-04a022e23696?w=400&q=80', '凉菜', '2,3', 1, 100, 5, 0),
-(1, '酸梅汤', 4.00, 'https://images.unsplash.com/photo-1626202373052-9d3e4e2c5e7f?w=400&q=80', '饮品', '1,2,3', 1, 100, 5, 0),
-(1, '小笼包', 6.00, 'https://images.unsplash.com/photo-1496116218417-1a781b1c376c?w=400&q=80', '主食', '1', 1, 100, 5, 0),
-(1, '豆浆', 2.50, 'https://images.unsplash.com/photo-1547592180-85f173990554?w=400&q=80', '饮品', '1', 0, 100, 5, 0),
-(1, '油条', 2.00, 'https://images.unsplash.com/photo-1606756790138-261d2b21cd75?w=400&q=80', '主食', '1', 0, 100, 5, 0),
-(1, '糖醋里脊', 16.00, 'https://images.unsplash.com/photo-1582452459900-7e0bb4d46937?w=400&q=80', '荤菜', '2,3', 0, 100, 5, 0),
-(1, '紫菜汤', 4.00, 'https://images.unsplash.com/photo-1547592180-85f173990554?w=400&q=80', '汤类', '1,2,3', 0, 100, 5, 0),
-(1, '小米粥', 3.00, 'https://images.unsplash.com/photo-1582452459900-7e0bb4d46937?w=400&q=80', '主食', '1', 0, 100, 5, 0),
-(1, '鱼香肉丝', 13.00, 'https://images.unsplash.com/photo-1606756790138-261d2b21cd75?w=400&q=80', '荤菜', '2,3', 0, 100, 5, 0),
-(1, '酸辣土豆丝', 7.00, 'https://images.unsplash.com/photo-1583663848850-46af132dc08e?w=400&q=80', '素菜', '2,3', 0, 100, 5, 0);
+INSERT INTO dish (store_id, name, price, image, category, meal_types, stock, max_per_order, is_deleted) VALUES
+(1, '红烧排骨', 15.00, 'https://images.unsplash.com/photo-1525755662778-989d0524087e?w=400&q=80', '荤菜', '2,3', 100, 5, 0),
+(1, '宫保鸡丁', 12.00, 'https://images.unsplash.com/photo-1525755662778-989d0524087e?w=400&q=80', '荤菜', '2,3', 100, 5, 0),
+(1, '青椒肉丝', 11.00, 'https://images.unsplash.com/photo-1606756790138-261d2b21cd75?w=400&q=80', '荤菜', '2,3', 100, 5, 0),
+(1, '麻婆豆腐', 10.00, 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=400&q=80', '素菜', '2,3', 100, 5, 0),
+(1, '蒜蓉西兰花', 8.00, 'https://images.unsplash.com/photo-1583663848850-46af132dc08e?w=400&q=80', '素菜', '2,3', 100, 5, 0),
+(1, '番茄蛋汤', 4.00, 'https://images.unsplash.com/photo-1547592180-85f173990554?w=400&q=80', '汤类', '1,2,3', 100, 5, 0),
+(1, '白粥', 2.00, 'https://images.unsplash.com/photo-1582452459900-7e0bb4d46937?w=400&q=80', '主食', '1', 100, 5, 0),
+(1, '煎蛋', 3.00, 'https://images.unsplash.com/photo-1567652731832-5ce5e6d8e1c5?w=400&q=80', '主食', '1', 100, 5, 0),
+(1, '清蒸鲈鱼', 18.00, 'https://images.unsplash.com/photo-1535140728325-a4d3707eee96?w=400&q=80', '荤菜', '3', 100, 5, 0),
+(1, '蛋炒饭', 8.00, 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=400&q=80', '主食', '2,3', 100, 5, 0),
+(1, '绿豆沙', 3.00, 'https://images.unsplash.com/photo-1571212515416-fef07fee64b9?w=400&q=80', '饮品', '1,2,3', 100, 5, 0),
+(1, '凉拌黄瓜', 5.00, 'https://images.unsplash.com/photo-1604152135912-04a022e23696?w=400&q=80', '凉菜', '2,3', 100, 5, 0),
+(1, '酸梅汤', 4.00, 'https://images.unsplash.com/photo-1626202373052-9d3e4e2c5e7f?w=400&q=80', '饮品', '1,2,3', 100, 5, 0),
+(1, '小笼包', 6.00, 'https://images.unsplash.com/photo-1496116218417-1a781b1c376c?w=400&q=80', '主食', '1', 100, 5, 0),
+(1, '豆浆', 2.50, 'https://images.unsplash.com/photo-1547592180-85f173990554?w=400&q=80', '饮品', '1', 100, 5, 0),
+(1, '油条', 2.00, 'https://images.unsplash.com/photo-1606756790138-261d2b21cd75?w=400&q=80', '主食', '1', 100, 5, 0),
+(1, '糖醋里脊', 16.00, 'https://images.unsplash.com/photo-1582452459900-7e0bb4d46937?w=400&q=80', '荤菜', '2,3', 100, 5, 0),
+(1, '紫菜汤', 4.00, 'https://images.unsplash.com/photo-1547592180-85f173990554?w=400&q=80', '汤类', '1,2,3', 100, 5, 0),
+(1, '小米粥', 3.00, 'https://images.unsplash.com/photo-1582452459900-7e0bb4d46937?w=400&q=80', '主食', '1', 100, 5, 0),
+(1, '鱼香肉丝', 13.00, 'https://images.unsplash.com/photo-1606756790138-261d2b21cd75?w=400&q=80', '荤菜', '2,3', 100, 5, 0),
+(1, '酸辣土豆丝', 7.00, 'https://images.unsplash.com/photo-1583663848850-46af132dc08e?w=400&q=80', '素菜', '2,3', 100, 5, 0);
 
 -- 7天菜单:今天 + 6 天,每天 3 餐(共 21 个菜单,菜单ID 1-21)
 -- 菜单ID 1-3:今天早/午/晚;4-6:明天;7-9:后天;10-12:第4天;13-15:第5天;16-18:第6天;19-21:第7天

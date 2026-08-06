@@ -16,13 +16,47 @@ const TARGET_SIZE_KB = 200
 const MAX_DIMENSION = 800
 const MIN_QUALITY = 0.5
 
+/** 宽松压缩参数(品牌/背景等大图场景,保留更多细节,避免缩小后不清晰) */
+const LOOSE_TARGET_KB = 800
+const LOOSE_MAX_DIMENSION = 1600
+const LOOSE_MIN_QUALITY = 0.85
+
 /**
- * 压缩图片到目标大小(默认 200KB)
+ * 压缩图片到目标大小(默认 200KB,最大边长 800px)。
+ * 适用于菜品图、员工头像等中尺寸展示场景。
  * @param file 原始 File 对象
  * @param targetKB 目标大小 KB(默认 200)
  * @returns 压缩后的 File 对象(保留原文件名)
  */
 export async function compressImage(file: File, targetKB: number = TARGET_SIZE_KB): Promise<File> {
+  return compressImageCore(file, {
+    targetKB,
+    maxDimension: MAX_DIMENSION,
+    minQuality: MIN_QUALITY,
+  })
+}
+
+/**
+ * 宽松压缩(品牌/背景等大图,最大边长 1600px、目标 800KB、最低画质 0.85),
+ * 避免终端背景/H5 Banner 等放大展示场景压缩过度变模糊。
+ */
+export async function compressImageLoose(file: File): Promise<File> {
+  return compressImageCore(file, {
+    targetKB: LOOSE_TARGET_KB,
+    maxDimension: LOOSE_MAX_DIMENSION,
+    minQuality: LOOSE_MIN_QUALITY,
+  })
+}
+
+interface CompressOptions {
+  targetKB: number
+  maxDimension: number
+  minQuality: number
+}
+
+/** 压缩核心实现:canvas 缩放 + 逐步降质,参数可调 */
+async function compressImageCore(file: File, opts: CompressOptions): Promise<File> {
+  const { targetKB, maxDimension, minQuality } = opts
   // 非图片直接返回(部分浏览器对特殊格式可能不报告 type,也放行让后端校验)
   if (file.type && !file.type.startsWith('image/')) {
     return file
@@ -38,7 +72,7 @@ export async function compressImage(file: File, targetKB: number = TARGET_SIZE_K
   let isPng = isPngByMime || isPngByExt
 
   const img = await loadImage(file)
-  const { width, height } = clampDimension(img.width, img.height, MAX_DIMENSION)
+  const { width, height } = clampDimension(img.width, img.height, maxDimension)
 
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -66,7 +100,7 @@ export async function compressImage(file: File, targetKB: number = TARGET_SIZE_K
     // JPEG 逐步降低 quality 直到 <= 目标大小
     let quality = 0.9
     blob = await canvasToBlob(canvas, 'image/jpeg', quality)
-    while (blob && blob.size > targetKB * 1024 && quality > MIN_QUALITY) {
+    while (blob && blob.size > targetKB * 1024 && quality > minQuality) {
       quality -= 0.1
       blob = await canvasToBlob(canvas, 'image/jpeg', quality)
     }

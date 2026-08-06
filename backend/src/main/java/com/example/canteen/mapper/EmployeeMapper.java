@@ -15,8 +15,18 @@ public interface EmployeeMapper extends BaseMapper<Employee> {
     /** S7 卡号 + 门店查询 */
     Employee selectByCardNoAndStore(@Param("cardNo") String cardNo, @Param("storeId") Long storeId);
 
+    /**
+     * 卡号全局存在性检查。
+     * 不过滤 is_deleted,以便精确对齐数据库 employee.card_no 全局唯一索引(含已逻辑删除记录)。
+     * excludeId 非空时排除自身(用于编辑场景)。
+     */
+    int countByCardNoExcludeId(@Param("cardNo") String cardNo, @Param("excludeId") Long excludeId);
+
     /** 手机号 + 门店查询(H5/小程序登录用) */
     Employee selectByPhoneAndStore(@Param("phone") String phone, @Param("storeId") Long storeId);
+
+    /** 姓名 + 门店查询(批量头像上传按文件名匹配姓名用) */
+    Employee selectByNameAndStore(@Param("name") String name, @Param("storeId") Long storeId);
 
     /** 手机号全局唯一查询(phone 已建全局唯一索引,登录不传 storeId 时用) */
     Employee selectByPhone(@Param("phone") String phone);

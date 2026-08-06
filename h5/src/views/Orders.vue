@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showSuccessToast, showFailToast, showToast, showConfirmDialog } from 'vant'
+import { Popup as VanPopup } from 'vant'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getMyOrders, cancelOrder } from '@/api/order'
@@ -12,9 +13,17 @@ import {
   formatMoney,
   formatDate,
 } from '@/composables/useFormat'
-import { mealBadgeStyle } from '@/composables/useMealConfig'
+import { mealBadgeStyle, mealDotColor } from '@/composables/useMealConfig'
 import { useOrderConfig } from '@/composables/useOrderConfig'
-import { toChineseDate } from '@/utils/date'
+import {
+  formatDateStr,
+  numericDateLabel,
+  relativeDateLabel,
+  weekdayLabel,
+  toChineseDate,
+  compareDate,
+  addDays,
+} from '@/utils/date'
 import type { Order } from '@/api/types'
 
 defineOptions({ name: 'Orders' })
@@ -30,19 +39,18 @@ const loaded = ref(false)
 const activeStatus = ref<number>(0)
 const cancelling = ref(false)
 
-/** 滚动容器引用(用于监听滚动,控制下拉刷新启用/禁用) */
-const scrollContainerRef = ref<HTMLElement | null>(null)
-
-/** 滚动事件处理:列表在顶部时才允许下拉刷新 */
-const handleScroll = (e: Event): void => {
-  const target = e.target as HTMLElement
-  canRefresh.value = target.scrollTop <= 0
-}
-
-/** 挂载后默认允许下拉刷新(初始在顶部) */
-onMounted(() => {
-  canRefresh.value = true
-})
+/** 右侧内容区滚动容器引用(用于 scroll 事件监听 + 滚动控制) */
+const contentRef = ref<HTMLElement | null>(null)
+/** 每个日期 section 的 DOM 引用,用于滚动定位 + 可视检测 */
+const daySectionRefs: Record<string, HTMLElement | null> = {}
+/** 当前可视日期(滚动时动态更新,用于左侧栏高亮 + sticky 日期指示器) */
+const visibleDate = ref<string>('')
+/** scroll 事件节流时间戳 */
+let lastScrollCalcTime = 0
+/** 点击左侧日期栏跳转时屏蔽可视日期更新,避免跳动 */
+let isProgrammaticScroll = false
+/** 初始是否允许下拉刷新(内容区不在顶部时禁止,避免误触发) */
+const canRefresh = ref(false)
 
 const statusTabs = [
   { value: 0, label: '全部' },
@@ -105,7 +113,6 @@ interface DateGroup {
  * 排序规则:
  * - 日期正序:过去日期在上方,今天在中间,未来日期在下方。
  * - 今天即使无订单也插入一个空分组(占位锚点),保证"今天"始终是可滚动定位点。
- *   用户进入页面看到的是今天;过去日期隐藏在上方,需上拉才能看到。
  */
 const groupedOrders = computed<DateGroup[]>(() => {
   // 1. 按订餐日期分组
@@ -123,7 +130,7 @@ const groupedOrders = computed<DateGroup[]>(() => {
     dateMap.set(today, [])
   }
 
-  // 3. 日期正序:过去→今天→未来(过去日期在上方,今天在中间,未来在下)
+  // 3. 日期正序:过去→今天→未来
   const sortedDates = Array.from(dateMap.keys()).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
   // 4. 每个日期内按餐别分组,菜品平铺
@@ -183,7 +190,7 @@ const groupedOrders = computed<DateGroup[]>(() => {
       }
 
       const allPending = mealOrders.every((o) => o.status === 1)
-      // 还需检查是否在取消截止时间内(未来日期的订单受 cancel_deadline_time 限制)
+      // 还需检查是否在取消截止时间内
       const deadlineCancellable = isCancellableByDeadline(dateStr, new Date())
       meals.push({
         mealType: mt,
@@ -204,8 +211,206 @@ const groupedOrders = computed<DateGroup[]>(() => {
   return groups
 })
 
-/** 初始是否允许下拉刷新(列表不在顶部时禁止,避免误触发) */
-const canRefresh = ref(false)
+// ============ 左侧日期竖列(与订餐页一致:日期 + 周几 + 三餐餐别圆点) ============
+interface DateItem {
+  date: string
+  dateLabel: string // "7月14日"
+  weekday: string // "周一"
+  isToday: boolean
+  /** 该日期已下单的餐别集合(用于渲染三餐色圆点) */
+  mealTypes: number[]
+}
+
+/** 三餐固定顺序(早/中/晚),用于日期竖列圆点固定位置渲染 */
+const MEAL_TYPE_ORDER: number[] = [1, 2, 3]
+
+/** 将日期分组转为左侧栏条目 */
+const toDateItem = (group: DateGroup): DateItem => ({
+  date: group.dateStr,
+  dateLabel: numericDateLabel(group.dateStr),
+  weekday: weekdayLabel(group.dateStr),
+  isToday: group.dateStr === formatDateStr(new Date()),
+  mealTypes: group.meals.map((m) => m.mealType),
+})
+
+/** 左侧栏当前展示的最早日期(默认今天 → 只显示"今天+未来");下拉加载更早历史时前移 */
+const earliestShownDate = ref(formatDateStr(new Date()))
+/** 是否正在加载历史(防止重复触发) */
+const loadingHistory = ref(false)
+/** 是否还有比当前最早展示日期更早的历史可加载 */
+const hasMoreHistory = computed(() =>
+  groupedOrders.value.some(
+    (g) => g.meals.length > 0 && compareDate(g.dateStr, earliestShownDate.value) < 0,
+  ),
+)
+
+/**
+ * 左侧日期栏:默认只显示"今天+未来",今天固定为列表顶端首项(时间正序)。
+ * 历史日期(今天之前)默认隐藏,手指下拉/滚动到顶时按周加载,出现在今天上方。
+ * 无订单的日期不显示(不循环补空)。
+ */
+const dateList = computed<DateItem[]>(() => {
+  const today = formatDateStr(new Date())
+
+  // 今天及未来(>= 最早展示日期)按时间正序,今天为列表顶端
+  const items = groupedOrders.value
+    .filter((g) => compareDate(g.dateStr, earliestShownDate.value) >= 0)
+    .map(toDateItem)
+    .sort((a, b) => compareDate(a.date, b.date))
+
+  // 今天即使无订单也作为锚点,保证"今天"始终是列表顶端首项
+  if (!items.some((i) => i.date === today)) {
+    items.push({
+      date: today,
+      dateLabel: numericDateLabel(today),
+      weekday: weekdayLabel(today),
+      isToday: true,
+      mealTypes: [],
+    })
+    items.sort((a, b) => compareDate(a.date, b.date))
+  }
+
+  return items
+})
+
+/** 下拉/滚动到顶:把更早一周的历史日期加载出来,插入到今天上方 */
+const loadMoreHistory = (): void => {
+  if (loadingHistory.value || !hasMoreHistory.value) return
+  loadingHistory.value = true
+  try {
+    const cutoff = addDays(earliestShownDate.value, -7)
+    const older = groupedOrders.value
+      .filter(
+        (g) => g.meals.length > 0 && compareDate(g.dateStr, earliestShownDate.value) < 0,
+      )
+      .map((g) => g.dateStr)
+      .sort((a, b) => compareDate(a, b)) // 正序:最早在前
+    const batch = older.filter((d) => compareDate(d, cutoff) >= 0)
+    earliestShownDate.value = (batch.length > 0 ? batch : older)[0]
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+/** 侧栏滚动到顶时加载更早历史(桌面/滚动场景) */
+const handleSidebarScroll = (e: Event): void => {
+  const el = e.target as HTMLElement
+  if (el.scrollTop <= 0) loadMoreHistory()
+}
+
+/** 手指下拉到顶时加载更早历史(移动端触控场景) */
+const sidebarTouchStartY = ref(0)
+const onSidebarTouchStart = (e: TouchEvent): void => {
+  sidebarTouchStartY.value = e.touches[0].clientY
+}
+const onSidebarTouchMove = (e: TouchEvent): void => {
+  const sidebar = sidebarRef.value
+  if (!sidebar || sidebar.scrollTop > 0) return
+  const dy = e.touches[0].clientY - sidebarTouchStartY.value
+  if (dy > 30) {
+    loadMoreHistory()
+    sidebarTouchStartY.value = e.touches[0].clientY
+  }
+}
+
+/** 左侧栏滚动容器引用 */
+const sidebarRef = ref<HTMLElement | null>(null)
+
+/**
+ * 联动:右侧滚动到历史日期时,左侧自动前移 earliestShownDate 以包含该日期,
+ * 然后滚动左侧到对应项,实现两侧联动高亮。
+ */
+watch(visibleDate, (d) => {
+  if (!d) return
+  // 右侧滚到了比左侧最早显示日期还早的历史 → 自动展开左侧
+  if (compareDate(d, earliestShownDate.value) < 0) {
+    earliestShownDate.value = d
+  }
+  // 滚动左侧到当前高亮日期项
+  void nextTick(() => {
+    const el = sidebarRef.value?.querySelector<HTMLElement>(`[data-sidebar-date="${d}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
+})
+
+/** 判断指定日期+餐别是否已下单(用于圆点是否渲染) */
+const isMealOrdered = (d: DateItem, mt: number): boolean => d.mealTypes.includes(mt)
+
+/** 当前可视日期的数字部分(如 "7月26日"),用于 sticky 顶部指示器 */
+const visibleDateNumber = computed(() =>
+  numericDateLabel(visibleDate.value || formatDateStr(new Date())),
+)
+
+/** 当前可视日期的相对标签(今天/明天/周X),用于 sticky 顶部指示器 */
+const visibleDateRelativeLabel = computed(() =>
+  relativeDateLabel(visibleDate.value || formatDateStr(new Date())),
+)
+
+/** 设置日期 section 的 DOM 引用(供 v-for :ref 回调用) */
+const setDaySectionRef = (date: string, el: Element | null): void => {
+  daySectionRefs[date] = (el as HTMLElement) || null
+}
+
+/**
+ * 点击左侧日期栏:平滑滚动到对应日期 section(不切换、不替换数据)。
+ * 单页堆叠模式:所有日期已在 DOM 中,滚动即可;日期跟随滚动同步高亮。
+ */
+const scrollToDate = (date: string): void => {
+  const el = daySectionRefs[date]
+  if (!el) return
+  isProgrammaticScroll = true
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  visibleDate.value = date
+  setTimeout(() => { isProgrammaticScroll = false }, 500)
+}
+
+/**
+ * 右侧内容区滚动事件处理:
+ * - 更新下拉刷新可用状态(仅在顶部时可下拉)
+ * - 节流计算当前可视日期 → 同步左侧栏高亮 + sticky 日期指示器
+ */
+const handleScroll = (e: Event): void => {
+  const target = e.target as HTMLElement
+  canRefresh.value = target.scrollTop <= 0
+  if (isProgrammaticScroll) return
+  const now = Date.now()
+  if (now - lastScrollCalcTime < 100) return // 100ms 节流
+  lastScrollCalcTime = now
+  updateVisibleDate()
+}
+
+/**
+ * 计算当前可视日期(使用"触发线"算法,稳定不跳动)。
+ * 触发线位于容器顶部下方 60px(sticky 日期指示器之下):
+ * - 若触发线落在某 section 内 → 选定该日期
+ * - 否则 → 选触发线上方最近的 section
+ */
+const updateVisibleDate = (): void => {
+  const container = contentRef.value
+  if (!container) return
+  const containerTop = container.getBoundingClientRect().top
+  const TRIGGER_Y = 60
+  let bestDate = ''
+  let bestTop = -Infinity
+  for (const g of groupedOrders.value) {
+    const el = daySectionRefs[g.dateStr]
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    const top = rect.top - containerTop
+    const bottom = rect.bottom - containerTop
+    if (top <= TRIGGER_Y && bottom > TRIGGER_Y) {
+      bestDate = g.dateStr
+      break
+    }
+    if (top <= TRIGGER_Y && top >= bestTop) {
+      bestTop = top
+      bestDate = g.dateStr
+    }
+  }
+  if (bestDate && bestDate !== visibleDate.value) {
+    visibleDate.value = bestDate
+  }
+}
 
 /** 餐别中可复制取餐码的订单(按 orderId 去重,一个订单只显示一个取餐码) */
 const pickupOrders = (meal: MealGroup): DishRow[] => {
@@ -222,13 +427,11 @@ const pickupOrders = (meal: MealGroup): DishRow[] => {
 
 /**
  * 滚动到今天日期所在的分组位置。
- * 用于:每次进入页面 / 下拉刷新后,确保今天订单首先可见。
- * 由于 groupedOrders 已保证今天始终有占位 section(即使无订单),
- * 这里直接定位今天的 section,过去日期自然隐藏在上方需要上拉才能看到。
+ * 用于:每次进入页面 / 下拉刷新 / 切换 Tab 后,确保今天订单首先可见。
  */
 const scrollToToday = async (): Promise<void> => {
   await nextTick()
-  const container = scrollContainerRef.value
+  const container = contentRef.value
   if (!container) return
   const today = formatDate(new Date())
   const target = container.querySelector<HTMLElement>(`[data-date="${today}"]`)
@@ -236,12 +439,11 @@ const scrollToToday = async (): Promise<void> => {
     container.scrollTo({ top: 0, behavior: 'auto' })
     return
   }
-  // 用 getBoundingClientRect 计算相对滚动容器的偏移,避免 offsetParent 不一致
-  // 偏移 0:让今天的 section 顶部完全贴容器顶部,sticky 日期标题正好吸顶显示"今天"
   const containerRect = container.getBoundingClientRect()
   const targetRect = target.getBoundingClientRect()
   const offset = targetRect.top - containerRect.top + container.scrollTop
   container.scrollTo({ top: Math.max(0, offset), behavior: 'auto' })
+  visibleDate.value = today
 }
 
 /** 加载订单列表(不自动滚动,由调用方决定是否滚动到今天) */
@@ -252,10 +454,10 @@ const loadOrders = async (): Promise<void> => {
   }
   loading.value = true
   try {
-    // 后端在无订单时可能返回 null,兜底为空数组避免后续 .filter / .sort 抛错
+    // 后端在无订单时可能返回 null,兜底为空数组
     orders.value = (await getMyOrders(authStore.employeeId)) ?? []
   } catch {
-    /* 拦截器已 toast 具体错误信息 */
+    /* 拦截器已 toast */
   } finally {
     loading.value = false
     loaded.value = true
@@ -273,11 +475,9 @@ const onRefresh = async (): Promise<void> => {
   }
 }
 
-/** Tab 切换:列表由 computed 自动筛选,无需重新请求;切换后滚到今天保证今天在第一屏 */
+/** Tab 切换:列表由 computed 自动筛选,无需重新请求;切换后滚到今天 */
 const selectTab = (value: number): void => {
   activeStatus.value = value
-  // groupedOrders 是 computed,nextTick 后 DOM 才更新;scrollToToday 内部已 await nextTick
-  // 但 tab 切换瞬间 activeStatus 变化,computed 重算需要一帧,这里再补一次 nextTick 更稳
   void nextTick(() => scrollToToday())
 }
 
@@ -310,7 +510,6 @@ const copyCode = async (code: string, e: Event): Promise<void> => {
 /** 取消整个餐别的订单(二次确认,取消后金额退回余额) */
 const onCancelMeal = (meal: MealGroup): void => {
   if (!meal.cancellable || meal.rows.length === 0 || cancelling.value) return
-  // 同一餐别可能有多个订单,统计 orderId 去重
   const orderIds = Array.from(new Set(meal.rows.map((r) => r.orderId)))
   const count = orderIds.length
   const message =
@@ -348,22 +547,105 @@ const onCancelMeal = (meal: MealGroup): void => {
     })
 }
 
+// ============ 日历选择器 ============
+/** 日历弹窗显示状态 */
+const showCalendar = ref(false)
+/** 所有有订单的日期集合(用于日历高亮可点击) */
+const orderDatesSet = computed(
+  () => new Set(groupedOrders.value.filter((g) => g.meals.length > 0).map((g) => g.dateStr)),
+)
+/** 日历当前显示的月份 yyyy-MM,默认跟随当前可视日期 */
+const calendarMonth = ref(formatDateStr(new Date()).slice(0, 7))
+/** 日历月份标签 */
+const calendarMonthLabel = computed(() => {
+  const [y, m] = calendarMonth.value.split('-').map(Number)
+  return `${y}年${m}月`
+})
+/** 日历表头 */
+const WEEK_HEADER = ['日', '一', '二', '三', '四', '五', '六']
+/** 日历网格单元格 */
+interface CalendarCell {
+  key: string
+  day: number
+  hasOrder: boolean
+  isToday: boolean
+  isSelected: boolean
+  isPlaceholder: boolean
+}
+/** 日历当月网格(含前后占位补齐7列) */
+const calendarGrid = computed<CalendarCell[]>(() => {
+  const [y, m] = calendarMonth.value.split('-').map(Number)
+  const firstDay = new Date(y, m - 1, 1)
+  const leadDays = firstDay.getDay()
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const today = formatDateStr(new Date())
+  const cells: CalendarCell[] = []
+  for (let i = 0; i < leadDays; i++) {
+    cells.push({ key: `ph-${i}`, day: 0, hasOrder: false, isToday: false, isSelected: false, isPlaceholder: true })
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const key = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    cells.push({
+      key,
+      day,
+      hasOrder: orderDatesSet.value.has(key),
+      isToday: key === today,
+      isSelected: key === visibleDate.value,
+      isPlaceholder: false,
+    })
+  }
+  while (cells.length % 7 !== 0) {
+    cells.push({ key: `ph-end-${cells.length}`, day: 0, hasOrder: false, isToday: false, isSelected: false, isPlaceholder: true })
+  }
+  return cells
+})
+/** 日历上一月 */
+const calendarPrevMonth = (): void => {
+  const [y, m] = calendarMonth.value.split('-').map(Number)
+  const d = new Date(y, m - 2, 1)
+  calendarMonth.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+/** 日历下一月 */
+const calendarNextMonth = (): void => {
+  const [y, m] = calendarMonth.value.split('-').map(Number)
+  const d = new Date(y, m, 1)
+  calendarMonth.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+/** 打开日历时,月份跟随当前可视日期 */
+const openCalendar = (): void => {
+  if (visibleDate.value) calendarMonth.value = visibleDate.value.slice(0, 7)
+  showCalendar.value = true
+}
+/** 选择日历日期:滚动到该日期并关闭弹窗 */
+const onCalendarSelect = (key: string): void => {
+  if (!orderDatesSet.value.has(key)) return
+  showCalendar.value = false
+  // 如果选的是比左侧最早显示日期还早的历史,前移以包含它
+  if (compareDate(key, earliestShownDate.value) < 0) {
+    earliestShownDate.value = key
+  }
+  void nextTick(() => scrollToDate(key))
+}
+
 // ============ 生命周期 ============
 // Orders 未启用 keep-alive,每次进入都是全新挂载,保证每次进入都重新加载 + 滚到今天
 onMounted(() => {
+  canRefresh.value = true
   // 加载后端订餐配置(取消截止时间等),供 isCancellableByDeadline 使用
   loadConfig()
-  // 入口:加载订单 → 滚到今天(过去日期在上方隐藏,今天在第一屏可见)
-  loadOrders().then(() => scrollToToday())
+  // 入口:加载订单后,右侧内容区滚到今天(左侧栏默认即"今天+未来",今天置顶)
+  loadOrders().then(async () => {
+    await scrollToToday()
+  })
 })
 </script>
 
 <template>
   <div class="orders-page">
     <!-- 标题 -->
-    <h1 class="orders-page__title">我的订单</h1>
+    <h1 class="orders-page__title">订单</h1>
 
-    <!-- 状态 Tab(文字 + 下划线) -->
+    <!-- 状态 Tab + 日历按钮 -->
     <nav class="orders-page__tabs">
       <button
         v-for="t in statusTabs"
@@ -375,110 +657,236 @@ onMounted(() => {
       >
         {{ t.label }}
       </button>
+      <!-- 日历选择按钮 -->
+      <button
+        type="button"
+        class="orders-page__cal-btn"
+        aria-label="选择日期"
+        @click="openCalendar"
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+      </button>
     </nav>
 
-    <!-- 下拉刷新 + 列表(列表不在顶部时禁用下拉刷新,避免误触发) -->
-    <van-pull-refresh
-      v-model="refreshing"
-      :disabled="!canRefresh"
-      @refresh="onRefresh"
+    <!-- 日历弹窗(居中) -->
+    <VanPopup
+      v-model:show="showCalendar"
+      position="center"
+      round
+      teleport="body"
+      :style="{ width: '90%', maxWidth: '400px' }"
     >
+      <div class="calendar">
+        <!-- 月份导航 -->
+        <div class="calendar__head">
+          <button type="button" class="calendar__nav" aria-label="上一月" @click="calendarPrevMonth">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <span class="calendar__month">{{ calendarMonthLabel }}</span>
+          <button type="button" class="calendar__nav" aria-label="下一月" @click="calendarNextMonth">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+          </button>
+        </div>
+        <!-- 表头 -->
+        <div class="calendar__week-header">
+          <span v-for="w in WEEK_HEADER" :key="w" class="calendar__week-cell">{{ w }}</span>
+        </div>
+        <!-- 网格 -->
+        <div class="calendar__grid">
+          <button
+            v-for="cell in calendarGrid"
+            :key="cell.key"
+            type="button"
+            :disabled="cell.isPlaceholder || !cell.hasOrder"
+            class="calendar__cell"
+            :class="{
+              'calendar__cell--placeholder': cell.isPlaceholder,
+              'calendar__cell--has-order': cell.hasOrder,
+              'calendar__cell--no-order': !cell.isPlaceholder && !cell.hasOrder,
+              'calendar__cell--today': cell.isToday,
+              'calendar__cell--selected': cell.isSelected,
+            }"
+            @click="onCalendarSelect(cell.key)"
+          >
+            <span v-if="!cell.isPlaceholder" class="calendar__day">{{ cell.day }}</span>
+            <span v-if="!cell.isPlaceholder && cell.hasOrder" class="calendar__dot"></span>
+          </button>
+        </div>
+        <!-- 底部提示 -->
+        <div class="calendar__footer">
+          <span>有订单的日期可点击选择</span>
+        </div>
+      </div>
+    </VanPopup>
+
+    <!-- 主体:左侧日期竖列 + 右侧内容区(单页堆叠,无切换动作) -->
+    <div class="orders-page__main">
+      <!-- 左侧日期竖列:默认今天+未来(今天顶端),历史日期今天上方默认隐藏,下拉/滚动到顶加载 -->
       <div
-        class="orders-page__scroll"
-        ref="scrollContainerRef"
-        @scroll.passive="handleScroll"
+        ref="sidebarRef"
+        class="date-sidebar"
+        @scroll.passive="handleSidebarScroll"
+        @touchstart.passive="onSidebarTouchStart"
+        @touchmove.passive="onSidebarTouchMove"
       >
-      <!-- 加载中 -->
-      <div v-if="loading && !loaded" class="orders-page__loading">
-        <van-loading size="24px">加载中...</van-loading>
+        <!-- 顶部提示:存在更早历史时下拉加载 -->
+        <div v-if="hasMoreHistory" class="date-sidebar__hint">下拉加载更早</div>
+
+        <button
+          v-for="d in dateList"
+          :key="d.date"
+          type="button"
+          class="date-sidebar__item"
+          :class="{ 'date-sidebar__item--active': visibleDate === d.date }"
+          :data-sidebar-date="d.date"
+          @click="scrollToDate(d.date)"
+        >
+          <span class="date-sidebar__date">{{ d.dateLabel }}</span>
+          <span class="date-sidebar__weekday">{{ d.weekday }}</span>
+          <!-- "今天"标记 -->
+          <span v-if="d.isToday" class="date-sidebar__today">今天</span>
+          <!-- 三餐固定3个位置(早/中/晚):已订餐显色,未订餐保留占位 -->
+          <div class="date-sidebar__dots">
+            <template v-for="mt in MEAL_TYPE_ORDER" :key="mt">
+              <span
+                v-if="isMealOrdered(d, mt)"
+                class="date-sidebar__dot"
+                :style="{ backgroundColor: mealDotColor(mt) }"
+              ></span>
+              <span v-else class="date-sidebar__dot-placeholder"></span>
+            </template>
+          </div>
+        </button>
+
+        <!-- 空状态:暂无任何订单 -->
+        <div v-if="orders.length === 0" class="date-sidebar__empty">
+          暂无订餐
+        </div>
       </div>
 
-      <!-- 空列表 -->
-      <EmptyState v-else-if="groupedOrders.length === 0" text="暂无订单" />
-
-      <!-- 订单列表(按日期 + 餐别分组,菜品平铺) -->
-      <div v-else class="orders-page__list">
-        <section
-          v-for="group in groupedOrders"
-          :key="group.dateStr"
-          class="orders-page__group"
-          :data-date="group.dateStr"
+      <!-- 右侧内容区:所有日期垂直堆叠,上下滚动无切换;日期跟随滚动同步 -->
+      <van-pull-refresh
+        v-model="refreshing"
+        :disabled="!canRefresh"
+        @refresh="onRefresh"
+      >
+        <div
+          ref="contentRef"
+          class="content-area"
+          @scroll.passive="handleScroll"
         >
-          <!-- 日期标题(完整中文日期,sticky 吸顶) -->
-          <div class="orders-page__date-header">{{ group.label }}</div>
-
-          <!-- 当日无订单占位(仅今天会渲染,过去日期无订单时不会进入 groupedOrders) -->
-          <div v-if="group.meals.length === 0" class="orders-page__empty-day">
-            <span>今日暂无订单</span>
+          <!-- 顶部 sticky 日期指示器:跟随当前可视日期吸顶显示 -->
+          <div v-if="dateList.length > 0" class="content-area__sticky-date">
+            <span class="content-area__date-num">{{ visibleDateNumber }}</span>
+            <span class="content-area__date-rel">{{ visibleDateRelativeLabel }}</span>
           </div>
 
-          <!-- 餐别卡片(只展示有订单的餐别) -->
-          <article
-            v-for="meal in group.meals"
-            :key="meal.mealType"
-            class="orders-page__meal"
-            :class="{
-              'orders-page__meal--pending': meal.cancellable,
-              'orders-page__meal--done': !meal.cancellable,
-            }"
-          >
-            <!-- 餐别标题(单字 badge 按餐别配色 + 全称 + 小计) -->
-            <div class="orders-page__meal-header">
-              <span class="orders-page__meal-badge" :style="mealBadgeStyle(meal.mealType)">{{ meal.mealName }}</span>
-              <span class="orders-page__meal-fullname">{{ meal.mealFullName }}</span>
-              <span class="orders-page__meal-subtotal">¥{{ formatMoney(meal.subtotal) }}</span>
-            </div>
+          <!-- 加载中 -->
+          <div v-if="loading && !loaded" class="content-area__loading">
+            <van-loading size="24px">加载中...</van-loading>
+          </div>
 
-            <!-- 菜品行(平铺,每行一道菜) -->
-            <div
-              v-for="row in meal.rows"
-              :key="row.key"
-              class="orders-page__dish-row"
-              @click="goDetail(row.orderId)"
+          <!-- 空列表 -->
+          <EmptyState v-else-if="loaded && orders.length === 0" text="暂无订单" />
+
+          <!-- 订单列表(按日期 + 餐别分组,菜品平铺) -->
+          <div v-else class="content-area__list">
+            <section
+              v-for="group in groupedOrders"
+              :key="group.dateStr"
+              :ref="(el) => setDaySectionRef(group.dateStr, el as Element | null)"
+              class="day-section"
+              :class="{ 'day-section--active': visibleDate === group.dateStr }"
+              :data-date="group.dateStr"
             >
-              <span class="orders-page__dish-name">{{ row.name }}</span>
-              <span class="orders-page__dish-qty">x{{ row.quantity }}</span>
-              <span class="orders-page__dish-price">¥{{ formatMoney(row.price * row.quantity) }}</span>
-              <span
-                class="orders-page__status-tag"
+              <!-- 日期标题(居中 + 胶囊包裹) -->
+              <div class="day-section__header">
+                <span class="day-section__header-pill">{{ group.label }}</span>
+              </div>
+
+              <!-- 当日无订单占位(仅今天会渲染) -->
+              <div v-if="group.meals.length === 0" class="day-section__empty">
+                <span>今日暂无订单</span>
+              </div>
+
+              <!-- 餐别卡片(只展示有订单的餐别) -->
+              <article
+                v-for="meal in group.meals"
+                :key="meal.mealType"
+                class="orders-page__meal"
                 :class="{
-                  'orders-page__status-tag--accent': row.status === 1,
-                  'orders-page__status-tag--primary': row.status === 2,
-                  'orders-page__status-tag--muted': row.status === 3,
+                  'orders-page__meal--pending': meal.cancellable,
+                  'orders-page__meal--done': !meal.cancellable,
                 }"
-              >{{ formatOrderStatus(row.status) }}</span>
-            </div>
-
-            <!-- 取餐码(待取餐且存在 pickupCode) -->
-            <div
-              v-if="meal.cancellable && pickupOrders(meal).length > 0"
-              class="orders-page__pickup-row"
-            >
-              <button
-                v-for="(row, idx) in pickupOrders(meal)"
-                :key="`${row.key}-${idx}`"
-                type="button"
-                class="orders-page__pickup-pill"
-                @click.stop="row.pickupCode && copyCode(row.pickupCode, $event)"
               >
-                取餐码 {{ row.pickupCode }}
-              </button>
-            </div>
+                <!-- 餐别标题(单字 badge 按餐别配色 + 全称 + 小计) -->
+                <div class="orders-page__meal-header">
+                  <span class="orders-page__meal-badge" :style="mealBadgeStyle(meal.mealType)">{{ meal.mealName }}</span>
+                  <span class="orders-page__meal-fullname">{{ meal.mealFullName }}</span>
+                  <span class="orders-page__meal-subtotal">¥{{ formatMoney(meal.subtotal) }}</span>
+                </div>
 
-            <!-- 取消按钮(仅待取餐,位于卡片右下角) -->
-            <div v-if="meal.cancellable" class="orders-page__meal-foot">
-              <button
-                type="button"
-                class="orders-page__cancel-btn"
-                :disabled="cancelling"
-                @click.stop="onCancelMeal(meal)"
-              >取消订单</button>
+                <!-- 菜品行(平铺,每行一道菜) -->
+                <div
+                  v-for="row in meal.rows"
+                  :key="row.key"
+                  class="orders-page__dish-row"
+                  @click="goDetail(row.orderId)"
+                >
+                  <span class="orders-page__dish-name">{{ row.name }}</span>
+                  <span class="orders-page__dish-qty">x{{ row.quantity }}</span>
+                  <span class="orders-page__dish-price">¥{{ formatMoney(row.price * row.quantity) }}</span>
+                  <span
+                    class="orders-page__status-tag"
+                    :class="{
+                      'orders-page__status-tag--accent': row.status === 1,
+                      'orders-page__status-tag--primary': row.status === 2,
+                      'orders-page__status-tag--muted': row.status === 3,
+                    }"
+                  >{{ formatOrderStatus(row.status) }}</span>
+                </div>
+
+                <!-- 取餐码(待取餐且存在 pickupCode) -->
+                <div
+                  v-if="meal.cancellable && pickupOrders(meal).length > 0"
+                  class="orders-page__pickup-row"
+                >
+                  <button
+                    v-for="(row, idx) in pickupOrders(meal)"
+                    :key="`${row.key}-${idx}`"
+                    type="button"
+                    class="orders-page__pickup-pill"
+                    @click.stop="row.pickupCode && copyCode(row.pickupCode, $event)"
+                  >
+                    取餐码 {{ row.pickupCode }}
+                  </button>
+                </div>
+
+                <!-- 取消按钮(仅待取餐,位于卡片右下角) -->
+                <div v-if="meal.cancellable" class="orders-page__meal-foot">
+                  <button
+                    type="button"
+                    class="orders-page__cancel-btn"
+                    :disabled="cancelling"
+                    @click.stop="onCancelMeal(meal)"
+                  >取消订单</button>
+                </div>
+              </article>
+            </section>
+
+            <!-- 底部提示 -->
+            <div class="content-area__end-hint">
+              <span>已展示所有订单</span>
             </div>
-          </article>
-        </section>
-      </div>
-      </div>
-    </van-pull-refresh>
+          </div>
+        </div>
+      </van-pull-refresh>
+    </div>
   </div>
 </template>
 
@@ -486,30 +894,12 @@ onMounted(() => {
 @use '@/styles/variables' as *;
 
 .orders-page {
-  // 固定高度 + overflow hidden:让自身不滚动,把滚动职责交给 .orders-page__scroll
-  // 否则 van-pull-refresh 不是 flex 容器,内部 .orders-page__scroll 的 flex:1 无效,
-  // 真正滚动的是 window,scrollContainerRef.scrollTo 失效,scrollToToday 不起作用。
   height: 100vh;
   height: 100dvh; // 移动端动态视口高度,避免 iOS 地址栏伸缩抖动
   background: $brand-card;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-
-  // 让 van-pull-refresh 占满剩余高度(除 title/tabs 外),让 flex 链贯通到滚动容器
-  :deep(.van-pull-refresh) {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  :deep(.van-pull-refresh__track) {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
 
   &__title {
     margin: 0;
@@ -518,13 +908,36 @@ onMounted(() => {
     font-weight: 700;
     color: $brand-foreground;
     flex-shrink: 0;
+    text-align: center;
   }
 
   &__tabs {
     display: flex;
+    align-items: center;
     gap: 20px;
     padding: 0 16px 12px;
     flex-shrink: 0;
+  }
+
+  &__cal-btn {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: $brand-secondary;
+    color: $brand-foreground;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s;
+
+    &:active {
+      background: rgba(0, 101, 253, 0.1);
+      color: $brand-primary;
+    }
   }
 
   &__tab {
@@ -555,37 +968,266 @@ onMounted(() => {
     }
   }
 
-  /* 滚动容器(覆盖 van-pull-refresh 内部,用于监听滚动控制下拉刷新) */
-  &__scroll {
+  /* 主体区域:左侧日期竖列 + 右侧内容 */
+  &__main {
     flex: 1;
+    display: flex;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* 让 van-pull-refresh 占满剩余高度,让 flex 链贯通到滚动容器 */
+  :deep(.van-pull-refresh) {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.van-pull-refresh__track) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ============ 左侧日期竖列(与订餐页一致) ============ */
+  .date-sidebar {
+    width: 96px;
+    flex-shrink: 0;
+    background: $brand-secondary;
+    border-right: 1px solid $brand-border;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+
+    &__item {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      width: 100%;
+      /* 固定项高:避免 MiSans 字体按需加载换排导致行高变化 → 布局漂移,
+         确保"今天"项吸顶定位不受字体加载时序影响(适配稳定性) */
+      height: 70px;
+      padding: 0 4px;
+      box-sizing: border-box;
+      overflow: hidden;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid $brand-border;
+      cursor: pointer;
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      &:active {
+        background: rgba(0, 0, 0, 0.04);
+      }
+
+      &--active {
+        background: $brand-primary;
+
+        .date-sidebar__date {
+          color: $brand-primary-fg;
+          font-weight: 500;
+        }
+        .date-sidebar__weekday {
+          color: rgba(255, 255, 255, 0.8);
+        }
+        .date-sidebar__today {
+          color: rgba(255, 255, 255, 0.8);
+        }
+      }
+    }
+
+    &__date {
+      font-size: 13px;
+      color: $brand-secondary-foreground;
+      line-height: 1.2;
+    }
+
+    &__weekday {
+      font-size: 10px;
+      color: $brand-muted-foreground;
+      line-height: 1.2;
+    }
+
+    &__today {
+      font-size: 10px;
+      color: $brand-primary;
+      line-height: 1.2;
+    }
+
+    /* 三餐色竖排圆点容器:早橙/中绿/晚紫,固定3个位置 */
+    &__dots {
+      position: absolute;
+      top: 8px;
+      right: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    &__dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    /* 未订餐的餐别占位:保留等宽等高位置 */
+    &__dot-placeholder {
+      width: 6px;
+      height: 6px;
+    }
+
+    &__empty {
+      padding: 24px 8px;
+      text-align: center;
+      font-size: 11px;
+      color: $brand-muted-foreground;
+      line-height: 1.5;
+    }
+
+    /* 顶部"下拉加载更早"提示(吸顶,不挤占今天项位置) */
+    &__hint {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      padding: 6px 4px;
+      text-align: center;
+      font-size: 10px;
+      line-height: 1.2;
+      color: $brand-muted-foreground;
+      background: $brand-secondary;
+    }
+  }
+
+  /* ============ 右侧内容区 ============ */
+  :deep(.content-area) {
+    flex: 1;
+    min-width: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     min-height: 0;
-    // 给 fixed TabBar 让位,避免最后一条订单被盖住(原架构是 window 滚动 + app-container padding)
+    // 给固定 TabBar 让位,避免最后一条被盖住
     padding-bottom: calc(64px + env(safe-area-inset-bottom) + 12px);
-    // 防止滚动链传到父容器,避免误触页面级滚动
     overscroll-behavior: contain;
   }
 
-  &__loading {
-    padding: 48px 0;
+  /* 顶部 sticky 日期指示器:跟随当前可视日期,吸顶显示 */
+  :deep(.content-area__sticky-date) {
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     justify-content: center;
+    align-items: center;
+    gap: 0;
+    padding: 8px 0;
+    margin-bottom: 4px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 70%, rgba(255, 255, 255, 0));
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
-  &__list {
-    // 底部 padding 由 .orders-page__scroll 提供(给 TabBar 让位),这里只管左右
-    padding: 0 16px;
+  :deep(.content-area__date-num),
+  :deep(.content-area__date-rel) {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 18px;
+    font-size: 15px;
+    font-weight: 700;
+    border-radius: 999px;
+    letter-spacing: 0.5px;
   }
 
-  &__group {
-    margin-bottom: 16px;
+  :deep(.content-area__date-num) {
+    background: linear-gradient(135deg, rgba(0, 101, 253, 0.08), rgba(0, 101, 253, 0.18));
+    color: $brand-primary;
+    border: 1px solid rgba(0, 101, 253, 0.25);
+    box-shadow: 0 2px 8px rgba(0, 101, 253, 0.12);
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: none;
   }
 
-  /* 当日无订单占位(仅今天会渲染) */
-  &__empty-day {
-    padding: 24px 16px;
-    text-align: center;
+  :deep(.content-area__date-rel) {
+    background: $brand-primary;
+    color: #fff;
+    border: 1px solid $brand-primary;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    box-shadow: 0 2px 8px rgba(0, 101, 253, 0.2);
+  }
+
+  :deep(.content-area__loading) {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 200px;
+    padding: 40px 0;
+  }
+
+  :deep(.content-area__list) {
+    padding: 0 12px;
+  }
+
+  /* 底部提示 */
+  :deep(.content-area__end-hint) {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 16px 0 8px;
+
+    span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 14px;
+      background: $brand-secondary;
+      border-radius: 999px;
+      font-size: 11px;
+      color: $brand-muted-foreground;
+      border: 1px dashed $brand-border;
+    }
+  }
+
+  /* ============ 日期 section(单页堆叠模式:每个日期一个 section) ============ */
+  :deep(.day-section) {
+    padding: 4px 0 8px;
+  }
+
+  :deep(.day-section__header) {
+    display: flex;
+    justify-content: center;
+    padding: 12px 12px 10px;
+  }
+
+  :deep(.day-section__header-pill) {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 18px;
+    font-size: 14px;
+    font-weight: 700;
+    color: $brand-foreground;
+    background: $brand-secondary;
+    border: 1px solid $brand-border;
+    border-radius: 999px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  :deep(.day-section__empty) {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 80px;
+    padding: 16px 0;
     color: $brand-muted-foreground;
     font-size: 13px;
     background: $brand-card;
@@ -593,20 +1235,7 @@ onMounted(() => {
     border-radius: 12px;
   }
 
-  /* 日期标题:完整中文日期,sticky 吸顶 */
-  &__date-header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    padding: 10px 12px;
-    margin: 0 -12px 12px;
-    background: $brand-card;
-    font-size: 14px;
-    font-weight: 700;
-    color: $brand-foreground;
-    border-bottom: 1px solid $brand-border;
-  }
-
+  /* ============ 餐别卡片 ============ */
   &__meal {
     margin-bottom: 12px;
     border-radius: 16px;
@@ -623,7 +1252,6 @@ onMounted(() => {
     }
   }
 
-  /* 餐别标题:单字 badge + 全称 + 小计 */
   &__meal-header {
     display: flex;
     align-items: center;
@@ -640,7 +1268,6 @@ onMounted(() => {
     font-size: 14px;
     font-weight: 700;
     border-radius: 50%;
-    /* background / color / border-color 由内联样式动态控制(早餐橙/午餐蓝/晚餐紫) */
   }
 
   &__meal-fullname {
@@ -761,6 +1388,138 @@ onMounted(() => {
     &:disabled {
       opacity: 0.5;
     }
+  }
+}
+
+/* ============ 日历弹窗 ============ */
+.calendar {
+  padding: 20px 16px 16px;
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding-bottom: 16px;
+    border-bottom: 1px solid $brand-border;
+  }
+
+  &__nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: $brand-secondary;
+    color: $brand-foreground;
+    cursor: pointer;
+
+    &:active {
+      background: rgba(0, 101, 253, 0.1);
+      color: $brand-primary;
+    }
+  }
+
+  &__month {
+    margin: 0 24px;
+    font-size: 16px;
+    font-weight: 700;
+    color: $brand-foreground;
+  }
+
+  &__week-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin: 16px 0 8px;
+  }
+
+  &__week-cell {
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: $brand-muted-foreground;
+    padding: 4px 0;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+
+  &__cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    aspect-ratio: 1;
+    min-height: 44px;
+    border-radius: 10px;
+    border: 1.5px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+
+    &--placeholder {
+      background: transparent;
+      border: none;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    &--has-order {
+      background: $brand-card;
+      border-color: $brand-border;
+    }
+
+    &--no-order {
+      background: $brand-secondary;
+      border-color: transparent;
+      color: $brand-muted-foreground;
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &--today {
+      border-color: $brand-primary;
+    }
+
+    &--selected {
+      background: $brand-primary !important;
+      border-color: $brand-primary !important;
+      color: #fff;
+    }
+  }
+
+  &__day {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  &__dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: $brand-primary;
+  }
+
+  &__cell--selected &__dot {
+    background: #fff;
+  }
+
+  &__footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid $brand-border;
+    text-align: center;
+    font-size: 12px;
+    color: $brand-muted-foreground;
   }
 }
 </style>

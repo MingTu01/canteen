@@ -13,7 +13,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>enterprise-canteen</artifactId>
-    <version>0.0.7</version>
+    <version>0.0.13</version>
     <packaging>jar</packaging>
     <name>enterprise-canteen</name>
     <description>企业智慧食堂预定餐系统</description>
@@ -140,6 +140,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
+                    <parameters>true</parameters>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>

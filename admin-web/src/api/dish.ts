@@ -4,8 +4,6 @@ import type { Dish, DishQuery, PageResult } from './types'
 export const dishApi = {
   list: (params: DishQuery) =>
     api.get<PageResult<Dish>>(`/dish/store/${params.storeId}`, { params }).then((r) => r.data),
-  listNew: (storeId: number) =>
-    api.get<PageResult<Dish>>(`/dish/store/${storeId}/new`).then((r) => r.data),
   detail: (id: number) => api.get<Dish>(`/dish/${id}`).then((r) => r.data),
   create: (data: Dish) => api.post<Dish>('/dish', data).then((r) => r.data),
   update: (id: number, data: Dish) => api.put<Dish>(`/dish/${id}`, data).then((r) => r.data),

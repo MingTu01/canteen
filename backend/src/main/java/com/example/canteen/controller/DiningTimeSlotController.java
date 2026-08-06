@@ -24,7 +24,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.getTimeSlotsByStore(storeId));
     }
 
-    @OperationLog(value = "创建就餐时段", detail = "'门店ID ' + #timeSlot.storeId + ' 名称 ' + #timeSlot.name")
+    @OperationLog(value = "创建就餐时段", detail = "'门店 ' + #resolver.storeName(#timeSlot.storeId) + ' 名称 ' + #timeSlot.name")
     @PostMapping
     public ApiResponse<DiningTimeSlot> createTimeSlot(@RequestBody DiningTimeSlot timeSlot) {
         if (SecurityContext.isEmployee()) {

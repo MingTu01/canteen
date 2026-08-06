@@ -11,7 +11,7 @@ defineProps<Props>()
   <div class="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8" role="main" :aria-label="title">
     <header
       v-if="title || description || $slots.actions"
-      class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+      class="mb-6 flex flex-wrap items-center justify-between gap-4"
     >
       <div class="min-w-0">
         <h1 v-if="title" class="text-2xl font-bold tracking-tight text-text">

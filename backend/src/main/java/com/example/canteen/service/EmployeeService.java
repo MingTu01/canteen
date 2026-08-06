@@ -56,8 +56,43 @@ public class EmployeeService {
         return employeeMapper.selectByCardNoAndStore(cardNo, storeId);
     }
 
+    /**
+     * 按标识符自动适配匹配员工(批量头像上传用)。
+     * 依次尝试:卡号 → 手机号 → 姓名,命中即返回;均未命中返回 null。
+     */
+    public Employee findEmployeeByIdentifier(String identifier, Long storeId) {
+        if (identifier == null || identifier.isBlank()) {
+            return null;
+        }
+        String key = identifier.trim();
+        // 1. 卡号
+        Employee e = employeeMapper.selectByCardNoAndStore(key, storeId);
+        if (e != null) {
+            return e;
+        }
+        // 2. 手机号
+        e = employeeMapper.selectByPhoneAndStore(key, storeId);
+        if (e != null) {
+            return e;
+        }
+        // 3. 姓名
+        return employeeMapper.selectByNameAndStore(key, storeId);
+    }
+
     public Employee createEmployee(Employee employee) {
         SecurityContext.checkStoreAccess(employee.getStoreId());
+        // 手机号必填(H5/小程序登录凭证,同店内唯一)
+        if (employee.getPhone() == null || employee.getPhone().isBlank()) {
+            throw new BusinessException("手机号不能为空");
+        }
+        // 卡号必填
+        if (employee.getCardNo() == null || employee.getCardNo().isBlank()) {
+            throw new BusinessException("卡号不能为空");
+        }
+        // 卡号全局唯一(对齐数据库 employee.card_no 唯一索引,含已逻辑删除记录),避免唯一索引冲突报 500
+        if (employeeMapper.countByCardNoExcludeId(employee.getCardNo(), null) > 0) {
+            throw new BusinessException("卡号已存在: " + employee.getCardNo());
+        }
         // P1-6 修复 Mass Assignment:强制重置敏感字段,防止前端注入
         employee.setId(null);               // 防止覆盖已有记录
         employee.setIsDeleted(0);           // 防止创建即删除
@@ -101,6 +136,11 @@ public class EmployeeService {
         SecurityContext.checkStoreAccess(existing.getStoreId());
         // 禁止通过 update 修改 storeId(防跨租户移动员工),用 existing.storeId 覆盖
         employee.setStoreId(existing.getStoreId());
+        // 卡号全局唯一校验(编辑场景,排除自身),避免唯一索引冲突报 500
+        if (employee.getCardNo() != null && !employee.getCardNo().isBlank()
+                && employeeMapper.countByCardNoExcludeId(employee.getCardNo(), employee.getId()) > 0) {
+            throw new BusinessException("卡号已存在: " + employee.getCardNo());
+        }
         // P0-1 禁止通过 update 修改敏感字段:余额(只能走 recharge)/密码新鲜度/删除标记
         // 设为 null 后,MyBatis Plus 默认 NOT_NULL 策略会跳过这些字段不更新
         employee.setBalance(null);
@@ -150,11 +190,11 @@ public class EmployeeService {
                 if (e.getName() == null || e.getName().isBlank()) {
                     throw new BusinessException("姓名不能为空");
                 }
-                // 卡号唯一性校验(同门店)
-                Long exist = employeeMapper.selectCount(new LambdaQueryWrapper<Employee>()
-                        .eq(Employee::getStoreId, storeId)
-                        .eq(Employee::getCardNo, e.getCardNo()));
-                if (exist != null && exist > 0) {
+                if (e.getPhone() == null || e.getPhone().isBlank()) {
+                    throw new BusinessException("手机号不能为空");
+                }
+                // 卡号唯一性校验(全局,对齐数据库唯一索引含已删除记录)
+                if (employeeMapper.countByCardNoExcludeId(e.getCardNo(), null) > 0) {
                     throw new BusinessException("卡号已存在");
                 }
                 e.setStoreId(storeId);
@@ -327,13 +367,13 @@ public class EmployeeService {
         return result;
     }
 
-    /** 简易员工 VO(脱敏,不含密码;P2-6 手机号脱敏) */
+    /** 简易员工 VO(不含密码) */
     private Map<String, Object> employeeToVO(Employee e) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", e.getId());
         m.put("storeId", e.getStoreId());
         m.put("cardNo", e.getCardNo());
-        m.put("phone", maskPhone(e.getPhone()));
+        m.put("phone", e.getPhone());
         m.put("name", e.getName());
         m.put("avatar", e.getAvatar());
         m.put("departmentId", e.getDepartmentId());
@@ -342,11 +382,5 @@ public class EmployeeService {
         m.put("createdAt", e.getCreatedAt());
         m.put("updatedAt", e.getUpdatedAt());
         return m;
-    }
-
-    /** P2-6 手机号脱敏:保留前 3 后 4 */
-    private static String maskPhone(String phone) {
-        if (phone == null || phone.length() < 11) return phone;
-        return phone.substring(0, 3) + "****" + phone.substring(7);
     }
 }

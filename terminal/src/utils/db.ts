@@ -76,7 +76,6 @@ export interface CachedDish {
   image: string | null
   category: string | null
   mealTypes: string | null
-  isNew: number
   status: number
   updatedAt: string
 }

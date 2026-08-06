@@ -126,8 +126,6 @@ export interface Dish {
   category?: string
   /** 适用餐次(逗号分隔:1=早餐,2=午餐,3=晚餐),如 "1,2,3" */
   mealTypes?: string
-  /** 是否新品:1=是 0=否 */
-  isNew?: number
   /** 是否特价/推荐:1=是 0=否(H5 端展示用,后端 Dish 实体未直接含此字段,保留兼容) */
   isSpecial?: number
   /** 上架状态:1=上架 0=下架 */

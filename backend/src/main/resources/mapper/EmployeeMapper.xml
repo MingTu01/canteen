@@ -11,9 +11,21 @@
         LIMIT 1
     </select>
 
+    <select id="countByCardNoExcludeId" resultType="int">
+        SELECT COUNT(*) FROM employee
+        WHERE card_no = #{cardNo}
+        <if test="excludeId != null">AND id != #{excludeId}</if>
+    </select>
+
     <select id="selectByPhoneAndStore" resultType="com.example.canteen.entity.Employee">
         SELECT * FROM employee
         WHERE phone = #{phone} AND store_id = #{storeId} AND status = 1 AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectByNameAndStore" resultType="com.example.canteen.entity.Employee">
+        SELECT * FROM employee
+        WHERE name = #{name} AND store_id = #{storeId} AND status = 1 AND is_deleted = 0
         LIMIT 1
     </select>
 

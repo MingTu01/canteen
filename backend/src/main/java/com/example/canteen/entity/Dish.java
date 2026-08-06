@@ -20,7 +20,6 @@ public class Dish {
     private String category;
     /** 适用餐次(逗号分隔:1=早餐,2=午餐,3=晚餐),如 "1,2,3" */
     private String mealTypes;
-    private Integer isNew;
     private Integer status;
     /** 库存,null 表示不限 */
     private Integer stock;

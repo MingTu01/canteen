@@ -75,7 +75,6 @@ export interface Dish {
   image?: string
   category?: string
   mealTypes?: string
-  isNew?: number
   status?: number
   stock?: number | null
   maxPerOrder?: number | null
@@ -100,7 +99,6 @@ export interface DishQuery extends PageQuery {
   category?: string
   mealType?: number
   status?: number
-  isNew?: number
 }
 
 /* ============================================================

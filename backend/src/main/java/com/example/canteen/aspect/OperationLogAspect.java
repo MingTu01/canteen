@@ -1,6 +1,7 @@
 package com.example.canteen.aspect;
 
 import com.example.canteen.annotation.OperationLog;
+import com.example.canteen.service.LogDetailResolver;
 import com.example.canteen.service.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -30,11 +31,13 @@ import java.lang.reflect.Method;
 public class OperationLogAspect {
 
     private final OperationLogService operationLogService;
+    private final LogDetailResolver logDetailResolver;
     private final ExpressionParser spelParser = new SpelExpressionParser();
     private final DefaultParameterNameDiscoverer paramNameDiscoverer = new DefaultParameterNameDiscoverer();
 
-    public OperationLogAspect(OperationLogService operationLogService) {
+    public OperationLogAspect(OperationLogService operationLogService, LogDetailResolver logDetailResolver) {
         this.operationLogService = operationLogService;
+        this.logDetailResolver = logDetailResolver;
     }
 
     @Around("@annotation(com.example.canteen.annotation.OperationLog)")
@@ -83,6 +86,8 @@ public class OperationLogAspect {
         try {
             MethodBasedEvaluationContext ctx = new MethodBasedEvaluationContext(
                     joinPoint.getTarget(), method, joinPoint.getArgs(), paramNameDiscoverer);
+            // 注册名称解析器为 SpEL 变量 #resolver,以便模板将实体 ID 解析为名称
+            ctx.setVariable("resolver", logDetailResolver);
             Expression exp = spelParser.parseExpression(template);
             Object value = exp.getValue(ctx);
             return value == null ? "" : value.toString();

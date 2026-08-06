@@ -76,20 +76,20 @@ INSERT INTO employee (store_id, card_no, name, avatar, department_id, balance, p
 (2, 'CARD005', '陈静', NULL, 4, 400.00, '13800000005', '$2b$10$ZYbFA3pByvcxS1/wrlSDP.i8ElgaAIyviU5Pp26Ev8PVJcM2GOMaC');
 
 -- 菜品
-INSERT INTO dish (store_id, name, price, image, category, is_new) VALUES
-(1, '红烧排骨', 15.00, NULL, '荤菜', 0),
-(1, '宫保鸡丁', 12.00, NULL, '荤菜', 0),
-(1, '青椒肉丝', 11.00, NULL, '荤菜', 0),
-(1, '麻婆豆腐', 10.00, NULL, '素菜', 0),
-(1, '蒜蓉西兰花', 8.00, NULL, '素菜', 0),
-(1, '番茄蛋汤', 4.00, NULL, '汤类', 0),
-(1, '白粥', 2.00, NULL, '主食', 0),
-(1, '煎蛋', 3.00, NULL, '主食', 0),
-(1, '清蒸鲈鱼', 18.00, NULL, '荤菜', 0),
-(1, '蛋炒饭', 8.00, NULL, '主食', 0),
-(1, '绿豆沙', 3.00, NULL, '饮品', 1),
-(1, '凉拌黄瓜', 5.00, NULL, '凉菜', 1),
-(1, '酸梅汤', 4.00, NULL, '饮品', 1);
+INSERT INTO dish (store_id, name, price, image, category) VALUES
+(1, '红烧排骨', 15.00, NULL, '荤菜'),
+(1, '宫保鸡丁', 12.00, NULL, '荤菜'),
+(1, '青椒肉丝', 11.00, NULL, '荤菜'),
+(1, '麻婆豆腐', 10.00, NULL, '素菜'),
+(1, '蒜蓉西兰花', 8.00, NULL, '素菜'),
+(1, '番茄蛋汤', 4.00, NULL, '汤类'),
+(1, '白粥', 2.00, NULL, '主食'),
+(1, '煎蛋', 3.00, NULL, '主食'),
+(1, '清蒸鲈鱼', 18.00, NULL, '荤菜'),
+(1, '蛋炒饭', 8.00, NULL, '主食'),
+(1, '绿豆沙', 3.00, NULL, '饮品'),
+(1, '凉拌黄瓜', 5.00, NULL, '凉菜'),
+(1, '酸梅汤', 4.00, NULL, '饮品');
 
 -- 菜单(今日+明日 各3餐)
 INSERT INTO menu (store_id, date, meal_type) VALUES

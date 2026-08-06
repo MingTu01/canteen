@@ -23,7 +23,7 @@ import java.util.Set;
  *
  * 从 BackupService 拆分,让 BackupService 退化为协调器。
  *
- * P1-2 安全修复:导出时自动脱敏敏感字段(password / wx_openid 完全遮蔽,phone 部分遮蔽)。
+ * P1-2 安全修复:导出时自动遮蔽敏感字段(password / wx_openid / wx_unionid 完全遮蔽),手机号完整导出。
  */
 @Service
 public class BackupExporter {
@@ -99,22 +99,14 @@ public class BackupExporter {
     }
 
     /**
-     * P1-2 行级脱敏:
-     * - password / wx_openid / wx_unionid → "***REDACTED***"
-     * - phone → 138****0001(保留前 3 后 4)
+     * 行级脱敏(password / wx_openid / wx_unionid → "***REDACTED***")。
+     * 手机号不再脱敏,完整导出。
      */
     private void desensitizeRow(Map<String, Object> row) {
         if (row == null) return;
         for (String col : FULL_REDACT_COLUMNS) {
             if (row.containsKey(col) && row.get(col) != null) {
                 row.put(col, "***REDACTED***");
-            }
-        }
-        Object phoneVal = row.get("phone");
-        if (phoneVal != null) {
-            String phone = phoneVal.toString();
-            if (phone.length() >= 11) {
-                row.put("phone", phone.substring(0, 3) + "****" + phone.substring(7));
             }
         }
     }

@@ -11,6 +11,10 @@ import 'nprogress/nprogress.css'
 import './style.css'
 import App from './App.vue'
 import router from './router'
+import { startVersionCheck } from './composables/useVersionCheck'
+
+// 版本检测:浏览器缓存自动刷新
+startVersionCheck()
 
 const app = createApp(App)
 

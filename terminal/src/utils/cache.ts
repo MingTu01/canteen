@@ -56,7 +56,6 @@ interface DishDTO {
   image: string | null
   category: string | null
   mealTypes: string | null
-  isNew: number
   status: number
   updatedAt?: string
 }
@@ -151,7 +150,6 @@ async function doRefreshDishes(storeId: number): Promise<void> {
     image: d.image,
     category: d.category,
     mealTypes: d.mealTypes,
-    isNew: d.isNew ?? 0,
     status: d.status ?? 1,
     updatedAt: d.updatedAt ?? new Date().toISOString(),
   }))

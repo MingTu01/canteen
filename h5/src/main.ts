@@ -12,9 +12,13 @@ import './styles/global.scss'
 
 // 图片本地缓存（IndexedDB）
 import { cleanExpiredCache } from './utils/imageCache'
+// 版本检测:微信浏览器缓存自动刷新
+import { startVersionCheck } from './composables/useVersionCheck'
 // H5 懒加载缓存：菜品图片 + 登录用户头像（用到才加载，加载后缓存）
 // 启动时清理过期缓存
 cleanExpiredCache()
+// 启动版本检测(页面可见时 + 定时检测)
+startVersionCheck()
 
 const app = createApp(App)
 

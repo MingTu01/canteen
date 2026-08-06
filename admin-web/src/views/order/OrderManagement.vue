@@ -354,7 +354,7 @@ watch(() => authStore.storeId, () => {
               <StatusTag :value="row.status" :map="ORDER_STATUS" />
             </template>
           </ElTableColumn>
-          <ElTableColumn label="操作" width="220" fixed="right">
+          <ElTableColumn label="操作" width="280" fixed="right" :show-overflow-tooltip="false">
             <template #default="{ row }">
               <ElButton size="small" :icon="Eye" @click.stop="openDetail(row as OrderRow)">详情</ElButton>
               <ElButton

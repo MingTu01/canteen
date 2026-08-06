@@ -271,7 +271,7 @@ public class RestoreService {
      * @param storeId 门店 ID;null 表示全库恢复,清理所有门店缓存
      *
      * 清理范围:
-     * - dish:store:{storeId}:*  (菜品列表/新品/全量)
+     * - dish:store:{storeId}:*  (菜品列表/全量)
      * - menu:store:{storeId}:*  (菜单按日/按月)
      *
      * 使用 SCAN 而非 KEYS,避免阻塞 Redis(SCAN 游标式扫描,单次返回 count=100)

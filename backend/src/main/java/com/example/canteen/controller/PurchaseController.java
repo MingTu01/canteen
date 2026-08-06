@@ -54,7 +54,7 @@ public class PurchaseController {
         return ApiResponse.success(purchaseService.getPurchaseDetail(id));
     }
 
-    @OperationLog(value = "创建采购单", detail = "'门店ID ' + #dto.purchase.storeId + ' 供应商ID ' + #dto.purchase.supplierId")
+    @OperationLog(value = "创建采购单", detail = "'门店 ' + #resolver.storeName(#dto.purchase.storeId) + ' 供应商 ' + #resolver.supplierName(#dto.purchase.supplierId)")
     @PostMapping
     public ApiResponse<Purchase> createPurchase(@RequestBody PurchaseCreateDTO dto) {
         if (!SecurityContext.canManageProcurement()) {
@@ -67,7 +67,7 @@ public class PurchaseController {
         return ApiResponse.success(purchaseService.createPurchase(dto));
     }
 
-    @OperationLog(value = "更新采购状态", detail = "'采购单ID ' + #id + ' 状态 ' + #status")
+    @OperationLog(value = "更新采购状态", detail = "'采购单 ' + #resolver.purchaseNo(#id) + ' 状态 ' + #resolver.purchaseStatus(#status)")
     @PutMapping("/{id}/status")
     public ApiResponse<Purchase> updateStatus(@PathVariable Long id,
                                               @RequestParam int status) {
@@ -77,7 +77,7 @@ public class PurchaseController {
         return ApiResponse.success(purchaseService.updateStatus(id, status));
     }
 
-    @OperationLog(value = "删除采购单", detail = "'采购单ID ' + #id")
+    @OperationLog(value = "删除采购单", detail = "'采购单 ' + #resolver.purchaseNo(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deletePurchase(@PathVariable Long id) {
         if (!SecurityContext.canManageProcurement()) {

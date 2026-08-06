@@ -24,6 +24,7 @@ import {
 import EmptyState from '@/components/EmptyState.vue'
 import {
   formatDateStr,
+  addDays,
   compareDate,
   numericDateLabel,
   relativeDateLabel,
@@ -93,6 +94,18 @@ const imageActivatedDates = ref<Set<string>>(new Set())
 /** 图片懒加载 IntersectionObserver 实例(根为内容区,rootMargin 下扩 1 屏) */
 let imageObserver: IntersectionObserver | null = null
 
+/**
+ * 增量加载(按周)状态:
+ * - 初始只加载"今天所在周"的菜单日期,滚动到底部再加载下一周
+ * - 窗口起始固定为今天,结束日期随加载向后扩展
+ */
+let windowStartDate = formatDateStr(new Date())
+let windowEndDate = addDays(windowStartDate, 6)
+/** 是否正在加载更多(防重入) */
+const loadingMore = ref(false)
+/** 是否已到末尾(某周无新增可订餐日期) */
+const noMoreData = ref(false)
+
 // ============ 餐别配置(颜色 + 图标,从 @/composables/useMealConfig 复用) ============
 // 颜色规范:早餐橙、午餐绿、晚餐紫,与 Orders.vue 共享
 const { mealIconMap } = useMealConfig()
@@ -132,19 +145,6 @@ interface DateItem {
   weekday: string // "周一"
   isToday: boolean
 }
-
-/** 当前月份需要查询的日期范围(前后各 1 个月,覆盖可滚动范围) */
-const visibleDateRange = computed(() => {
-  const today = new Date()
-  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-  const end = new Date(today.getFullYear(), today.getMonth() + 2, 0)
-  return {
-    startYear: start.getFullYear(),
-    startMonth: start.getMonth() + 1,
-    endYear: end.getFullYear(),
-    endMonth: end.getMonth() + 1,
-  }
-})
 
 /** 可订餐日期列表(过滤:未来日期 + 菜单存在 + 至少一餐未过点) */
 const dateList = computed<DateItem[]>(() => {
@@ -439,52 +439,50 @@ const loadDiningTimes = async (): Promise<void> => {
   }
 }
 
-/** 加载已配置菜单的日期列表(覆盖前后月) */
-const loadMenuDates = async (): Promise<void> => {
+/**
+ * 查询 [start, end] 范围内所有月份已配置菜单的日期,合并写入 menuDates。
+ * 按需增量:只查询窗口覆盖的月份,日期限定在 [start, end] 内,避免拉取窗口外数据。
+ */
+const fetchMenuDatesForRange = async (start: string, end: string): Promise<void> => {
   const storeId = authStore.storeId
   if (!storeId) return
-  const { startYear, startMonth, endYear, endMonth } = visibleDateRange.value
-  const dates = new Set<string>()
-  // 拉 3 个月(startMonth, startMonth+1, endMonth)
-  const monthsToFetch = [
-    { year: startYear, month: startMonth },
-    { year: startMonth === 12 ? startYear + 1 : startYear, month: startMonth === 12 ? 1 : startMonth + 1 },
-    { year: endYear, month: endMonth },
-  ]
-  for (const { year, month } of monthsToFetch) {
+  // 收集窗口覆盖的月份集合(yyyy-m)
+  const monthSet = new Set<string>()
+  const cursor = new Date(`${start}T00:00:00`)
+  const endDate = new Date(`${end}T00:00:00`)
+  while (cursor <= endDate) {
+    monthSet.add(`${cursor.getFullYear()}-${cursor.getMonth() + 1}`)
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  const next = new Set(menuDates.value)
+  for (const key of monthSet) {
+    const [year, month] = key.split('-').map(Number)
     try {
       const list = await menuApi.getMenuDates(storeId, year, month)
       for (const d of list || []) {
-        if (typeof d === 'string') {
-          dates.add(d)
-        } else if (d && d.published) {
-          dates.add(d.date)
-        }
+        const date = typeof d === 'string' ? d : d && d.published ? d.date : ''
+        if (date && date >= start && date <= end) next.add(date)
       }
     } catch {
       // 忽略单月失败
     }
   }
-  menuDates.value = dates
+  menuDates.value = next
+}
+
+/** 加载当前窗口(今天 → windowEndDate)的菜单日期 */
+const loadMenuDates = async (): Promise<void> => {
+  menuDates.value = new Set()
+  await fetchMenuDatesForRange(windowStartDate, windowEndDate)
 }
 
 /**
- * 并发加载所有可订餐日期的菜单(并发上限 5,避免瞬时打满服务器和带宽)。
- * 加载完成后 allMenusLoaded=true,统一渲染所有日期 section,杜绝懒加载导致的布局抖动。
+ * 并发加载指定日期的菜单(并发上限 5,避免瞬时打满服务器和带宽)。
  * 单日失败:写入空数组,占位区显示"暂无菜品",不影响其他日期。
  */
-const loadAllMenus = async (): Promise<void> => {
+const loadMenusFor = async (dates: string[]): Promise<void> => {
   const storeId = authStore.storeId
-  if (!storeId) {
-    showToast('请先登录')
-    router.replace('/login')
-    return
-  }
-  const dates = dateList.value.map((d) => d.date)
-  if (dates.length === 0) {
-    allMenusLoaded.value = true
-    return
-  }
+  if (!storeId || dates.length === 0) return
   // 滑动窗口控制并发:5 个 worker 同时跑,每个 worker 顺序取下一个未处理日期
   const CONCURRENCY = 5
   let cursor = 0
@@ -511,7 +509,62 @@ const loadAllMenus = async (): Promise<void> => {
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, dates.length) }, () => worker()),
   )
+}
+
+/**
+ * 加载当前窗口内所有可订餐日期的菜单。
+ * 加载完成后 allMenusLoaded=true,统一渲染当前窗口的日期 section。
+ */
+const loadAllMenus = async (): Promise<void> => {
+  const storeId = authStore.storeId
+  if (!storeId) {
+    showToast('请先登录')
+    router.replace('/login')
+    return
+  }
+  const dates = dateList.value.map((d) => d.date)
+  if (dates.length === 0) {
+    allMenusLoaded.value = true
+    return
+  }
+  await loadMenusFor(dates)
   allMenusLoaded.value = true
+}
+
+/**
+ * 滚动接近底部时加载下一周(窗口向后扩展 7 天)。
+ * 若新增的那一周没有新的可订餐日期,认为已到末尾,停止继续加载。
+ */
+const loadMoreWeek = async (): Promise<void> => {
+  if (loadingMore.value || noMoreData.value) return
+  loadingMore.value = true
+  try {
+    const prevSize = menuDates.value.size
+    const newEnd = addDays(windowEndDate, 7)
+    // 只查询新增那一周(上一周结束次日 → 新结束)的菜单日期
+    await fetchMenuDatesForRange(addDays(windowEndDate, 1), newEnd)
+    windowEndDate = newEnd
+    // 新增的可订餐日期(尚未加载菜单)
+    const newOrderable = dateList.value.filter((d) => !menusByDate.value.has(d.date))
+    if (newOrderable.length === 0) {
+      // 新增周无任何菜单日期 → 已到末尾
+      if (menuDates.value.size === prevSize) noMoreData.value = true
+    } else {
+      await loadMenusFor(newOrderable.map((d) => d.date))
+    }
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+/** 滚动时检测是否接近底部,触发加载下一周 */
+const checkLoadMore = (): void => {
+  const container = contentRef.value
+  if (!container || !allMenusLoaded.value || loadingMore.value || noMoreData.value) return
+  // 距底部不足 200px 时触发
+  if (container.scrollHeight - (container.scrollTop + container.clientHeight) < 200) {
+    void loadMoreWeek()
+  }
 }
 
 /** 设置日期 section 的 DOM 引用(供 v-for :ref 回调用) */
@@ -547,6 +600,8 @@ const handleContentScroll = (): void => {
   if (now - lastScrollCalcTime < 100) return // 100ms 节流
   lastScrollCalcTime = now
   updateVisibleDate()
+  // 滚动接近底部时增量加载下一周
+  checkLoadMore()
 }
 
 /**
@@ -783,18 +838,33 @@ const categoryEmoji = (category?: string): string => {
 }
 
 // ============ 生命周期 ============
-onMounted(async () => {
-  // 加载后端订餐配置(截止时间、提前天数等),供 isOrderableByDeadline 使用
-  await loadConfig()
-  await Promise.all([loadDiningTimes(), loadMenuDates(), fetchOrderedOrders()])
-  // 如果当前 selectedDate 不可订餐,自动切到第一个可订餐日期
+/**
+ * 重置到"今天所在周"并加载:
+ * - 窗口起始固定为今天(顶部分从未过去日期),初始仅加载今天起一周
+ * - 清空旧数据与缓存,确保每次进入订餐页都以当天为顶
+ */
+const resetToTodayAndLoad = async (): Promise<void> => {
+  const today = formatDateStr(new Date())
+  windowStartDate = today
+  windowEndDate = addDays(today, 6)
+  loadingMore.value = false
+  noMoreData.value = false
+  allMenusLoaded.value = false
+  menusByDate.value = new Map()
+  menuCache.value = new Map()
+  // 清空旧日期 section 引用与图片激活状态,避免残留影响滚动定位与懒加载
+  for (const k of Object.keys(daySectionRefs)) delete daySectionRefs[k]
+  imageActivatedDates.value = new Set()
+  cartStore.selectedDate = today
+  await loadMenuDates()
+  // 如果今天已不可订餐,自动切到当天起第一个可订餐日期
   if (dateList.value.length > 0 && !isDateOrderable(cartStore.selectedDate)) {
     cartStore.selectedDate = dateList.value[0].date
   }
   visibleDate.value = cartStore.selectedDate
-  // 单页堆叠模式:并发加载所有日期菜单(并发上限 5),加载完成后统一渲染,杜绝布局抖动
+  // 加载当前窗口内所有可订餐日期的菜单
   await loadAllMenus()
-  // DOM 渲染后滚动到当前日期 section(避免刷新后从第一天开始)
+  // DOM 渲染后滚动到当前日期 section(保持在当天)
   await nextTick()
   const targetEl = daySectionRefs[cartStore.selectedDate]
   if (targetEl) {
@@ -804,28 +874,24 @@ onMounted(async () => {
   }
   // 初始化图片懒加载观察器(DOM 已就绪后即可观察)
   initImageObserver()
+}
+
+onMounted(async () => {
+  // 加载后端订餐配置(截止时间、提前天数等),供 isOrderableByDeadline 使用
+  await loadConfig()
+  await Promise.all([loadDiningTimes(), fetchOrderedOrders()])
+  await resetToTodayAndLoad()
 })
 
-onActivated(() => {
+onActivated(async () => {
   // keep-alive 首次挂载时 onMounted + onActivated 均触发,跳过首次避免重复
   if (firstMount) {
     firstMount = false
     return
   }
-  // keep-alive 激活:重新拉取已下单订单(下单后返回时刷新锁定状态) + 滚动到 selectedDate + 重连观察器
+  // keep-alive 激活(从其他页切回订餐页):重新拉取已下单订单 + 重置到当天并重新加载
   void fetchOrderedOrders()
-  if (!allMenusLoaded.value) return
-  void nextTick(() => {
-    const targetEl = daySectionRefs[cartStore.selectedDate]
-    if (targetEl) {
-      isProgrammaticScroll = true
-      targetEl.scrollIntoView({ behavior: 'auto', block: 'start' })
-      setTimeout(() => { isProgrammaticScroll = false }, 100)
-    }
-    visibleDate.value = cartStore.selectedDate
-    // 失活期间 observer 已断开,激活后重连
-    initImageObserver()
-  })
+  await resetToTodayAndLoad()
 })
 
 /** 清理跳转定时器与图片懒加载观察器,避免离开页面后被意外触发 */
@@ -853,6 +919,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="order-page">
+    <!-- 顶部头部:订餐 -->
+    <header class="order-page__header">
+      <span class="order-page__header-title">订餐</span>
+    </header>
+
     <!-- 主体:左侧日期竖列 + 右侧内容区 -->
     <div class="order-main">
       <!-- 左侧日期竖列(点击跳转到对应日期 section,平滑滚动) -->
@@ -971,8 +1042,6 @@ onBeforeUnmount(() => {
                         @error="handleImgError(iv.item.id)"
                       />
                       <span v-else class="dish-card__emoji">{{ categoryEmoji(iv.dish?.category) }}</span>
-                      <!-- 新品 pill 标签 -->
-                      <span v-if="iv.dish?.isNew === 1" class="dish-card__new">新品</span>
                       <!-- 售罄遮罩 -->
                       <span v-if="iv.dish?.status === 0" class="dish-card__soldout">已售罄</span>
                       <!-- 已订数量徽标(锁定餐别下已订菜品图片右上角,显示份数) -->
@@ -1033,9 +1102,11 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <!-- 底部提示 -->
+          <!-- 底部提示:加载更多 / 已到末尾 -->
           <div class="content-area__end-hint">
-            <span>已展示所有可订餐日期</span>
+            <span v-if="loadingMore">加载更多...</span>
+            <span v-else-if="noMoreData">已展示所有可订餐日期</span>
+            <span v-else>向下滚动加载更多</span>
           </div>
         </template>
       </div>
@@ -1259,6 +1330,24 @@ onBeforeUnmount(() => {
   background: $brand-card;
 }
 
+/* 顶部头部:订餐 + 订单,居中 */
+.order-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 14px 16px 10px;
+  flex-shrink: 0;
+  background: $brand-card;
+  border-bottom: 1px solid $brand-border;
+}
+
+.order-page__header-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: $brand-foreground;
+}
+
 /* 主体区域:左侧日期竖列 + 右侧内容 */
 .order-main {
   flex: 1;
@@ -1269,7 +1358,7 @@ onBeforeUnmount(() => {
 
 /* ============ 左侧日期竖列 ============ */
 .date-sidebar {
-  width: 80px;
+  width: 96px;
   flex-shrink: 0;
   background: $brand-secondary;
   border-right: 1px solid $brand-border;
@@ -1284,12 +1373,17 @@ onBeforeUnmount(() => {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 5px;
     width: 100%;
-    padding: 12px 4px;
+    padding: 15px 4px;
     background: transparent;
     border: none;
+    border-bottom: 1px solid $brand-border;
     cursor: pointer;
+
+    &:last-child {
+      border-bottom: none;
+    }
 
     &:active {
       background: rgba(0, 0, 0, 0.04);
@@ -1310,7 +1404,7 @@ onBeforeUnmount(() => {
   }
 
   &__date {
-    font-size: 12px;
+    font-size: 13px;
     color: $brand-secondary-foreground;
     line-height: 1.2;
   }

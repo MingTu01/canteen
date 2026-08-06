@@ -9,9 +9,6 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.logging.Logger;
 
@@ -24,6 +21,9 @@ import java.util.logging.Logger;
  *   避免覆盖已运营系统中的超管账号。
  * - 幂等:通过环境变量 + 账号匹配判断,已存在同名账号时仅更新密码(若账号是超管),
  *   不重复创建。
+ * - FORCE=true 时始终按环境变量重置超管密码。部署完成后 deploy.sh 会清理
+ *   .env 中的 INIT_ADMIN_FORCE/INIT_ADMIN_PASSWORD,因此后续重启不会覆盖
+ *   管理员通过 UI 修改的密码。
  * - 不抛异常以避免阻塞应用启动(仅记录警告日志)。
  *
  * 使用场景:
@@ -34,16 +34,6 @@ import java.util.logging.Logger;
 public class AdminInitializer {
 
     private static final Logger LOG = Logger.getLogger(AdminInitializer.class.getName());
-
-    /**
-     * 初始化标记文件:首次 FORCE 重置密码后创建,后续重启即使 FORCE=true 也跳过,
-     * 避免覆盖管理员通过 UI 修改过的密码。
-     * 优先使用 /app/.admin-initialized(Docker 容器内固定路径),
-     * 不可写时回退到系统临时目录。
-     */
-    private static final String INIT_FLAG_FILE_APP = "/app/.admin-initialized";
-    private static final String INIT_FLAG_FILE_TMP =
-            System.getProperty("java.io.tmpdir") + "/.canteen-admin-initialized";
 
     private final AdminMapper adminMapper;
     private final PasswordEncoder passwordEncoder;
@@ -82,22 +72,11 @@ public class AdminInitializer {
                     boolean forceRequested = "true".equalsIgnoreCase(force);
                     boolean shouldUpdate = forceRequested || isDefaultPassword(existing);
 
-                    // FORCE 模式下,若已初始化过(标记文件存在),跳过密码重置,
-                    // 避免每次重启覆盖管理员通过 UI 修改的密码。
-                    if (forceRequested && shouldUpdate && alreadyInitialized()) {
-                        LOG.info("[AdminInitializer] 管理员密码已初始化过,跳过 FORCE 重置(避免覆盖用户修改的密码)");
-                        return;
-                    }
-
                     if (shouldUpdate) {
                         existing.setPassword(passwordEncoder.encode(password));
                         existing.setPasswordUpdatedAt(LocalDateTime.now());
                         adminMapper.updateById(existing);
                         LOG.info("[AdminInitializer] 已更新超管 '" + username + "' 的密码");
-                        // FORCE 重置成功后写标记文件,后续重启不再覆盖
-                        if (forceRequested) {
-                            markInitialized();
-                        }
                     } else {
                         LOG.info("[AdminInitializer] 超管 '" + username + "' 已存在且非默认密码,跳过(如需强制重置请设置 INIT_ADMIN_FORCE=true)");
                     }
@@ -143,10 +122,6 @@ public class AdminInitializer {
             admin.setPasswordUpdatedAt(LocalDateTime.now());
             adminMapper.insert(admin);
             LOG.info("[AdminInitializer] 已创建超管账号 '" + username + "'");
-            // FORCE 模式下创建成功后写标记文件,后续重启不再覆盖
-            if (forceCreate) {
-                markInitialized();
-            }
 
             // 若默认 admin 账号存在且与新账号不同,删除默认账号
             if (!"admin".equals(username)) {
@@ -173,51 +148,6 @@ public class AdminInitializer {
             return passwordEncoder.matches("123456", admin.getPassword());
         } catch (Exception e) {
             return false;
-        }
-    }
-
-    /**
-     * 检查是否已初始化过(标记文件存在)。
-     * 优先检查 /app/.admin-initialized(Docker 容器路径),其次检查系统临时目录下的标记文件。
-     */
-    private boolean alreadyInitialized() {
-        try {
-            if (Files.exists(Paths.get(INIT_FLAG_FILE_APP))) {
-                return true;
-            }
-            return Files.exists(Paths.get(INIT_FLAG_FILE_TMP));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /**
-     * 创建初始化标记文件。优先写入 /app/.admin-initialized,
-     * 若目录不可写则回退到系统临时目录。权限问题时仅 warn,不阻断启动。
-     */
-    private void markInitialized() {
-        // 优先尝试 /app/ 目录
-        try {
-            Path appPath = Paths.get(INIT_FLAG_FILE_APP);
-            if (Files.isWritable(appPath.getParent()) || Files.exists(appPath)) {
-                if (!Files.exists(appPath)) {
-                    Files.createFile(appPath);
-                }
-                LOG.info("[AdminInitializer] 已创建初始化标记文件 " + INIT_FLAG_FILE_APP);
-                return;
-            }
-        } catch (Exception e) {
-            LOG.warning("[AdminInitializer] 无法创建标记文件 " + INIT_FLAG_FILE_APP + ": " + e.getMessage());
-        }
-        // 回退到系统临时目录
-        try {
-            Path tmpPath = Paths.get(INIT_FLAG_FILE_TMP);
-            if (!Files.exists(tmpPath)) {
-                Files.createFile(tmpPath);
-            }
-            LOG.info("[AdminInitializer] 已创建初始化标记文件 " + INIT_FLAG_FILE_TMP);
-        } catch (Exception e) {
-            LOG.warning("[AdminInitializer] 无法创建标记文件 " + INIT_FLAG_FILE_TMP + ": " + e.getMessage());
         }
     }
 }

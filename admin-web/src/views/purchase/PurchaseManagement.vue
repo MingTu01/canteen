@@ -107,19 +107,21 @@ const loadMaterials = async () => {
 }
 
 /** 选择/输入食材时:已有食材填充 materialId+name+unit;新食材清空 materialId 只保留 name */
-const onMaterialSelect = (row: PurchaseItem, val: number | string) => {
+const onMaterialSelect = (row: PurchaseItemRow, val: number | string) => {
   if (typeof val === 'number') {
     const m = materials.value.find((it) => it.id === val)
     if (m) {
       row.materialId = m.id
       row.materialName = m.name
       row.unit = m.unit || '公斤'
+      row.materialText = m.id
       return
     }
   }
-  // 新食材:val 是用户输入的名称字符串
+  // 新食材:val 是用户输入的名称字符串,保留到 materialText 防止输入框被清空
   row.materialId = undefined
-  row.materialName = String(val)
+  row.materialName = String(val ?? '')
+  row.materialText = String(val ?? '')
 }
 
 // 创建弹窗
@@ -133,16 +135,21 @@ const defaultPurchase = (): Purchase => ({
   remark: '',
 })
 const form = ref<Purchase>(defaultPurchase())
-const items = ref<PurchaseItem[]>([])
+// 采购明细行:materialText 用于在可输入下拉中保留用户输入的新食材名称(支持 number 已有食材 / string 新食材)
+interface PurchaseItemRow extends PurchaseItem {
+  materialText?: number | string
+}
+const items = ref<PurchaseItemRow[]>([])
 
 const rules: FormRules = {
   supplierId: [{ required: true, message: '请选择供应商', trigger: 'change' }],
   purchaseDate: [{ required: true, message: '请选择采购日期', trigger: 'change' }],
 }
 
-const defaultItem = (): PurchaseItem => ({
+const defaultItem = (): PurchaseItemRow => ({
   materialId: undefined,
   materialName: '',
+  materialText: '',
   unit: '公斤',
   quantity: 1,
   price: 0,
@@ -198,10 +205,10 @@ const handleCreate = async () => {
   try {
     await purchaseApi.create({
       purchase: { ...form.value, supplierId: Number(form.value.supplierId) },
-      items: validItems.map((it) => ({
-        ...it,
-        quantity: Number(it.quantity),
-        price: Number(it.price),
+      items: validItems.map(({ materialText, ...rest }) => ({
+        ...rest,
+        quantity: Number(rest.quantity),
+        price: Number(rest.price),
       })),
     })
     ElMessage.success('采购单创建成功')
@@ -397,7 +404,7 @@ onMounted(fetchList)
               <StatusTag :value="row.status ?? 1" :map="PURCHASE_STATUS" />
             </template>
           </ElTableColumn>
-          <ElTableColumn label="操作" width="280" fixed="right">
+          <ElTableColumn label="操作" width="340" fixed="right" :show-overflow-tooltip="false">
             <template #default="{ row }">
               <ElButton size="small" :icon="Eye" @click="openDetail(row as Purchase)">详情</ElButton>
               <ElButton
@@ -418,9 +425,10 @@ onMounted(fetchList)
                 v-if="row.status === 1"
                 size="small"
                 type="danger"
+                plain
                 :icon="Trash2"
                 @click="handleDelete(row as Purchase)"
-              />
+              >删除</ElButton>
             </template>
           </ElTableColumn>
           <template #empty>
@@ -488,14 +496,14 @@ onMounted(fetchList)
             <ElTableColumn label="食材" min-width="200">
               <template #default="{ row }">
                 <ElSelect
-                  v-model="row.materialId"
+                  v-model="row.materialText"
                   placeholder="选择或输入新食材"
                   filterable
                   allow-create
                   default-first-option
                   size="small"
                   class="w-full"
-                  @change="(val: number | string) => onMaterialSelect(row as PurchaseItem, val)"
+                  @change="(val) => onMaterialSelect(row as PurchaseItemRow, val as number | string)"
                 >
                   <ElOption
                     v-for="m in materials"

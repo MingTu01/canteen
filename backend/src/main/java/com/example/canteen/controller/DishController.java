@@ -92,26 +92,6 @@ public class DishController {
         return ApiResponse.success(dishService.getAllDishesByStore(storeId));
     }
 
-    @GetMapping("/store/{storeId}/new")
-    public ApiResponse<Map<String, Object>> getNewDishesByStore(@PathVariable Long storeId,
-                                                                @RequestParam(defaultValue = "1") int page,
-                                                                @RequestParam(defaultValue = "10") int size) {
-        SecurityContext.checkStoreAccess(storeId);
-        LambdaQueryWrapper<Dish> wrapper = new LambdaQueryWrapper<Dish>()
-                .eq(Dish::getStoreId, storeId)
-                .eq(Dish::getIsNew, 1)
-                .eq(Dish::getStatus, 1)
-                .eq(Dish::getIsDeleted, 0)
-                .orderByDesc(Dish::getId);
-        IPage<Dish> p = dishMapper.selectPage(new Page<>(page, size), wrapper);
-        Map<String, Object> result = new HashMap<>();
-        result.put("records", p.getRecords());
-        result.put("total", p.getTotal());
-        result.put("page", page);
-        result.put("size", size);
-        return ApiResponse.success(result);
-    }
-
     @GetMapping("/{id}")
     public ApiResponse<Dish> getDishById(@PathVariable Long id) {
         Dish dish = dishService.getDishById(id);

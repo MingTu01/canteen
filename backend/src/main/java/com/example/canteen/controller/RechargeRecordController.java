@@ -37,7 +37,7 @@ public class RechargeRecordController {
         this.employeeMapper = employeeMapper;
     }
 
-    @OperationLog(value = "员工充值", detail = "'员工ID ' + #dto.employeeId + ' 金额 ' + #dto.amount")
+    @OperationLog(value = "员工充值", detail = "'员工 ' + #resolver.employeeName(#dto.employeeId) + ' 金额 ' + #dto.amount")
     @PostMapping
     public ApiResponse<RechargeRecord> recharge(@Valid @RequestBody RechargeDTO dto) {
         // P1-3 员工(role=0)和终端(role=3)无权充值,防止资金漏洞

@@ -73,8 +73,7 @@ const onRemove = (): void => {
       <div v-else class="dish-card__image-placeholder">
         <van-icon name="photo-o" size="32" />
       </div>
-      <span v-if="dish.isNew === 1" class="dish-card__badge dish-card__badge--new">新品</span>
-      <span v-else-if="dish.isSpecial === 1" class="dish-card__badge dish-card__badge--special">推荐</span>
+      <span v-if="dish.isSpecial === 1" class="dish-card__badge dish-card__badge--special">推荐</span>
     </div>
 
     <div class="dish-card__body">

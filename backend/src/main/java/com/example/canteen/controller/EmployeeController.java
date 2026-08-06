@@ -301,7 +301,7 @@ public class EmployeeController {
         for (Employee e : list) {
             sb.append(csvEscape(e.getName())).append(',');
             sb.append(csvEscape(e.getCardNo())).append(',');
-            sb.append(csvEscape(maskPhone(e.getPhone()))).append(',');
+            sb.append(csvEscape(e.getPhone())).append(',');
             sb.append(csvEscape(e.getDepartmentId() == null ? "" : deptNameMap.getOrDefault(e.getDepartmentId(), ""))).append(',');
             sb.append(e.getBalance() == null ? "0" : e.getBalance().toPlainString()).append(',');
             sb.append(e.getStatus() != null && e.getStatus() == 1 ? "启用" : "禁用").append(',');
@@ -331,25 +331,19 @@ public class EmployeeController {
         return v;
     }
 
-    /** P2-6 手机号脱敏:保留前 3 后 4,中间 4 位用 * 替换 */
-    private String maskPhone(String phone) {
-        if (phone == null || phone.length() < 11) return phone == null ? "" : phone;
-        return phone.substring(0, 3) + "****" + phone.substring(7);
-    }
-
     /**
      * 上传/更新员工头像(批量导入照片使用)。
      * 文件名(去扩展名)作为卡号,自动匹配当前门店内对应员工。
      * 走与 FileController 一致的存储策略:UUID 重命名 + magic bytes 校验 + /uploads 目录。
      * 替换头像时自动删除旧文件,避免磁盘孤儿文件。
      *
-     * @param cardNo  卡号(从路径取,前端用文件名提取)
-     * @param storeId 门店 ID(超管需显式传;门店管理员可不传,自动取当前门店)
-     * @param file    图片文件(前端已 canvas 压缩到 300x300 / JPEG 0.8)
+     * @param identifier 匹配标识符(文件名去扩展名,支持卡号 / 姓名 / 手机号自动适配)
+     * @param storeId    门店 ID(超管需显式传;门店管理员可不传,自动取当前门店)
+     * @param file       图片文件(前端已 canvas 压缩)
      */
-    @OperationLog(value = "上传员工头像", detail = "'卡号 ' + #cardNo + ' 门店ID ' + #storeId")
-    @PostMapping("/{cardNo}/avatar")
-    public ApiResponse<Map<String, Object>> uploadAvatar(@PathVariable String cardNo,
+    @OperationLog(value = "上传员工头像", detail = "'标识符 ' + #identifier + ' 门店ID ' + #storeId")
+    @PostMapping("/{identifier}/avatar")
+    public ApiResponse<Map<String, Object>> uploadAvatar(@PathVariable String identifier,
                                                          @RequestParam(required = false) Long storeId,
                                                          @RequestParam("file") MultipartFile file) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -361,13 +355,13 @@ public class EmployeeController {
         }
         SecurityContext.checkStoreAccess(targetStore);
 
-        if (cardNo == null || cardNo.isBlank()) {
-            return ApiResponse.error(400, "卡号不能为空");
+        if (identifier == null || identifier.isBlank()) {
+            return ApiResponse.error(400, "标识符不能为空");
         }
         if (file == null || file.isEmpty()) {
             return ApiResponse.error(400, "文件为空");
         }
-        // 5MB 防御性上限(前端已压缩到 300x300 / JPEG 0.8,实际约几十 KB)
+        // 5MB 防御性上限(前端已压缩,实际约几十 KB)
         if (file.getSize() > 5 * 1024 * 1024) {
             return ApiResponse.error(400, "文件过大,最大 5MB");
         }
@@ -376,10 +370,12 @@ public class EmployeeController {
             return ApiResponse.error(400, "仅允许上传图片文件");
         }
 
-        Employee employee = employeeService.getEmployeeByCardNoAndStore(cardNo, targetStore);
+        // 按标识符自动适配:卡号 → 手机号 → 姓名
+        Employee employee = employeeService.findEmployeeByIdentifier(identifier, targetStore);
         if (employee == null) {
-            return ApiResponse.error(404, "员工不存在: " + cardNo);
+            return ApiResponse.error(404, "未匹配到员工: " + identifier + "(支持卡号/手机号/姓名)");
         }
+        String cardNo = employee.getCardNo();
 
         try {
             // 删除旧头像文件(避免磁盘孤儿文件)

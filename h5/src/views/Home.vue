@@ -1,26 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onActivated } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onUnmounted, nextTick } from 'vue'
 
 import { useRouter } from 'vue-router'
-import { showToast, showDialog, showImagePreview } from 'vant'
+import { showImagePreview } from 'vant'
 import {
   Megaphone,
   UtensilsCrossed,
   ClipboardList,
   MessageSquare,
-  Soup,
-  Salad,
-  IceCreamCone,
-  CupSoda,
-  Croissant,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useBrandingStore } from '@/stores/branding'
 import { getStoreNotifications } from '@/api/notification'
-import { getNewDishes } from '@/api/menu'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatDate } from '@/composables/useFormat'
 import { getCachedImage } from '@/utils/imageCache'
-import type { Notification, Dish } from '@/api/types'
+import type { Notification } from '@/api/types'
 
 defineOptions({ name: 'Home' })
 
@@ -34,24 +28,43 @@ const branding = computed(() => brandingStore.branding)
 /** 通知列表 */
 const notifications = ref<Notification[]>([])
 
-/** 今日新品 */
-const newDishes = ref<Dish[]>([])
-
 /** 加载状态 */
 const notificationLoading = ref(true)
-const dishesLoading = ref(true)
-
-/** 加载失败的菜品图片(dish.id),触发 v-if 回退到 Lucide 占位图标 */
-const erroredDishImages = ref<Set<number>>(new Set())
 
 /** 标记首次挂载,避免 onMounted + onActivated 双重触发重复请求 */
 let firstMount = true
 
-/** 通知公告滚动文案(将所有标题用 · 拼接) */
-const noticeText = computed(() => {
-  if (notifications.value.length === 0) return ''
-  return notifications.value.map((n) => n.title).join('  ·  ')
+/** 通知公告轮播:每条单独右往左滚动播放,播完切换下一条,循环播放 */
+const currentNoticeIndex = ref(0)
+const currentNotice = computed(
+  () => notifications.value[currentNoticeIndex.value] ?? { title: '' },
+)
+
+/** 当前条滚动动画时长(根据文本长度自适应,越长滚动越久) */
+const noticeScrollDuration = computed(() => {
+  const len = currentNotice.value?.title?.length ?? 0
+  // 基础 6 秒 + 每个字 0.4 秒,最短 6s 最长 20s
+  return Math.min(20, Math.max(6, 6 + len * 0.4))
 })
+
+/** 监听当前条滚动结束(animationiteration 事件触发切下一条) */
+const onNoticeScrollEnd = (): void => {
+  if (notifications.value.length <= 1) return
+  currentNoticeIndex.value =
+    (currentNoticeIndex.value + 1) % notifications.value.length
+}
+
+/** ticker 视口实际宽度(作为滚动起始偏移,保证从最右边出现) */
+const tickerViewportRef = ref<HTMLElement | null>(null)
+const tickerViewportWidth = ref(0)
+let tickerResizeObserver: ResizeObserver | null = null
+
+/** 测量视口宽度并更新 */
+const measureTickerViewport = (): void => {
+  if (tickerViewportRef.value) {
+    tickerViewportWidth.value = tickerViewportRef.value.clientWidth
+  }
+}
 
 /** 公告列表(type=3):展示标题 + 图片 + 内容 */
 const announcementList = computed(() =>
@@ -71,6 +84,10 @@ const noticeList = computed(() =>
 /** 活动详情弹窗 */
 const activityDetail = ref<Notification | null>(null)
 const showActivityPopup = ref(false)
+
+/** 通知详情弹窗(展示标题 + 图片 + 内容) */
+const noticeDetail = ref<Notification | null>(null)
+const showNoticePopup = ref(false)
 
 /** 图片缓存 Map（通知/公告图片，id → blob URL 或原 URL） */
 const cachedNoticeImages = ref<Map<number, string>>(new Map())
@@ -130,8 +147,6 @@ const noticeTag = (item: Notification): NoticeTag => {
   switch (item.type) {
     case 1:
       return { label: '滚动通知', variant: 'accent' }
-    case 2:
-      return { label: '新品推荐', variant: 'accent' }
     case 3:
       return { label: '公告', variant: 'muted' }
     default:
@@ -139,93 +154,46 @@ const noticeTag = (item: Notification): NoticeTag => {
   }
 }
 
-/** 菜品占位图标:根据品类关键词选择 Lucide 图标,无品类时回退通用餐具图标 */
-const categoryIcon = (dish: Dish) => {
-  const cat = (dish.category || '').toLowerCase()
-  if (cat.includes('汤') || cat.includes('soup')) return Soup
-  if (cat.includes('凉') || cat.includes('拌') || cat.includes('salad')) return Salad
-  if (cat.includes('冰') || cat.includes('甜') || cat.includes('dessert')) return IceCreamCone
-  if (cat.includes('饮') || cat.includes('茶') || cat.includes('drink')) return CupSoda
-  if (cat.includes('面') || cat.includes('包') || cat.includes('糕') || cat.includes('bread')) {
-    return Croissant
-  }
-  return UtensilsCrossed
-}
-
 /** 跳转 */
 const go = (path: string): void => {
   router.push(path)
 }
 
-/** 通知公告条点击:用 dialog 展示完整内容,避免 toast 截断长文本 */
+/** 展示通知详情(标题 + 图片 + 内容,弹层内可点击放大图片) */
+const showNoticeDetail = (item: Notification): void => {
+  noticeDetail.value = item
+  showNoticePopup.value = true
+}
+
+/** 通知公告条点击:打开当前轮播通知的详情弹层 */
 const onNoticeBarClick = (): void => {
-  if (notifications.value.length === 0) return
-  const first = notifications.value[0]
-  showDialog({
-    title: first.title,
-    message: first.content || first.title,
-    confirmButtonText: '知道了',
-  }).catch(() => {
-    /* ignore */
-  })
+  const current = notifications.value[currentNoticeIndex.value]
+  if (!current) return
+  showNoticeDetail(current)
 }
 
-/** 通知列表项点击:用 dialog 展示完整内容 */
+/** 通知列表项点击:打开详情弹层 */
 const onNoticeItemClick = (item: Notification): void => {
-  showDialog({
-    title: item.title,
-    message: item.content || item.title,
-    confirmButtonText: '知道了',
-  }).catch(() => {
-    /* ignore */
-  })
+  showNoticeDetail(item)
 }
-
-/** 菜品图片加载失败:标记该菜品,触发 v-if 切换到 Lucide 占位图标 */
-const onDishImgError = (dish: Dish): void => {
-  if (erroredDishImages.value.has(dish.id)) return
-  const next = new Set(erroredDishImages.value)
-  next.add(dish.id)
-  erroredDishImages.value = next
-}
-
-/** 菜品图片缓存 Map（dish.id → 缓存后的 blob URL 或原 URL），异步填充 */
-const cachedDishImages = ref<Map<number, string>>(new Map())
-
-/** 批量预加载菜品图片到缓存 Map（懒加载：首次 fetch 后缓存，后续命中缓存直接返回 blob URL） */
-const refreshDishImages = async (): Promise<void> => {
-  const map = new Map<number, string>()
-  await Promise.all(
-    newDishes.value.map(async (dish) => {
-      const raw = dish.image || dish.imageUrl
-      if (!raw) return
-      // 完整 URL 或 data URL 直接使用，不走 IndexedDB 缓存
-      if (/^(https?:)?\/\//.test(raw) || raw.startsWith('data:')) {
-        map.set(dish.id, raw)
-        return
-      }
-      map.set(dish.id, await getCachedImage(raw))
-    }),
-  )
-  cachedDishImages.value = map
-}
-
-/** 菜品图片地址(优先返回缓存 blob URL);已失败的返回空串触发占位图标 */
-const getDishImage = (dish: Dish): string => {
-  if (erroredDishImages.value.has(dish.id)) return ''
-  return cachedDishImages.value.get(dish.id) || ''
-}
-
-// 菜品列表变化时异步刷新缓存 Map
-watch(newDishes, refreshDishImages, { immediate: true })
 
 // 通知列表变化时异步刷新图片缓存 Map
 watch(notifications, refreshNoticeImages, { immediate: true })
 
-/** 点击新品卡片 */
-const onDishCardClick = (): void => {
-  showToast('请前往订餐页下单')
-}
+// 通知列表变化时重置到第一条
+watch(notifications, () => {
+  currentNoticeIndex.value = 0
+})
+
+// 通知出现后 DOM 渲染完成,测量 ticker 视口宽度(此时 v-if 才为 true)
+watch(
+  () => notifications.value.length > 0,
+  (has) => {
+    if (has) {
+      nextTick(measureTickerViewport)
+    }
+  },
+)
 
 /** 拉取通知 */
 const loadNotifications = async (storeId: number): Promise<void> => {
@@ -240,32 +208,25 @@ const loadNotifications = async (storeId: number): Promise<void> => {
   }
 }
 
-/** 拉取今日新品 */
-const loadNewDishes = async (storeId: number): Promise<void> => {
-  dishesLoading.value = true
-  try {
-    const res = await getNewDishes(storeId, { page: 1, size: 10 })
-    newDishes.value = res?.records ?? []
-  } catch {
-    /* 拦截器已 toast */
-  } finally {
-    dishesLoading.value = false
-  }
-}
-
 onMounted(async () => {
+  // 测量 ticker 视口宽度(用于滚动起始位置:从最右边出现)
+  measureTickerViewport()
+  if (tickerViewportRef.value && 'ResizeObserver' in window) {
+    tickerResizeObserver = new ResizeObserver(measureTickerViewport)
+    tickerResizeObserver.observe(tickerViewportRef.value)
+  }
+
   const storeId = authStore.storeId
   if (!storeId) return
 
-  // 并行拉取:品牌信息(秒开缓存)、通知、新品
+  // 并行拉取:品牌信息(秒开缓存)、通知
   await Promise.all([
     brandingStore.fetchBranding(storeId),
     loadNotifications(storeId),
-    loadNewDishes(storeId),
   ])
 })
 
-// keep-alive 重新激活时刷新通知与新品,避免展示过期数据
+// keep-alive 重新激活时刷新通知,避免展示过期数据
 onActivated(() => {
   // keep-alive 首次挂载时 onMounted + onActivated 均触发,跳过首次避免重复请求
   if (firstMount) {
@@ -275,7 +236,14 @@ onActivated(() => {
   const storeId = authStore.storeId
   if (!storeId) return
   loadNotifications(storeId)
-  loadNewDishes(storeId)
+})
+
+// 清理 ResizeObserver 避免内存泄漏
+onUnmounted(() => {
+  if (tickerResizeObserver) {
+    tickerResizeObserver.disconnect()
+    tickerResizeObserver = null
+  }
 })
 </script>
 
@@ -294,16 +262,23 @@ onActivated(() => {
       <h1 class="home__brand-name">{{ branding?.name || '企业食堂' }}</h1>
     </header>
 
-    <!-- 滚动通知栏(ticker,横向无限滚动,替代 van-notice-bar) -->
+    <!-- 通知轮播栏:每条单独右往左滚动,播完切下一条,循环播放 -->
     <div v-if="notifications.length > 0" class="home__ticker" @click="onNoticeBarClick">
       <div class="home__ticker-fixed">
         <Megaphone :size="16" :stroke-width="2" class="home__ticker-icon" />
         <span class="home__ticker-label">通知</span>
       </div>
-      <div class="home__ticker-viewport">
-        <div class="home__ticker-track">
-          <span class="home__ticker-text">{{ noticeText }}</span>
-          <span class="home__ticker-text">{{ noticeText }}</span>
+      <div ref="tickerViewportRef" class="home__ticker-viewport">
+        <div
+          :key="currentNoticeIndex"
+          class="home__ticker-track"
+          :style="{
+            '--duration': `${noticeScrollDuration}s`,
+            '--vp-w': `${tickerViewportWidth}px`,
+          }"
+          @animationend="onNoticeScrollEnd"
+        >
+          <span class="home__ticker-text">{{ currentNotice.title }}</span>
         </div>
       </div>
     </div>
@@ -326,56 +301,7 @@ onActivated(() => {
         </div>
       </section>
 
-      <!-- 今日新品(无新品时隐藏整个模块) -->
-      <section v-if="dishesLoading || newDishes.length > 0" class="home__section">
-        <div class="home__section-header">
-          <h2 class="home__section-title">今日新品</h2>
-          <span class="home__section-more" @click="go('/order')">查看更多</span>
-        </div>
-
-        <!-- 加载骨架 -->
-        <van-skeleton v-if="dishesLoading" :row="3" :loading="true" title>
-          <template #template>
-            <div class="home__dish-list">
-              <van-skeleton-image v-for="i in 3" :key="i" image-size="80" />
-            </div>
-          </template>
-        </van-skeleton>
-
-        <!-- 横向滑动卡片列表 -->
-        <div v-else class="home__dish-list">
-          <div
-            v-for="dish in newDishes"
-            :key="dish.id"
-            class="home__dish-card"
-            @click="onDishCardClick"
-          >
-            <div class="home__dish-image">
-              <img
-                v-if="getDishImage(dish)"
-                :src="getDishImage(dish)"
-                :alt="dish.name"
-                loading="lazy"
-                @error="onDishImgError(dish)"
-              />
-              <component
-                v-else
-                :is="categoryIcon(dish)"
-                :size="28"
-                :stroke-width="2"
-                class="home__dish-placeholder"
-              />
-            </div>
-            <div class="home__dish-name">{{ dish.name }}</div>
-            <div class="home__dish-footer">
-              <span class="home__dish-price">¥{{ formatMoney(dish.price) }}</span>
-              <span class="home__dish-pill">新品</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 公告(展示标题 + 图片 + 内容,与新品展示方式一致) -->
+      <!-- 公告(展示标题 + 图片 + 内容) -->
       <section v-if="announcementList.length > 0" class="home__section">
         <div class="home__section-header">
           <h2 class="home__section-title">公告</h2>
@@ -453,6 +379,32 @@ onActivated(() => {
         <span>去订餐</span>
       </button>
     </div>
+
+    <!-- 通知详情弹层(标题 + 图片 + 内容;仅通过按钮/关闭图标关闭,不响应遮罩点击) -->
+    <van-popup
+      v-model:show="showNoticePopup"
+      position="bottom"
+      round
+      closeable
+      close-icon-position="top-left"
+      :close-on-click-overlay="false"
+      :style="{ maxHeight: '80%' }"
+    >
+      <div v-if="noticeDetail" class="notice-detail">
+        <div class="notice-detail__title">{{ noticeDetail.title }}</div>
+        <div
+          v-if="getNoticeImage(noticeDetail)"
+          class="notice-detail__image"
+          @click="previewImage(getNoticeImage(noticeDetail))"
+        >
+          <img :src="getNoticeImage(noticeDetail)" :alt="noticeDetail.title" />
+        </div>
+        <div v-if="noticeDetail.content" class="notice-detail__content">{{ noticeDetail.content }}</div>
+        <div class="notice-detail__footer safe-area-bottom">
+          <van-button type="primary" round block @click="showNoticePopup = false">知道了</van-button>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -460,12 +412,15 @@ onActivated(() => {
 @use '@/styles/variables' as *;
 
 .home {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
   // 为固定 TabBar(64px + 安全区)留出空间
-  padding-bottom: calc(64px + constant(safe-area-inset-bottom));
   padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  overflow: hidden;
 
-  // ============ 顶部品牌标题模块(居中) ============
+  // ============ 顶部品牌标题模块(居中,固定不被滚动) ============
   &__brand-header {
     display: flex;
     flex-direction: column;
@@ -474,6 +429,7 @@ onActivated(() => {
     gap: 10px;
     padding: 14px 16px 10px;
     text-align: center;
+    flex-shrink: 0;
   }
 
   &__brand-logo {
@@ -518,6 +474,7 @@ onActivated(() => {
     border-radius: 12px;
     overflow: hidden;
     cursor: pointer;
+    flex-shrink: 0;
   }
 
   &__ticker-fixed {
@@ -542,30 +499,34 @@ onActivated(() => {
     min-width: 0;
     overflow: hidden;
     position: relative;
+    height: 20px;
+    display: flex;
+    align-items: center;
   }
 
   &__ticker-track {
     display: inline-flex;
     align-items: center;
     white-space: nowrap;
-    animation: ticker-scroll 16s linear infinite;
-
-    &:hover {
-      animation-play-state: paused;
-    }
+    will-change: transform;
+    // 单条从右往左滚动一次,animationDuration 由内联样式按文本长度设置
+    // animationend 事件触发切下一条(:key 变化重建元素,动画重新播放)
+    animation: ticker-scroll-single var(--duration, 8s) linear forwards;
   }
 
   &__ticker-text {
     flex-shrink: 0;
     font-size: 14px;
     color: $brand-secondary-foreground;
-    // 用 padding-right 而非 gap 提供间隔,保证 -50% 平移无缝衔接
     padding-right: 48px;
   }
 
   // ============ 内容区 ============
   &__content {
     padding: 20px 16px 0;
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   // ============ 快捷入口 ============
@@ -628,92 +589,6 @@ onActivated(() => {
     font-size: 12px;
     color: $brand-muted-foreground;
     cursor: pointer;
-  }
-
-  // ============ 今日新品 ============
-  &__dish-list {
-    display: flex;
-    gap: 12px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-
-    &::-webkit-scrollbar {
-      display: none;
-    }
-  }
-
-  &__dish-card {
-    flex-shrink: 0;
-    width: 130px;
-    padding: 12px;
-    background: $brand-card;
-    border: 1px solid $brand-border;
-    border-radius: 16px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-
-    &:active {
-      opacity: 0.6;
-    }
-  }
-
-  &__dish-image {
-    width: 80px;
-    height: 80px;
-    border-radius: 12px;
-    background: $brand-muted;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-
-    img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-  }
-
-  &__dish-placeholder {
-    color: $brand-muted-foreground;
-  }
-
-  &__dish-name {
-    max-width: 100%;
-    font-size: 14px;
-    font-weight: 500;
-    color: $brand-card-foreground;
-    text-align: center;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__dish-footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  &__dish-price {
-    font-size: 14px;
-    font-weight: 700;
-    color: $brand-primary;
-  }
-
-  &__dish-pill {
-    font-size: 10px;
-    font-weight: 500;
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: $brand-accent;
-    color: $brand-accent-foreground;
   }
 
   // ============ 公司通知 ============
@@ -802,12 +677,61 @@ onActivated(() => {
   }
 }
 
-@keyframes ticker-scroll {
+/* ============ 通知详情弹层 ============ */
+.notice-detail {
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+
+  &__title {
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid $brand-border;
+    color: $brand-foreground;
+  }
+
+  &__image {
+    margin: 12px 16px 0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: $brand-muted;
+    cursor: zoom-in;
+
+    img {
+      display: block;
+      width: 100%;
+      max-height: 40vh;
+      object-fit: cover;
+    }
+  }
+
+  &__content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: $brand-foreground;
+    white-space: pre-wrap;
+    word-break: break-word;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  &__footer {
+    padding: 10px 16px;
+    border-top: 1px solid $brand-border;
+    background: $brand-card;
+  }
+}
+
+@keyframes ticker-scroll-single {
   0% {
-    transform: translateX(0);
+    transform: translateX(var(--vp-w, 100%));
   }
   100% {
-    transform: translateX(-50%);
+    transform: translateX(-100%);
   }
 }
 </style>

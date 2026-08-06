@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   ElButton,
   ElDialog,
@@ -18,7 +18,7 @@ import {
   ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
-import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X, CreditCard, Usb } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X, CreditCard, Info } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -34,6 +34,7 @@ import type { EmployeeImportRow, LowBalanceStats } from '@/api/employee'
 import type { Department, Employee, Order, PageResult } from '@/api/types'
 import { COMMON_STATUS, ORDER_STATUS, MEAL_TYPE } from '@/constants/dict'
 import { formatMoney } from '@/utils/money'
+import { compressImage } from '@/utils/imageCompress'
 
 const authStore = useAuthStore()
 // 超管未选择食堂时返回 null,不再静默回退到 storeId=1
@@ -87,6 +88,7 @@ const form = ref<Employee>(defaultEmployee())
 const rules: FormRules = {
   cardNo: [{ required: true, message: '请输入员工卡号', trigger: 'blur' }],
   name: [{ required: true, message: '请输入员工姓名', trigger: 'blur' }],
+  phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }],
 }
 
 const openAdd = () => {
@@ -101,146 +103,137 @@ const openEdit = (row: Employee) => {
   dialogVisible.value = true
 }
 
-// ===== 读卡器刷卡填卡号 =====
-// 支持两种读卡器模式:
-// 1. 键盘模拟模式(HID 楔形读卡器):读卡器模拟键盘输入卡号+回车,所有浏览器通用
-// 2. 串口模式(Web Serial API):直接连接读卡器的串口,仅 Chrome/Edge 89+ 支持
-const cardReading = ref(false)
-const cardReadBuffer = ref('')
-let cardReadTimer: ReturnType<typeof setTimeout> | null = null
-let serialPort: any = null
-let serialReader: any = null
+// ===== 读卡器刷卡(读卡助手模拟键盘) =====
+// 读卡助手(本地 32 位进程加载 OUR_IDR.dll)把卡号模拟成键盘输入+回车,
+// 只要卡号输入框聚焦,刷卡就会自动填入卡号,前端无需任何接线。
+// 本页只负责:轮询读卡助手状态,在输入框末尾显示绿色/红色图标,提供详情与驱动下载。
+const CARD_HELPER_URL = 'http://127.0.0.1:8765'
+// 读卡助手安装包下载地址(指向 GitHub Release 资产,留空则隐藏下载按钮)
+const CARD_HELPER_DOWNLOAD_URL = 'https://api.gitproxy.dev/https://github.com/MingTu01/canteen/releases/download/card-helper-v1.2.0/CanteenCardHelper-Setup-1.2.0.exe'
 
-/** 开始键盘模拟模式读卡 */
-const startKeyboardCardRead = () => {
-  cardReading.value = true
-  cardReadBuffer.value = ''
-  ElMessage.info('请刷卡…')
+interface CardReaderStatus {
+  running: boolean
+  dll_loaded: boolean
+  connected: boolean
+  driver_ok: boolean
+  active: boolean
+  mode: string
+  description: string
+  last_ret: number | null
+  last_ret_desc: string
+  version: string
+  send_enter: boolean
+  python_bits: number
 }
 
-/** 停止键盘模拟模式读卡 */
-const stopKeyboardCardRead = () => {
-  cardReading.value = false
-  cardReadBuffer.value = ''
-  if (cardReadTimer) {
-    clearTimeout(cardReadTimer)
-    cardReadTimer = null
-  }
-}
+const cardNoInput = ref()
+const cardReaderStatus = ref<CardReaderStatus | null>(null)
+const cardReaderDetailVisible = ref(false)
+let cardStatusTimer: ReturnType<typeof setInterval> | null = null
 
-/** 键盘模式读卡:捕获快速连续输入,以回车结尾视为完整卡号 */
-const handleCardKeydown = (e: KeyboardEvent) => {
-  if (!cardReading.value) return
-  // 读卡器输入通常很快,忽略修饰键
-  if (e.ctrlKey || e.altKey || e.metaKey) return
+/** 读卡器是否正常(绿色):已连接 且 正在读卡(未暂停) */
+const cardReaderOk = computed(() => !!cardReaderStatus.value?.connected && cardReaderStatus.value?.active !== false)
 
-  if (e.key === 'Enter') {
-    // 回车 = 读卡结束
-    if (cardReadBuffer.value.length > 0) {
-      form.value.cardNo = cardReadBuffer.value.trim()
-      ElMessage.success('读卡成功')
+/** 读卡状态机(检测逻辑 v2):按优先级划分 UI 状态 */
+const readerUi = computed(() => {
+  const s = cardReaderStatus.value
+  if (!s) {
+    // S5 读卡助手未运行(未安装或已停止)
+    return {
+      key: 'no_helper',
+      title: '未检测到读卡助手',
+      desc: '读卡助手未安装或未运行。若你的读卡器是 CH375/CH372(OUR_IDR)类型,请下载并安装读卡助手。',
+      showDownload: true,
     }
-    stopKeyboardCardRead()
-    e.preventDefault()
-    return
   }
+  if (!s.dll_loaded) {
+    // S4 DLL 缺失
+    return {
+      key: 'dll_missing',
+      title: '读卡助手不完整',
+      desc: '未找到 OUR_IDR.dll,请重新安装读卡助手。',
+      showDownload: true,
+    }
+  }
+  if (!s.connected) {
+    // S3 读卡助手已运行,但未检测到 OUR_IDR 读卡器
+    return {
+      key: 'no_reader',
+      title: '未检测到 OUR_IDR 读卡器',
+      desc: '读卡助手已运行,但未检测到 CH375/CH372 读卡器。请检查读卡器是否插入、驱动是否正常。',
+      showDownload: !s.driver_ok,
+    }
+  }
+  if (!s.active) {
+    // S2 读卡已暂停(托盘「暂停使用」开启)
+    return {
+      key: 'paused',
+      title: '读卡已暂停',
+      desc: '读卡器已暂停使用(让给其他程序)。请右键右下角托盘图标,选择「继续使用」恢复刷卡。',
+      showDownload: false,
+    }
+  }
+  // S1 正常
+  return {
+    key: 'normal',
+    title: '读卡器已就绪',
+    desc: '将光标置于卡号输入框后刷卡即可自动填入。',
+    showDownload: false,
+  }
+})
 
-  // 单字符输入
-  if (e.key.length === 1) {
-    cardReadBuffer.value += e.key
-    // 重置超时(读卡器输入间隔 <100ms,手动输入 >200ms)
-    if (cardReadTimer) clearTimeout(cardReadTimer)
-    cardReadTimer = setTimeout(() => {
-      // 超时后如果缓冲区有内容,视为读卡完成(部分读卡器不发送回车)
-      if (cardReadBuffer.value.length >= 4) {
-        form.value.cardNo = cardReadBuffer.value.trim()
-        ElMessage.success('读卡成功')
-      }
-      stopKeyboardCardRead()
-    }, 150)
-    e.preventDefault()
+/** 卡号框图标悬停提示(随状态变化) */
+const cardReaderIconTitle = computed(() => {
+  switch (readerUi.value.key) {
+    case 'normal': return '读卡器正常,点击查看详情'
+    case 'paused': return '读卡已暂停,点击查看详情'
+    case 'no_reader': return '未检测到读卡器,点击查看详情'
+    case 'dll_missing': return '读卡助手不完整,点击查看详情'
+    default: return '未检测到读卡助手,点击查看详情'
   }
-}
+})
 
-/** 串口模式读卡(Web Serial API) */
-const startSerialCardRead = async () => {
-  if (!('serial' in navigator)) {
-    ElMessage.warning('当前浏览器不支持串口读卡,请使用 Chrome/Edge 浏览器,或使用键盘模拟模式')
-    return
-  }
+/** 轮询读卡助手状态 */
+const pollCardStatus = async () => {
   try {
-    serialPort = await (navigator as any).serial.requestPort()
-    await serialPort.open({ baudRate: 9600 })
-    ElMessage.info('读卡器已连接,请刷卡…')
-    cardReading.value = true
-
-    const decoder = new TextDecoderStream()
-    serialPort.readable.pipeTo(decoder.writable)
-    serialReader = decoder.readable.getReader()
-
-    // 后台读取循环
-    ;(async () => {
-      let buffer = ''
-      while (cardReading.value) {
-        try {
-          const { value, done } = await serialReader.read()
-          if (done) break
-          if (value) {
-            buffer += value
-            // 多数读卡器以回车/换行结尾
-            if (buffer.includes('\n') || buffer.includes('\r')) {
-              const cardNo = buffer.replace(/[\r\n]/g, '').trim()
-              if (cardNo.length > 0) {
-                form.value.cardNo = cardNo
-                ElMessage.success('读卡成功')
-                stopSerialCardRead()
-                return
-              }
-              buffer = ''
-            }
-          }
-        } catch {
-          break
-        }
-      }
-    })()
-  } catch (err: any) {
-    if (err.name !== 'NotFoundError') {
-      ElMessage.error('连接读卡器失败: ' + (err.message || err))
-    }
-    cardReading.value = false
-  }
-}
-
-/** 停止串口读卡 */
-const stopSerialCardRead = async () => {
-  cardReading.value = false
-  try {
-    if (serialReader) {
-      await serialReader.cancel()
-      serialReader = null
-    }
-    if (serialPort) {
-      await serialPort.close()
-      serialPort = null
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 1500)
+    const res = await fetch(`${CARD_HELPER_URL}/status`, { signal: ctrl.signal })
+    clearTimeout(timer)
+    if (res.ok) {
+      cardReaderStatus.value = (await res.json()) as CardReaderStatus
+    } else {
+      cardReaderStatus.value = null
     }
   } catch {
-    /* 忽略关闭错误 */
+    cardReaderStatus.value = null
   }
 }
 
-/** 切换读卡状态 */
-const toggleCardRead = () => {
-  if (cardReading.value) {
-    stopKeyboardCardRead()
-    stopSerialCardRead()
-  } else {
-    startKeyboardCardRead()
-  }
+/** 点击读卡图标:刷新状态并打开详情弹窗 */
+const openCardReaderDetail = () => {
+  pollCardStatus().then(() => {
+    cardReaderDetailVisible.value = true
+  })
 }
 
-/** 串口支持检测 */
-const serialSupported = computed(() => 'serial' in navigator)
+/** 下载读卡助手安装包(安装并注册开机自启) */
+const downloadCardHelper = () => {
+  if (!CARD_HELPER_DOWNLOAD_URL) {
+    ElMessage.warning('暂未配置读卡助手下载地址,请联系管理员')
+    return
+  }
+  window.open(CARD_HELPER_DOWNLOAD_URL, '_blank')
+}
+
+/** 弹窗打开后:刷新读卡状态并聚焦卡号输入框,刷卡即可填入 */
+const onDialogOpened = async () => {
+  await pollCardStatus()
+  nextTick(() => cardNoInput.value?.focus())
+}
+
+/** 弹窗关闭后:无需处理(读卡助手常驻后台) */
+const onDialogClosed = () => {}
 
 /** 启用/禁用员工(只更新 status 字段) */
 const handleToggleStatus = async (row: Employee) => {
@@ -593,14 +586,15 @@ const handleExport = async () => {
 onMounted(() => {
   fetchList()
   fetchDepartments()
-  // 注册键盘读卡监听(全局,但仅在 cardReading=true 时生效)
-  window.addEventListener('keydown', handleCardKeydown)
+  pollCardStatus()
+  cardStatusTimer = setInterval(pollCardStatus, 3000)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleCardKeydown)
-  stopKeyboardCardRead()
-  stopSerialCardRead()
+  if (cardStatusTimer) {
+    clearInterval(cardStatusTimer)
+    cardStatusTimer = null
+  }
 })
 
 // ===== 批量导入照片 =====
@@ -620,7 +614,7 @@ const photoImportItems = ref<PhotoImportItem[]>([])
 const photoImportLoading = ref(false)
 const photoFileInput = ref<HTMLInputElement | null>(null)
 
-/** 从文件名提取卡号(去扩展名) */
+/** 从文件名提取标识符(去扩展名,作为卡号/手机号/姓名的匹配 key) */
 const extractCardNo = (fileName: string): string => {
   const lastSlash = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'))
   const base = lastSlash >= 0 ? fileName.slice(lastSlash + 1) : fileName
@@ -737,7 +731,9 @@ const startPhotoUpload = async () => {
     item.status = 'uploading'
     item.progress = 30
     try {
-      await employeeApi.uploadAvatar(item.cardNo, item.file, sid.value || undefined)
+      // 前端压缩后再上传,避免大图触发服务器体积限制(默认 200KB/最大 800px)
+      const compressed = await compressImage(item.file)
+      await employeeApi.uploadAvatar(item.cardNo, compressed, sid.value || undefined)
       item.status = 'success'
       item.progress = 100
       success++
@@ -745,7 +741,7 @@ const startPhotoUpload = async () => {
       item.status = 'error'
       item.progress = 0
       const msg = e instanceof Error ? e.message : '上传失败'
-      item.error = msg.includes('员工不存在') ? '员工不存在' : msg
+      item.error = msg.includes('员工不存在') || msg.includes('未匹配到员工') ? '未匹配到员工' : msg
       failed++
     }
   }
@@ -859,7 +855,7 @@ const onPhotoImportClose = () => {
               <StatusTag :value="row.status" :map="COMMON_STATUS" />
             </template>
           </ElTableColumn>
-          <ElTableColumn label="操作" width="360" fixed="right" align="left" header-align="left">
+          <ElTableColumn label="操作" width="430" fixed="right" align="left" header-align="left" :show-overflow-tooltip="false">
             <template #default="{ row }">
               <ElButton size="small" :icon="Pencil" @click="openEdit(row as Employee)">编辑</ElButton>
               <ElButton size="small" :icon="ClipboardList" @click="openEmployeeOrders(row as Employee)">订单</ElButton>
@@ -874,7 +870,7 @@ const onPhotoImportClose = () => {
               <ElButton size="small" type="warning" :icon="Wallet" @click="openRecharge(row as Employee)">
                 充值
               </ElButton>
-              <ElButton size="small" type="danger" :icon="Trash2" aria-label="删除员工" @click="handleDelete(row.id)" />
+              <ElButton size="small" type="danger" plain :icon="Trash2" class="delete-btn" @click="handleDelete(row.id)">删除</ElButton>
             </template>
           </ElTableColumn>
           <template #empty>
@@ -905,6 +901,8 @@ const onPhotoImportClose = () => {
         :close-on-click-modal="false"
         append-to-body
         destroy-on-close
+        @opened="onDialogOpened"
+        @closed="onDialogClosed"
       >
         <ElForm ref="formRef" :model="form" :rules="rules" label-width="80px">
           <ElFormItem label="头像">
@@ -918,33 +916,28 @@ const onPhotoImportClose = () => {
             </div>
           </ElFormItem>
           <ElFormItem label="卡号" prop="cardNo">
-            <div class="flex items-center gap-2 w-full">
-              <ElInput
-                v-model="form.cardNo"
-                :placeholder="cardReading ? '请刷卡…' : '请输入员工卡号'"
-                aria-required="true"
-                class="flex-1"
-                :class="{ 'card-reading': cardReading }"
-              />
-              <ElButton
-                :type="cardReading ? 'danger' : 'primary'"
-                :icon="CreditCard"
-                @click="toggleCardRead"
-              >
-                {{ cardReading ? '取消' : '刷卡' }}
-              </ElButton>
-              <ElButton
-                v-if="serialSupported"
-                :icon="Usb"
-                title="连接 USB/串口读卡器"
-                @click="startSerialCardRead"
-              >
-                串口
-              </ElButton>
-            </div>
+            <ElInput
+              ref="cardNoInput"
+              v-model="form.cardNo"
+              placeholder="将光标置于此处后刷卡,自动填入卡号"
+              aria-required="true"
+              clearable
+            >
+              <template #suffix>
+                <button
+                  type="button"
+                  class="card-status-btn"
+                  :class="cardReaderOk ? 'ok' : 'down'"
+                  :title="cardReaderIconTitle"
+                  @click="openCardReaderDetail"
+                >
+                  <CreditCard :size="16" />
+                </button>
+              </template>
+            </ElInput>
           </ElFormItem>
           <ElFormItem label="手机号" prop="phone">
-            <ElInput v-model="form.phone" placeholder="用于 H5/小程序登录(同店内唯一)" maxlength="11" />
+            <ElInput v-model="form.phone" placeholder="用于 H5/小程序登录(同店内唯一)" maxlength="11" aria-required="true" />
           </ElFormItem>
           <ElFormItem label="姓名" prop="name">
             <ElInput v-model="form.name" placeholder="请输入员工姓名" aria-required="true" />
@@ -972,6 +965,57 @@ const onPhotoImportClose = () => {
         <template #footer>
           <ElButton @click="dialogVisible = false">取消</ElButton>
           <ElButton type="primary" :loading="dialogLoading" @click="handleSave">保存</ElButton>
+        </template>
+      </ElDialog>
+
+      <!-- 读卡器详情弹窗 -->
+      <ElDialog
+        v-model="cardReaderDetailVisible"
+        title="读卡器状态"
+        width="440px"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <div class="card-reader-detail">
+          <div
+            class="status-row"
+            :class="readerUi.key === 'normal' ? 'ok' : 'down'"
+          >
+            <CreditCard :size="18" />
+            <div>
+              <div class="status-title">{{ readerUi.title }}</div>
+              <div class="status-desc">{{ readerUi.desc }}</div>
+            </div>
+          </div>
+
+          <!-- 仅当读卡器已连接(S1/S2)时才展示 OUR_IDR 设备详情,避免误报 -->
+          <div v-if="cardReaderStatus?.connected" class="detail-grid mt-3">
+            <div class="detail-item"><span>接入方式</span><b>{{ cardReaderStatus.mode }}</b></div>
+            <div class="detail-item"><span>设备</span><b>{{ cardReaderStatus.description }}</b></div>
+            <div class="detail-item"><span>驱动</span>
+              <b :class="cardReaderStatus.driver_ok ? 'text-success' : 'text-danger'">
+                {{ cardReaderStatus.driver_ok ? '正常' : '未安装/异常' }}
+              </b>
+            </div>
+            <div class="detail-item"><span>版本</span><b>v{{ cardReaderStatus.version }}</b></div>
+            <div class="detail-item"><span>追加回车</span><b>{{ cardReaderStatus.send_enter ? '是' : '否' }}</b></div>
+            <div class="detail-item"><span>运行位数</span><b>Python {{ cardReaderStatus.python_bits }} 位</b></div>
+          </div>
+
+          <div v-if="readerUi.showDownload && CARD_HELPER_DOWNLOAD_URL" class="mt-3">
+            <ElButton type="primary" class="w-full" @click="downloadCardHelper">
+              <Download :size="16" class="mr-1" />{{ cardReaderStatus?.connected === false ? '下载/安装读卡器驱动' : '下载读卡助手(含驱动)' }}
+            </ElButton>
+          </div>
+
+          <!-- 恒常提示:通用模拟键盘/HID 读卡器无需读卡助手 -->
+          <div class="hid-hint mt-3">
+            <Info :size="14" />
+            <span>提示:若你的读卡器是通用模拟键盘 / HID 类型,无需读卡助手。将光标置于卡号输入框后直接刷卡,卡号会自动填入。</span>
+          </div>
+        </div>
+        <template #footer>
+          <ElButton @click="cardReaderDetailVisible = false">关闭</ElButton>
         </template>
       </ElDialog>
 
@@ -1266,7 +1310,7 @@ const onPhotoImportClose = () => {
         />
         <div class="mb-4 flex items-center justify-between">
           <div class="text-sm text-gray-500">
-            文件名作为卡号自动匹配员工(如 CARD001.jpg → 卡号 CARD001)。同卡号多次选择,后选的覆盖先选的。
+            文件名(去扩展名)作为匹配标识符自动识别员工:支持<b>卡号</b> / <b>手机号</b> / <b>姓名</b> 自动适配(优先卡号,再手机号,后姓名)。如 CARD001.jpg → 卡号 CARD001、13800000001.jpg → 手机号、张三.jpg → 姓名。同名多次选择,后选的覆盖先选的。
           </div>
           <ElButton type="primary" :icon="ImagePlus" @click="triggerPhotoFileInput">选择照片</ElButton>
         </div>
@@ -1319,13 +1363,97 @@ const onPhotoImportClose = () => {
 </template>
 
 <style scoped>
-/* 读卡中输入框高亮闪烁动画 */
-.card-reading :deep(.el-input__wrapper) {
-  box-shadow: 0 0 0 2px var(--el-color-primary) !important;
-  animation: card-read-pulse 1s ease-in-out infinite;
+/* 卡号输入框末尾的读卡状态图标 */
+.card-status-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 6px;
+  transition: background 0.2s;
 }
-@keyframes card-read-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px var(--el-color-primary); }
-  50% { box-shadow: 0 0 0 2px var(--el-color-primary-light-3); }
+.card-status-btn:hover {
+  background: var(--el-fill-color-light);
+}
+.card-status-btn.ok {
+  color: #22c55e;
+  animation: card-blink 1.2s ease-in-out infinite;
+}
+.card-status-btn.down {
+  color: #ef4444;
+}
+@keyframes card-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* 读卡器详情弹窗 */
+.status-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+}
+.status-row.ok {
+  color: #16a34a;
+  background: rgba(34, 197, 94, 0.1);
+}
+.status-row.down {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.1);
+}
+.status-title {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.status-desc {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  padding: 4px 0;
+}
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.detail-item span {
+  color: var(--el-text-color-secondary);
+}
+.detail-item b {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  text-align: right;
+}
+.text-success {
+  color: #16a34a;
+}
+.text-danger {
+  color: #dc2626;
+}
+.hid-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+}
+.hid-hint svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #2563eb;
 }
 </style>

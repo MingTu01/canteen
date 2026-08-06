@@ -50,7 +50,6 @@ class DishServiceTest {
         testDish1.setName("红烧排骨");
         testDish1.setPrice(new BigDecimal("15.00"));
         testDish1.setCategory("荤菜");
-        testDish1.setIsNew(0);
         testDish1.setStatus(1);
         testDish1.setStock(100);
         testDish1.setMaxPerOrder(5);
@@ -62,7 +61,6 @@ class DishServiceTest {
         testDish2.setName("绿豆沙");
         testDish2.setPrice(new BigDecimal("3.00"));
         testDish2.setCategory("饮品");
-        testDish2.setIsNew(1);
         testDish2.setStatus(1);
         testDish2.setStock(100);
         testDish2.setMaxPerOrder(5);
@@ -73,7 +71,6 @@ class DishServiceTest {
         newDish.setName("宫保鸡丁");
         newDish.setPrice(new BigDecimal("12.00"));
         newDish.setCategory("荤菜");
-        newDish.setIsNew(0);
         newDish.setStatus(1);
     }
 
@@ -88,19 +85,6 @@ class DishServiceTest {
         assertEquals(2, result.size());
         assertEquals("红烧排骨", result.get(0).getName());
         verify(dishMapper).selectByStoreId(1L);
-    }
-
-    @Test
-    @DisplayName("获取门店新品菜品")
-    void getNewDishesByStore_ReturnsOnlyNewDishes() {
-        when(dishMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(testDish2));
-
-        List<Dish> result = dishService.getNewDishesByStore(1L);
-
-        assertNotNull(result);
-        assertEquals(1, result.size());
-        assertEquals("绿豆沙", result.get(0).getName());
-        assertEquals(1, result.get(0).getIsNew());
     }
 
     @Test

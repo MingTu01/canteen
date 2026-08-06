@@ -45,7 +45,7 @@ public class OrderController {
         this.rateLimiter = rateLimiter;
     }
 
-    @OperationLog(value = "创建订单", detail = "'员工ID ' + #dto.employeeId + ' 餐次 ' + #dto.mealType + ' 日期 ' + #dto.date")
+    @OperationLog(value = "创建订单", detail = "'员工 ' + #resolver.employeeName(#dto.employeeId) + ' 餐次 ' + #resolver.mealType(#dto.mealType) + ' 日期 ' + #dto.date")
     @PostMapping
     public ApiResponse<Order> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
         // 多租户:订单只能创建到当前用户有权限的门店

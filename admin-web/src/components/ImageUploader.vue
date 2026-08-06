@@ -3,18 +3,20 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Upload, Loader2, X } from 'lucide-vue-next'
 import { fileApi } from '@/api'
-import { compressImage } from '@/utils/imageCompress'
+import { compressImage, compressImageLoose } from '@/utils/imageCompress'
 
 /**
  * 图片上传组件
  *
  * 特性:
- * - 前端 canvas 压缩到 200k 左右(最大边长 800px)
+ * - 前端 canvas 压缩(默认 200k 左右/最大边长 800px)
+ * - loose=true 时用宽松压缩(更大尺寸/更高画质,用于品牌/背景等大图,避免不清晰)
  * - 支持预览与删除
  * - v-model 绑定 URL 字符串
  *
  * 用法:
  *   <ImageUploader v-model="form.logoUrl" label="企业 Logo" />
+ *   <ImageUploader v-model="form.backgroundUrl" label="背景" loose />
  */
 const props = withDefaults(
   defineProps<{
@@ -24,12 +26,15 @@ const props = withDefaults(
     hint?: string
     /** 预览图宽高(像素) */
     previewSize?: number
+    /** 宽松压缩:用于品牌/背景等大图,保留更多细节(更大尺寸+更高画质) */
+    loose?: boolean
   }>(),
   {
     modelValue: '',
     label: '图片',
     hint: '',
     previewSize: 100,
+    loose: false,
   }
 )
 
@@ -47,8 +52,8 @@ const handleFile = async (e: Event) => {
 
   uploading.value = true
   try {
-    // 1. 前端 canvas 压缩到 200k(默认值,与 imageCompress.ts 一致)
-    const compressed = await compressImage(file)
+    // 1. 前端 canvas 压缩(默认 200k;loose=true 用宽松压缩保留更多细节)
+    const compressed = props.loose ? await compressImageLoose(file) : await compressImage(file)
     // 2. 上传到后端
     const result = await fileApi.uploadImage(compressed)
     emit('update:modelValue', result.url)
@@ -118,7 +123,9 @@ const clearImage = () => {
         {{ uploading ? '上传中…' : `上传${label}` }}
       </button>
       <p v-if="hint" class="mt-1.5 text-xs text-text-muted">{{ hint }}</p>
-      <p v-else class="mt-1.5 text-xs text-text-muted">自动压缩到 200KB 以内,支持 JPG/PNG/WebP</p>
+      <p v-else class="mt-1.5 text-xs text-text-muted">
+        {{ props.loose ? '前端压缩(保留高画质),支持 JPG/PNG/WebP' : '自动压缩到 200KB 以内,支持 JPG/PNG/WebP' }}
+      </p>
       <input
         ref="inputRef"
         type="file"

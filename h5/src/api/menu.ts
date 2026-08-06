@@ -1,5 +1,5 @@
 import { get } from './index'
-import type { MenuWithItems, Dish, DishCategory, DiningTimeSlot, PageResult } from './types'
+import type { MenuWithItems, DishCategory, DiningTimeSlot } from './types'
 
 /**
  * 菜单 / 菜品 / 分类 / 就餐时段 API
@@ -18,14 +18,6 @@ export function getMenuDates(storeId: number, year: number, month: number): Prom
   return get<{ date: string; published: boolean }[]>(`/menu/store/${storeId}/dates`, {
     params: { year, month },
   })
-}
-
-/** 查询门店新品菜品(分页) */
-export function getNewDishes(
-  storeId: number,
-  params?: { page?: number; size?: number },
-): Promise<PageResult<Dish>> {
-  return get<PageResult<Dish>>(`/dish/store/${storeId}/new`, { params })
 }
 
 /** 查询门店菜品分类列表 */

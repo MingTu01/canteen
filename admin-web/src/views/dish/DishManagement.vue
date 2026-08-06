@@ -98,7 +98,6 @@ const defaultDish = (): Dish => ({
   image: '',
   stock: null,
   maxPerOrder: null,
-  isNew: 0,
   status: 1,
 })
 const form = ref<Dish>(defaultDish())
@@ -515,7 +514,7 @@ onMounted(() => {
           </ElFormItem>
           <ElFormItem label="单次限购">
             <div class="w-full">
-              <ElInputNumber v-model="formMaxPerOrder" :min="1" :step="1" controls-position="right" class="w-full" />
+              <ElInputNumber v-model="formMaxPerOrder" :min="0" :step="1" controls-position="right" class="w-full" />
               <p class="mt-1 text-xs text-text-muted">0 或不填表示不限</p>
             </div>
           </ElFormItem>
@@ -529,9 +528,6 @@ onMounted(() => {
                 {{ o.label }}
               </ElCheckbox>
             </ElCheckboxGroup>
-          </ElFormItem>
-          <ElFormItem label="新品">
-            <ElSwitch v-model="form.isNew" :active-value="1" :inactive-value="0" />
           </ElFormItem>
           <ElFormItem label="状态">
             <ElSwitch v-model="form.status" :active-value="1" :inactive-value="0" />
