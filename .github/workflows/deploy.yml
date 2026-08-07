@@ -1,0 +1,174 @@
+# =============================================================================
+# 企业智慧食堂系统 - main 分支自动构建并发布到 deploy 分支
+# =============================================================================
+# 触发条件:推送 main 分支(或手动 workflow_dispatch)
+# 作用    :自动构建后端/管理后台/H5 产物,组装 deploy 分支结构,强制推送到
+#          deploy 分支(orphan 分支,独立历史)。
+# 服务器只需跟踪 deploy 分支,git pull 即可更新,无需构建。
+#
+# 相比手动 publish.sh / push_deploy.py 的优势:
+#   - 免去人工重复构建与推送(避免 GitHub 45MB 大文件推送超时)
+#   - 在 Linux runner 上构建并设置 +x,彻底规避 Windows 不保留执行权限
+#     导致的服务器 "权限不够 (os error 13)" 问题
+#   - 产物一致性由 CI 保证,避免本地环境差异
+# =============================================================================
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 支持手动触发
+
+# 需要写权限以推送 deploy 分支
+permissions:
+  contents: write
+
+# 并发控制:同一时间只允许一个构建+发布流程,避免 deploy 分支竞态
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: 设置 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            admin-web/package-lock.json
+            h5/package-lock.json
+
+      # ---------- 后端构建 ----------
+      - name: 构建后端
+        run: |
+          cd backend
+          mvn -B clean package -Dmaven.test.skip=true
+        shell: bash
+
+      # ---------- 前端构建 ----------
+      - name: 构建管理后台 admin-web
+        run: |
+          cd admin-web
+          npm ci
+          npm run build
+        shell: bash
+
+      - name: 构建 H5
+        run: |
+          cd h5
+          npm ci
+          npm run build
+        shell: bash
+
+      # ---------- 组装 deploy/ 产物目录 ----------
+      - name: 组装 deploy 产物
+        run: |
+          set -e
+          WS="$GITHUB_WORKSPACE"
+          rm -rf "$WS/deploy"
+          mkdir -p "$WS/deploy/backend" "$WS/deploy/admin-web/html" "$WS/deploy/h5/html"
+
+          # 后端 jar(排除 sources/javadoc/plain,取唯一可执行 jar)
+          JAR=$(ls "$WS/backend/target/enterprise-canteen-"*.jar 2>/dev/null \
+                | grep -v -E 'sources|javadoc|plain|original' | head -1)
+          if [ -z "$JAR" ]; then
+            echo "::error::未找到后端构建产物 jar"
+            exit 1
+          fi
+          cp "$JAR" "$WS/deploy/backend/app.jar"
+          echo "后端 jar: $(basename "$JAR")"
+
+          # admin-web
+          if [ ! -f "$WS/admin-web/dist/index.html" ]; then
+            echo "::error::admin-web 构建产物缺失 dist/index.html"
+            exit 1
+          fi
+          cp -r "$WS/admin-web/dist/." "$WS/deploy/admin-web/html/"
+          cp "$WS/admin-web/nginx.conf" "$WS/deploy/admin-web/nginx.conf"
+
+          # h5
+          if [ ! -f "$WS/h5/dist/index.html" ]; then
+            echo "::error::h5 构建产物缺失 dist/index.html"
+            exit 1
+          fi
+          cp -r "$WS/h5/dist/." "$WS/deploy/h5/html/"
+          cp "$WS/h5/nginx.conf" "$WS/deploy/h5/nginx.conf"
+
+          echo "deploy 产物已组装:"
+          du -sh "$WS/deploy/backend/app.jar" "$WS/deploy/admin-web/html" "$WS/deploy/h5/html"
+        shell: bash
+
+      # ---------- 组装并强制推送 deploy 分支 ----------
+      - name: 组装并发往 deploy 分支
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config --global user.name  "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+          WS="$GITHUB_WORKSPACE"
+          # 使用带 token 的远程地址,确保有推送权限
+          GIT_ORIGIN="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # 在临时目录创建 orphan deploy 分支(与 publish.sh 同理,无需克隆远程大文件)
+          TMP=$(mktemp -d)
+          cd "$TMP"
+          git init --quiet
+          git remote add origin "$GIT_ORIGIN"
+          git checkout --orphan deploy 2>/dev/null || git checkout -B deploy
+          git rm -rf . 2>/dev/null || true
+
+          # 根目录运行时文件
+          cp "$WS/docker-compose.yml" .
+          cp "$WS/.env.example" .
+          cp "$WS/canteen.sh" . && chmod +x canteen.sh
+          cp "$WS/deploy.sh" . && chmod +x deploy.sh
+          cp "$WS/VERSIONS.json" .
+
+          # 后端运行时基础镜像 Dockerfile
+          mkdir -p backend scripts
+          cp "$WS/backend/Dockerfile.runtime" backend/
+
+          # 运行时脚本(deploy.sh 分阶段启动依赖,不含 build.sh / publish.sh)
+          for s in upgrade.sh snapshot.sh backup.sh restore.sh \
+                   clean-redeploy.sh init-db-user.sh cron_backup.sh; do
+            cp "$WS/scripts/$s" scripts/
+            chmod +x "scripts/$s"
+          done
+
+          # 构建产物
+          cp -r "$WS/deploy" deploy
+
+          # 提交(强制为所有 .sh 设置可执行位,服务器 pull 后可直接 sudo ./deploy.sh)
+          git add -A
+          find . -name '*.sh' -not -path './.git/*' | while read -r f; do
+            git update-index --chmod=+x "$f"
+          done
+
+          VERSION=$(python3 -c "import json; print(json.load(open('VERSIONS.json'))['system']['version'])")
+          git commit -m "deploy: v${VERSION} [CI]" --allow-empty
+
+          # 大文件推送调优(jar 约 45MB)
+          git config http.postBuffer 1048576000
+          git config http.lowSpeedLimit 0
+          git config http.lowSpeedTime 999999
+
+          echo "推送 deploy 分支..."
+          git push origin deploy --force
+        shell: bash
