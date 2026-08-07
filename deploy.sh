@@ -521,6 +521,22 @@ EOF
 configure_env() {
     step "3/9 配置环境变量"
 
+    # 读取旧 .env 中已有的持久凭证(MySQL root / 应用用户 / Redis / JWT / 备份密钥)
+    # 这些凭证要么绑定数据库数据卷,要么影响既有会话与历史加密备份:
+    #   - MySQL root 密码:首次部署时固化进 mysql 数据卷,重复部署时若重新生成,
+    #     容器(数据卷已初始化)会忽略新密码,导致 init-db-user.sh root 认证失败(Access denied)。
+    #   - JWT 密钥:更换会使已登录会话全部失效。
+    #   - 备份加密密钥:更换会令历史加密备份无法解密。
+    # 因此覆盖 .env 时优先复用旧值,仅首次部署(无旧 .env)才生成新随机值。
+    local old_mysql_pwd="" old_db_app_pwd="" old_redis_pwd="" old_jwt="" old_backup_key=""
+    if [[ -f .env ]]; then
+        old_mysql_pwd=$(read_env_var "MYSQL_ROOT_PASSWORD" ".env" 2>/dev/null || echo "")
+        old_db_app_pwd=$(read_env_var "DB_APP_PASSWORD" ".env" 2>/dev/null || echo "")
+        old_redis_pwd=$(read_env_var "REDIS_PASSWORD" ".env" 2>/dev/null || echo "")
+        old_jwt=$(read_env_var "JWT_SECRET" ".env" 2>/dev/null || echo "")
+        old_backup_key=$(read_env_var "BACKUP_ENCRYPTION_KEY" ".env" 2>/dev/null || echo "")
+    fi
+
     if [[ -f .env ]] && ! confirm_overwrite_env; then
         info "保留现有 .env 文件"
         return
@@ -529,36 +545,58 @@ configure_env() {
     info "即将生成 .env 配置文件,请按提示输入:"
     echo ""
 
-    # MySQL 密码
+    # MySQL 密码:优先复用(数据卷已初始化,更换会导致 Access denied)
     local mysql_pwd
-    ask "MySQL 数据库密码(留空=自动生成随机密码)"
-    read -r mysql_pwd
-    if [[ -z "$mysql_pwd" ]]; then
-        mysql_pwd=$(rand_hex 16)
-        info "已生成随机 MySQL 密码"
-    elif [[ ${#mysql_pwd} -lt 8 ]]; then
-        warn "密码不足 8 位,改为自动生成"
-        mysql_pwd=$(rand_hex 16)
+    if [[ -n "$old_mysql_pwd" ]]; then
+        mysql_pwd="$old_mysql_pwd"
+        info "复用已有 MySQL 密码(数据卷已初始化,不可更换)"
+    else
+        ask "MySQL 数据库密码(留空=自动生成随机密码)"
+        read -r mysql_pwd
+        if [[ -z "$mysql_pwd" ]]; then
+            mysql_pwd=$(rand_hex 16)
+            info "已生成随机 MySQL 密码"
+        elif [[ ${#mysql_pwd} -lt 8 ]]; then
+            warn "密码不足 8 位,改为自动生成"
+            mysql_pwd=$(rand_hex 16)
+        fi
     fi
 
-    # Redis 密码(P1-4 安全修复:Redis 强制密码,自动生成)
+    # Redis 密码(P1-4 安全修复:Redis 强制密码,优先复用)
     local redis_pwd
-    redis_pwd=$(rand_hex 16)
-    info "已生成随机 Redis 密码"
+    if [[ -n "$old_redis_pwd" ]]; then
+        redis_pwd="$old_redis_pwd"
+    else
+        redis_pwd=$(rand_hex 16)
+        info "已生成随机 Redis 密码"
+    fi
 
-    # JWT 密钥(自动生成)
+    # JWT 密钥(优先复用,避免既有登录会话失效)
     local jwt_secret
-    jwt_secret=$(rand_hex 32)
+    if [[ -n "$old_jwt" ]]; then
+        jwt_secret="$old_jwt"
+    else
+        jwt_secret=$(rand_hex 32)
+    fi
 
-    # MySQL 应用专用用户(P1-3:最小权限,仅 DML)
+    # MySQL 应用专用用户(P1-3:最小权限,仅 DML,优先复用)
     local db_app_user="canteen_app"
     local db_app_pwd
-    db_app_pwd=$(rand_hex 16)
-    info "已创建 MySQL 应用专用用户: ${db_app_user}(仅 DML 权限)"
+    if [[ -n "$old_db_app_pwd" ]]; then
+        db_app_pwd="$old_db_app_pwd"
+        info "复用已有应用用户密码: ${db_app_user}"
+    else
+        db_app_pwd=$(rand_hex 16)
+        info "已创建 MySQL 应用专用用户: ${db_app_user}(仅 DML 权限)"
+    fi
 
-    # 备份加密密钥(P1-1:备份 AES-256 加密,自动生成)
+    # 备份加密密钥(P1-1:备份 AES-256 加密,优先复用避免历史备份无法解密)
     local backup_key
-    backup_key=$(rand_hex 32)
+    if [[ -n "$old_backup_key" ]]; then
+        backup_key="$old_backup_key"
+    else
+        backup_key=$(rand_hex 32)
+    fi
 
     # P1-5 容器降权:检测宿主机运行用户 UID/GID,容器以此 UID 运行(非 root)
     # 默认 1000(Ubuntu/Debian 第一个普通用户),sudo 运行时取 SUDO_USER 的实际 UID/GID

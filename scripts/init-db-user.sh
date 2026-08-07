@@ -73,15 +73,11 @@ fi
 
 info "创建应用数据库用户: ${DB_APP_USERNAME}@% (数据库: ${MYSQL_DATABASE})"
 
-# P0 修复:转义密码中的单引号(mysql 字符串中单引号用 \' 转义,防止 SQL 注入)
-# shell 参数展开 ${var//pattern/replacement} 将所有 ' 替换为 \'
-ESCAPED_USER="${DB_APP_USERNAME//\'/\\\'}"
-ESCAPED_PASS="${DB_APP_PASSWORD//\'/\\\'}"
-
-# 1. 创建用户并授予 DML 权限(必须成功,不忽略错误)
-# P1 修复:临时禁用 set -e 以捕获退出码,避免错误处理成为死代码
-set +e
-docker exec -i canteen-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
+# 创建应用用户并授予 DML 权限(必须成功,不忽略错误)
+# P1 修复:函数内临时禁用 set -e 以捕获退出码(避免错误处理成为死代码)
+create_app_user() {
+    set +e
+    docker exec -i canteen-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
 -- P1-3 创建应用专用用户(最小权限:仅 DML,无 DDL/GRANT)
 -- 幂等:已存在则更新密码
 CREATE USER IF NOT EXISTS '${ESCAPED_USER}'@'%' IDENTIFIED BY '${ESCAPED_PASS}';
@@ -93,13 +89,120 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ${MYSQL_DATABASE}.* TO '${ESCAPED_USER}'
 
 FLUSH PRIVILEGES;
 SQL
+    local rc=$?
+    set -e
+    return $rc
+}
 
-main_rc=$?
-set -e
+# 等待 MySQL 容器就绪(用指定 root 密码验证可连接)
+wait_mysql_ready() {
+    local password="$1" max=${2:-30} i=0
+    while [[ $i -lt $max ]]; do
+        if docker exec -i canteen-mysql mysql -uroot -p"${password}" -e "SELECT 1" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+        i=$((i + 2))
+    done
+    return 1
+}
 
-if [ $main_rc -ne 0 ]; then
-    error "应用用户创建失败(mysql 退出码: $main_rc)"
-    exit 1
+# 重置 MySQL root 密码使其与 .env 一致(保留数据卷中的数据)
+# 场景:重复部署时 .env 被重新生成新密码,但 mysql 数据卷保留了首次部署的旧密码,
+# 容器(数据卷已初始化)会忽略新密码,导致 root 认证失败(Access denied)。
+# 解决:用 --skip-grant-tables 临时启动一个隔离容器,将 root 密码改为 .env 值。
+reset_root_password() {
+    local newpwd="$MYSQL_ROOT_PASSWORD"
+    local escaped_root_pass="${newpwd//\'/\\\'}"
+    warn "root 认证失败,尝试重置 MySQL root 密码以匹配 .env..."
+    warn "此操作仅修改 root 密码,数据卷中的数据将保留。"
+
+    # 清理可能遗留的恢复容器(异常退出时 --rm 未必生效)
+    docker rm -f canteen-mysql-recover >/dev/null 2>&1 || true
+
+    # 定位 mysql 数据卷的实际卷名(跨 compose 项目名鲁棒,避免硬编码)
+    local vol_src img
+    vol_src=$(docker inspect canteen-mysql --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Name}}{{end}}{{end}}' 2>/dev/null || echo "")
+    if [[ -z "$vol_src" ]]; then
+        error "无法定位 MySQL 数据卷,请手动重置 root 密码"
+        return 1
+    fi
+    img=$(docker inspect canteen-mysql --format '{{.Config.Image}}' 2>/dev/null || echo "mysql:8.0")
+
+    # 停止正常运行中的 MySQL 容器(数据卷会被临时容器复用)
+    docker stop canteen-mysql >/dev/null 2>&1 || true
+
+    # 以 skip-grant-tables 临时启动(隔离网络,仅 docker exec 使用)
+    if ! docker run --rm -d --name canteen-mysql-recover \
+        -v "${vol_src}:/var/lib/mysql" \
+        "$img" --skip-grant-tables --skip-networking >/dev/null 2>&1; then
+        error "恢复容器启动失败"
+        docker start canteen-mysql >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # 等待恢复容器可连接(skip-grant-tables 下需先 FLUSH PRIVILEGES 才能 ALTER USER)
+    local ok=false i=0
+    while [[ $i -lt 30 ]]; do
+        if docker exec canteen-mysql-recover mysql -uroot -e "FLUSH PRIVILEGES" >/dev/null 2>&1; then
+            ok=true
+            break
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    if [[ "$ok" != "true" ]]; then
+        error "恢复容器启动超时"
+        docker stop canteen-mysql-recover >/dev/null 2>&1 || true
+        docker start canteen-mysql >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # 重置 root 密码(localhost 与 % 均覆盖,保证后端/Flyway 远程连接可用)
+    # 临时禁用 set -e 以捕获退出码(避免失败时脚本直接退出,错误处理失效)
+    set +e
+    docker exec canteen-mysql-recover mysql -uroot <<SQL
+FLUSH PRIVILEGES;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${escaped_root_pass}';
+CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY '${escaped_root_pass}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+SQL
+    local rc=$?
+    set -e
+    docker stop canteen-mysql-recover >/dev/null 2>&1 || true
+
+    if [[ $rc -ne 0 ]]; then
+        error "重置 root 密码失败"
+        docker start canteen-mysql >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    info "root 密码已重置,与 .env 一致"
+    # 重新启动正常运行容器并等待其就绪(用新密码验证)
+    docker start canteen-mysql >/dev/null 2>&1 || true
+    if ! wait_mysql_ready "$newpwd"; then
+        error "MySQL 重置后未就绪"
+        return 1
+    fi
+    return 0
+}
+
+# 1. 创建应用用户;若 root 认证失败(密码与数据卷不匹配),自动恢复后重试
+ESCAPED_USER="${DB_APP_USERNAME//\'/\\\'}"
+ESCAPED_PASS="${DB_APP_PASSWORD//\'/\\\'}"
+if ! create_app_user; then
+    error "应用用户创建失败,尝试重置 root 密码以匹配 .env..."
+    if reset_root_password; then
+        info "root 密码已对齐,重新创建应用用户..."
+        if ! create_app_user; then
+            error "应用用户仍创建失败,请检查 DB_APP_PASSWORD 与数据库连接"
+            exit 1
+        fi
+    else
+        error "root 密码重置失败,请手动处理(见: docs/SERVER_HARDENING.md)"
+        exit 1
+    fi
 fi
 
 # 2. 回收元数据表(Flyway 迁移历史)的写权限,防止应用被攻破后伪造迁移记录
