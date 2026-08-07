@@ -279,7 +279,16 @@ HW_VER=$(python3 -c "import json; print(json.load(open('VERSIONS.json'))['admin-
 H5_VER=$(python3 -c "import json; print(json.load(open('VERSIONS.json'))['h5']['version'])" 2>/dev/null || echo "?")
 
 git add -A
-git commit -m "deploy: v${VERSION} (${SCOPE})
+
+# 强制为所有 shell 脚本设置可执行位(100755)。
+# 原因:Windows 上 git 默认不保留 +x,服务器 git pull 后文件会丢失执行权限,
+# 导致 `sudo ./deploy.sh` 报"权限不够 (os error 13)"。
+# git update-index --chmod=+x 会把执行位写进索引,Windows 下同样生效。
+find . -name '*.sh' -not -path './.git/*' | while read -r f; do
+    git update-index --chmod=+x "$f"
+done
+
+git commit -m "deploy: v${VERSION} (${SCOPE})"
 
 后端: v${BE_VER}
 管理后台: v${HW_VER}
