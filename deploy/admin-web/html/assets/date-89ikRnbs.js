@@ -1,0 +1,1 @@
+const a=t=>String(t).padStart(2,"0"),e=t=>`${t.getFullYear()}-${a(t.getMonth()+1)}-${a(t.getDate())}`,r=()=>e(new Date),n=()=>{const t=new Date;return`${t.getFullYear()}-${a(t.getMonth()+1)}`},o=()=>`${n()}-01`;export{o as a,n as m,r as t};

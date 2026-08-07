@@ -1,0 +1,32 @@
+# =============================================================================
+# 后端运行时基础镜像
+# =============================================================================
+# 仅安装系统依赖(tzdata/curl),不含业务代码
+# 业务 jar 通过卷映射挂入(docker-compose.yml: ./deploy/backend/app.jar:/app/app.jar)
+# 此镜像只需在首次部署时构建一次,后续更新后端代码无需重建镜像
+#
+# P1-5 非 root 降权设计(三段式,不依赖固定 UID):
+#   1. Dockerfile:不在镜像内创建用户(避免与基础镜像 UID 1000 冲突),只 chown /app
+#   2. docker-compose.yml:用 user: "${PUID}:${PGID}" 动态指定运行用户
+#   3. deploy.sh:自动检测宿主机用户 UID/GID,写入 .env + chown backup/uploads
+# 这样无论宿主机用户 UID 是 1000 还是其他值,容器都能以该 UID 非 root 运行
+# =============================================================================
+FROM eclipse-temurin:25-jre
+LABEL maintainer="Enterprise Canteen System"
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl && \
+    ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone && \
+    rm -rf /var/lib/apt/lists/*
+
+# /app 目录默认归 UID 1000(基础镜像 ubuntu 用户),运行时由 compose user 字段覆盖
+# 卷映射的 backup/uploads 会覆盖镜像内目录,实际权限由宿主机目录 chown 决定
+RUN mkdir -p /app/uploads /app/backup && \
+    chown -R 1000:1000 /app
+
+WORKDIR /app
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/system/health || exit 1
+# app.jar 由卷映射提供,不 COPY 进镜像
+ENTRYPOINT ["java", "-Xms256m", "-Xmx512m", "-Duser.timezone=Asia/Shanghai", "-jar", "app.jar"]

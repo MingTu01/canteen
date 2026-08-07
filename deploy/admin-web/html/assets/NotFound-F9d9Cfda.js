@@ -1,0 +1,6 @@
+import{d as n,c as a,a as e,b as o,e as s,w as i,n as l,h as m,o as c,p as d}from"./index-DLW7jusX.js";import{c as p}from"./createLucideIcon-CSOXZwCj.js";import{H as x}from"./home-Ck16FUp-.js";/**
+ * @license lucide-vue-next v0.323.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const u=p("CompassIcon",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["polygon",{points:"16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76",key:"m9r19z"}]]),f={class:"flex min-h-screen flex-col items-center justify-center px-4"},y={class:"flex h-24 w-24 items-center justify-center rounded-3xl bg-primary-100"},N=n({__name:"NotFound",setup(g){const r=m();return(k,t)=>(c(),a("div",f,[e("div",y,[o(s(u),{class:"h-12 w-12 text-primary"})]),t[2]||(t[2]=e("h1",{class:"mt-8 text-7xl font-bold tracking-tight text-text"},"404",-1)),t[3]||(t[3]=e("p",{class:"mt-3 text-lg text-text-secondary"},"抱歉，您访问的页面不存在",-1)),t[4]||(t[4]=e("p",{class:"mt-1 text-sm text-text-muted"},"请检查地址是否正确，或返回首页继续操作",-1)),o(s(l),{type:"primary",size:"large",class:"mt-8 rounded-xl",icon:s(x),onClick:t[0]||(t[0]=C=>s(r).push("/dashboard"))},{default:i(()=>[...t[1]||(t[1]=[d(" 返回首页 ",-1)])]),_:1},8,["icon"])]))}});export{N as default};
