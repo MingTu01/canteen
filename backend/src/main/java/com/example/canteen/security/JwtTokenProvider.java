@@ -81,9 +81,10 @@ public class JwtTokenProvider {
     }
 
     /**
-     * 生成员工身份二维码签名(HMAC-SHA256),取 hex 前 16 位。
+     * 生成员工身份二维码签名(HMAC-SHA256),取 hex 前 32 位(128 bit)。
      * 签名内容:cardNo|storeId|employeeId|expire
      * 复用 jwt secretKey 作为 HMAC 密钥。
+     * 128 bit 截断显著高于 64 bit,可抵抗离线碰撞/猜测攻击(二维码仅身份用途,足够)。
      */
     public String generateQrcodeSign(String cardNo, Long storeId, Long employeeId, long expire) {
         String data = cardNo + "|" + storeId + "|" + employeeId + "|" + expire;
@@ -95,7 +96,7 @@ public class JwtTokenProvider {
             for (byte b : raw) {
                 sb.append(String.format("%02x", b));
             }
-            return sb.substring(0, 16);
+            return sb.substring(0, 32);
         } catch (Exception e) {
             throw new RuntimeException("生成二维码签名失败", e);
         }

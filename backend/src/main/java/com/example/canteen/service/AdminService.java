@@ -120,6 +120,15 @@ public class AdminService {
             }
         }
         if (admin.getStatus() != null) {
+            if (!SecurityContext.isSuperAdmin()) {
+                // 非超管:不能停用自己(防自我锁死),也不能停用同级门店管理员账号(防互相停用)
+                if (id.equals(SecurityContext.currentAdminId())) {
+                    throw new SecurityException("不能修改自己的启用状态");
+                }
+                if (existing.getRole() != null && existing.getRole() == 2) {
+                    throw new SecurityException("无权修改同级管理员状态");
+                }
+            }
             existing.setStatus(admin.getStatus());
         }
         adminMapper.updateById(existing);
@@ -141,9 +150,14 @@ public class AdminService {
             throw new SecurityException("无权修改他人密码");
         }
         // 改自己的密码需要校验旧密码;超管重置他人密码不需要
-        if (id.equals(currentId) && !passwordEncoder.matches(oldPassword, admin.getPassword())) {
-            rateLimiter.recordFail(rateLimitKey);
-            throw new BusinessException("原密码错误");
+        if (id.equals(currentId)) {
+            if (oldPassword == null || oldPassword.isBlank()) {
+                throw new BusinessException("原密码不能为空");
+            }
+            if (!passwordEncoder.matches(oldPassword, admin.getPassword())) {
+                rateLimiter.recordFail(rateLimitKey);
+                throw new BusinessException("原密码错误");
+            }
         }
         if (newPassword == null) {
             throw new BusinessException("新密码不能为空");

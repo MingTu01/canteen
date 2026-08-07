@@ -51,8 +51,13 @@ public class NotificationController {
     @OperationLog(value = "通知上下架", detail = "'通知ID ' + #id + ' 状态 ' + (#status == 1 ? '上架' : '下架')")
     @PutMapping("/{id}/status")
     public ApiResponse<Notification> toggleStatus(@PathVariable Long id, @RequestParam Integer status) {
-        if (SecurityContext.currentRole() == null) {
-            throw new com.example.canteen.exception.SecurityException("请先登录");
+        // 与创建/更新/删除对齐为管理级权限:员工若可上下架通知,
+        // 重新上架(status 0→1)会触发微信群发模板消息,可被用来消息轰炸全员
+        if (!SecurityContext.hasAdminLevel()) {
+            throw new com.example.canteen.exception.SecurityException("无权操作通知");
+        }
+        if (status == null || (status != 0 && status != 1)) {
+            throw new com.example.canteen.exception.BusinessException("非法状态值");
         }
         Notification notification = notificationService.getNotificationById(id);
         if (notification == null) {

@@ -269,7 +269,7 @@ public class VersionController {
             }
             return ApiResponse.success(list.get(0));
         } catch (Exception e) {
-            return ApiResponse.error(500, "查询配置失败：" + e.getMessage());
+            return ApiResponse.error(500, "查询配置失败");
         }
     }
 
@@ -297,7 +297,7 @@ public class VersionController {
             }
             return ApiResponse.success(null);
         } catch (Exception e) {
-            return ApiResponse.error(500, "更新配置失败：" + e.getMessage());
+            return ApiResponse.error(500, "更新配置失败");
         }
     }
 
@@ -326,7 +326,7 @@ public class VersionController {
             }
             return ApiResponse.success(null);
         } catch (Exception e) {
-            return ApiResponse.error(500, "批量更新配置失败：" + e.getMessage());
+            return ApiResponse.error(500, "批量更新配置失败");
         }
     }
 }

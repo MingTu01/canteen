@@ -47,17 +47,39 @@ const updateClock = () => {
 }
 
 /**
- * 统一输入处理:USB 读卡器和扫码枪都作为键盘设备,Enter 结束输入。
- * 先尝试刷卡(员工接口),失败再尝试取餐码核销。
- * 这样无需用户区分两种设备,直接刷卡/扫码即可。
+ * 统一输入处理:USB 读卡器、扫码枪和摄像头扫码都作为键盘设备,Enter 结束输入。
+ * 依次尝试:
+ *   1. 员工身份二维码(H5「我的」页生成,内容为 JSON,以 { 开头)→ /terminal/verify-qrcode 验签识别员工
+ *   2. 刷卡(员工接口)→ /terminal/employee/{cardNo}
+ *   3. 取餐码核销 → /order/pickup
+ * 这样无需用户区分设备与场景,直接刷卡/扫码即可。
  */
 const handleInput = async (code: string) => {
   if (scanning.value || !code) return
   scanning.value = true
   try {
-    // 1. 先尝试作为卡号识别员工
+    // 1. 员工身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名),走验签接口
+    const trimmed = code.trim()
+    if (trimmed.startsWith('{')) {
+      try {
+        const qr = JSON.parse(trimmed)
+        if (qr.sign && qr.cardNo && qr.storeId && qr.employeeId && qr.expire) {
+          const resp = await api.post('/terminal/verify-qrcode', qr)
+          if (resp.data.code === 200 && resp.data.data) {
+            resetPickupFlow()
+            pickupStore.employee = resp.data.data
+            router.push('/pickup/verify')
+            return
+          }
+        }
+      } catch {
+        /* 非合法二维码 JSON,继续按卡号处理 */
+      }
+    }
+
+    // 2. 作为卡号识别员工
     try {
-      const empResp = await api.get(`/terminal/employee/${encodeURIComponent(code)}`)
+      const empResp = await api.get(`/terminal/employee/${encodeURIComponent(trimmed)}`)
       if (empResp.data.code === 200 && empResp.data.data) {
         resetPickupFlow()
         pickupStore.employee = empResp.data.data
@@ -66,8 +88,8 @@ const handleInput = async (code: string) => {
       }
     } catch { /* 非员工卡,继续尝试取餐码 */ }
 
-    // 2. 作为取餐码核销
-    const resp = await api.post('/order/pickup', { pickupCode: code })
+    // 3. 作为取餐码核销
+    const resp = await api.post('/order/pickup', { pickupCode: trimmed })
     if (resp.data.code === 200) {
       successMsg.value = '取餐成功,请前往取餐口领取餐品'
       showSuccess.value = true

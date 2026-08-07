@@ -70,6 +70,7 @@ a = Analysis(
         'server',
         'bridge',
         'card_reader',
+        'updater',
     ],
     hookspath=[],
     hooksconfig={},
@@ -111,7 +112,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico',  # 程序图标(食堂主题)
+    icon='terminal_icon.ico',  # 程序图标(食堂取餐餐碗主题;读卡助手仍用 icon.ico)
 )
 
 coll = COLLECT(

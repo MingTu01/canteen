@@ -17,7 +17,10 @@ public class MyBatisPlusConfig {
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
         // 自动识别数据库类型(H2 MySQL模式 / MySQL 均可)
-        interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
+        PaginationInnerInterceptor pagination = new PaginationInnerInterceptor(DbType.MYSQL);
+        // 分页 size 上限钳制:防止 size=100000 之类请求全表拉取造成内存/带宽 DoS
+        pagination.setMaxLimit(500L);
+        interceptor.addInnerInterceptor(pagination);
         return interceptor;
     }
 }

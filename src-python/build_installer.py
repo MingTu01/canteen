@@ -21,6 +21,7 @@
   python build_installer.py --skip-py  # 跳过 PyInstaller(已构建过)
 """
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -163,6 +164,21 @@ def check_drivers():
     return True
 
 
+def get_terminal_version():
+    """从 VERSIONS.json 读取 terminal.version,用于同步安装包版本号。"""
+    vers_file = PROJECT_DIR / 'VERSIONS.json'
+    try:
+        with open(vers_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        ver = data.get('terminal', {}).get('version', '')
+        if ver:
+            # 去掉 v 前缀(如 v1.0.4 -> 1.0.4)
+            return ver.lstrip('v')
+    except Exception as e:
+        warn(f'读取 VERSIONS.json 失败: {e}')
+    return ''
+
+
 def build_inno_setup():
     """运行 Inno Setup → output/CanteenTerminal-Setup-<版本>.exe"""
     info('步骤 3/3: 运行 Inno Setup 打包安装包...')
@@ -170,6 +186,14 @@ def build_inno_setup():
     iss_file = SCRIPT_DIR / 'installer.iss'
     if not iss_file.exists():
         raise RuntimeError(f'未找到 Inno Setup 脚本: {iss_file}')
+
+    # 从 VERSIONS.json 同步终端版本号,通过 /DMyAppVersion 覆盖 installer.iss 的默认值
+    terminal_version = get_terminal_version()
+    if terminal_version:
+        info(f'从 VERSIONS.json 同步终端版本号: {terminal_version}')
+    else:
+        terminal_version = '1.0.4'
+        warn(f'未读取到 VERSIONS.json 中的终端版本号,使用默认值: {terminal_version}')
 
     # 查找 ISCC.exe
     iscc = os.environ.get('ISCC_PATH')
@@ -190,8 +214,8 @@ def build_inno_setup():
     # 确保 output 目录存在
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 运行 ISCC
-    run([iscc, str(iss_file)], cwd=str(SCRIPT_DIR))
+    # 运行 ISCC(传入版本号命令行宏)
+    run([iscc, f'/DMyAppVersion={terminal_version}', str(iss_file)], cwd=str(SCRIPT_DIR))
 
     # 查找生成的安装包
     setup_files = list(OUTPUT_DIR.glob('CanteenTerminal-Setup-*.exe'))

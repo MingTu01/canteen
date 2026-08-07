@@ -130,7 +130,22 @@ DEFAULT_CONFIG_JSON = """{
   // 无操作自动返回待机页时间(秒)
   // 用户在选菜/取餐页面无任何操作超过此时间后,自动返回待机页
   // 推荐值:30 ~ 300 秒(0 表示永不自动返回)
-  "idle_timeout": 30
+  "idle_timeout": 30,
+
+  // ============================================================
+  // 在线更新设置
+  // ============================================================
+
+  // 在线更新检查地址(基于 GitHub Releases,可叠加加速器前缀)
+  // 留空("")则使用默认加速器检测 GitHub 最新版本
+  // 示例:
+  //   直连:   "https://api.github.com/repos/MingTu01/canteen/releases/latest"
+  //   加速器: "https://gh-proxy.com/https://api.github.com/repos/MingTu01/canteen/releases/latest"
+  "update_check_url": "",
+
+  // 用户选择"忽略此版本"后记录的最新版本号
+  // 程序启动检测时,若远端版本等于该值则不再弹窗(直到出现更新的版本)
+  "ignored_version": ""
 }
 """
 
@@ -200,6 +215,8 @@ def read_full_config():
         'window_mode': DEFAULT_WINDOW_MODE,
         'card_interval': DEFAULT_CARD_INTERVAL,
         'idle_timeout': DEFAULT_IDLE_TIMEOUT,
+        'update_check_url': '',
+        'ignored_version': '',
     }
     try:
         with open(cfg_path, 'r', encoding='utf-8') as f:
@@ -216,6 +233,10 @@ def read_full_config():
                 result['card_interval'] = float(data['card_interval'])
             if isinstance(data.get('idle_timeout'), (int, float)) and data['idle_timeout'] >= 0:
                 result['idle_timeout'] = int(data['idle_timeout'])
+            if isinstance(data.get('update_check_url'), str):
+                result['update_check_url'] = data['update_check_url']
+            if isinstance(data.get('ignored_version'), str):
+                result['ignored_version'] = data['ignored_version']
     except Exception as e:
         print(f'[Config] 读取配置失败: {e}')
     return result
@@ -225,13 +246,13 @@ def write_config(updates):
     """更新 config.json 中的部分字段,保留其他字段和注释。
 
     Args:
-        updates: dict,要更新的字段(key 必须是 server_url/window_mode/card_interval/idle_timeout)
+        updates: dict,要更新的字段(key 必须是受支持的配置字段)
     """
     cfg_path = get_config_path()
     # 读取现有配置(已含默认值)
     current = read_full_config()
     # 合并更新
-    for key in ('server_url', 'window_mode', 'card_interval', 'idle_timeout'):
+    for key in ('server_url', 'window_mode', 'card_interval', 'idle_timeout', 'update_check_url', 'ignored_version'):
         if key in updates:
             current[key] = updates[key]
     # 写回(不带注释,但 JSON 格式化)

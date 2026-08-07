@@ -1,8 +1,9 @@
 {
-  "version": "0.0.13",
-  "buildTime": "2026-08-06",
+  "version": "0.0.16",
+  "buildTime": "2026-08-07",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.16 补齐员工身份二维码验签链路:新增/terminal/verify-qrcode接口(仅终端role=3、门店隔离、HMAC-SHA256签名常量比对、有效期、员工启用校验);二维码签名由64bit加强到128bit(hex前32位)",
     "V0.0.13 彻底移除今日新品功能:删除Dish.isNew字段与is_new列、/dish/store/{id}/new接口、getNewDishes服务与缓存、新品推荐通知类型、相关测试与迁移SQL",
     "V0.0.12 批量上传员工头像支持按标识符自动适配:文件名(去扩展名)依次匹配卡号→手机号→姓名(新增EmployeeMapper.selectByNameAndStore与EmployeeService.findEmployeeByIdentifier,uploadAvatar改用自动匹配)",
     "V0.0.11 新增/编辑员工卡号全局查重(countByCardNoExcludeId,对齐数据库唯一索引含已逻辑删除记录),避免重复卡号插入触发唯一索引冲突返回500;批量导入查重同步改为全局语义"

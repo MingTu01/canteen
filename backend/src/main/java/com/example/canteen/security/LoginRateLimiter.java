@@ -72,7 +72,7 @@ public class LoginRateLimiter {
             long remainMin = Math.max(1, (remainMs + 59_000) / 60_000);
             log.warn("账号 '{}' 已锁定(失败 {}/{} 次),剩余锁定约 {} 分钟", key, info.count.get(), maxFail, remainMin);
             throw new SecurityException(SecurityException.FORBIDDEN,
-                    "账号已锁定,请约 " + remainMin + " 分钟后重试,或联系管理员重启后端服务");
+                    "账号已锁定,请约 " + remainMin + " 分钟后重试");
         }
     }
 

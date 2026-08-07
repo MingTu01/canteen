@@ -219,7 +219,7 @@ public class OrderService {
         order.setTotalAmount(totalAmount);
         order.setStatus(OrderStatus.PENDING.getCode());
         order.setOrderSource(orderSourceCode);
-        order.setPickupCode(generatePickupCode());
+        order.setPickupCode(generatePickupCode(storeId, orderDate));
         orderMapper.insert(order);
 
         for (OrderItemDTO itemDTO : dto.getItems()) {
@@ -355,11 +355,14 @@ public class OrderService {
     }
 
     /**
-     * 核销取餐:按取餐码查询订单,校验后置为已完成。
+     * 核销取餐:按取餐码查询订单(收口到当前门店+当天),校验后置为已完成。
+     * 收口说明:取餐码仅保证「同店+当天」唯一,全局查询会在跨店/跨日碰撞时错核销他人订单。
      */
     @Transactional
     public Order pickup(String pickupCode) {
-        Order order = orderMapper.selectByPickupCode(pickupCode);
+        Long storeId = SecurityContext.currentStoreId();
+        LocalDate today = LocalDate.now(ZONE_SHANGHAI);
+        Order order = orderMapper.selectByStoreDatePickupCode(storeId, today, pickupCode);
         if (order == null) {
             throw new BusinessException("取餐码无效");
         }
@@ -389,9 +392,19 @@ public class OrderService {
 
     /**
      * B3 6 位取餐码(P1-4 从 4 位改为 6 位降低暴力破解风险;P2-6 使用 SecureRandom 防可预测)
+     * 生成时在「同店+当天」范围内查重重试,避免碰撞导致无法核销/错核销;
+     * 数据库层由 uk_order_store_date_pickup 唯一索引兜底(V18)。
      */
-    private String generatePickupCode() {
-        return String.format("%06d", new SecureRandom().nextInt(1000000));
+    private String generatePickupCode(Long storeId, LocalDate date) {
+        SecureRandom random = new SecureRandom();
+        for (int i = 0; i < 10; i++) {
+            String code = String.format("%06d", random.nextInt(1000000));
+            if (orderMapper.selectByStoreDatePickupCode(storeId, date, code) == null) {
+                return code;
+            }
+        }
+        // 连续 10 次碰撞(理论上几乎不可能)仍放行,由唯一索引兜底,插入冲突时事务回滚提示重试
+        return String.format("%06d", random.nextInt(1000000));
     }
 
     public Map<String, Object> getDashboardStats(Long storeId) {

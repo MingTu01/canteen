@@ -23,7 +23,10 @@
 ; =============================================================================
 #define MyAppName "企业智慧食堂终端"
 #define MyAppNameEn "CanteenTerminal"
-#define MyAppVersion "1.0.0"
+; 版本号默认值;build_installer.py 会从 VERSIONS.json 读取并通过 /DMyAppVersion 覆盖
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.4"
+#endif
 #define MyAppPublisher "Enterprise Canteen System"
 #define MyAppExeName "canteen-terminal.exe"
 
@@ -56,10 +59,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x86compatible x64compatible
 
 ; 安装包外观
-SetupIconFile=icon.ico
+SetupIconFile=terminal_icon.ico
 WizardSmallImageFile=wizard-small.bmp
 WizardImageFile=wizard-large.bmp
-UninstallDisplayIcon={app}\icon.ico
+UninstallDisplayIcon={app}\terminal_icon.ico
 UninstallDisplayName={#MyAppName}
 
 ; 权限要求(需要管理员权限安装驱动)
@@ -86,7 +89,11 @@ Name: "startup"; Description: "开机自动启动"; GroupDescription: "附加选
 Source: "dist\canteen-terminal\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; 图标文件(打包到安装目录,供快捷方式和卸载程序使用)
-Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "terminal_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; CH375 驱动清理脚本(卸载时勾选"移除驱动"才执行)
+; 保留在安装目录直至卸载结束,不能加 deleteafterinstall,否则卸载时脚本已不存在
+Source: "remove_ch375_driver.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 ; CH375 驱动文件(只打包 INF/SYS/CAT/DLL,排除易被安全软件误报的第三方 EXE)
 ; 驱动安装由系统自带 pnputil 完成,不依赖第三方安装程序
@@ -94,14 +101,14 @@ Source: "drivers\*"; DestDir: "{app}\drivers"; Flags: ignoreversion recursesubdi
 
 [Icons]
 ; 开始菜单快捷方式(使用食堂主题图标)
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"
-Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"; IconFilename: "{app}\icon.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\terminal_icon.ico"
+Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"; IconFilename: "{app}\terminal_icon.ico"
 
 ; 桌面快捷方式(可选,使用食堂主题图标)
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\terminal_icon.ico"; Tasks: desktopicon
 
 ; 开机自启(可选,注册到 HKLM Run)
-Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; Tasks: startup
+Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\terminal_icon.ico"; Tasks: startup
 
 [Run]
 ; 安装 CH375 读卡器驱动 - 只使用系统自带 pnputil(不会触发安全软件拦截)
@@ -112,18 +119,27 @@ Filename: "{cmd}"; Parameters: "/c pnputil /add-driver ""{app}\drivers\CH375WDM.
     Flags: runhidden waituntilterminated; \
     Check: DriverFilesExist
 
-[UninstallRun]
-; 卸载时移除 CH375 驱动(可选,通常保留驱动避免影响其他设备)
-; 如需卸载驱动,取消下面注释:
-; Filename: "{cmd}"; Parameters: "/c pnputil /delete-driver oem*.inf /uninstall /force"; Flags: runhidden
+; 注:CH375 驱动的移除不再通过 [UninstallRun] 执行,而是在卸载向导的
+; 自定义页面(见 [Code])中由用户勾选后,于 usUninstall 阶段调用 remove_ch375_driver.cmd。
+; 这样能保证"默认不勾选 + 充分提示"。
 
 [UninstallDelete]
-; 清理安装目录残留(旧版可能在安装目录下留有 data/config.json)
+; 清理安装目录残留(旧版可能在安装目录下留有 data/config.json,或运行时写入的 qt.conf)
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\config.json"
 Type: filesandordirs; Name: "{app}\qt.conf"
+Type: filesandordirs; Name: "{app}\_internal\PyQt5\Qt5\bin\qt.conf"
+; 清理驱动移除脚本(卸载完成后不再需要)
+Type: files; Name: "{app}\remove_ch375_driver.cmd"
 
 [Code]
+// =============================================================================
+// 全局变量:卸载向导中的"驱动移除"自定义页面
+// =============================================================================
+var
+    RemoveDriverPage: TWizardPage;
+    RemoveDriverCheck: TNewCheckBox;
+
 // =============================================================================
 // 自定义函数:检测 drivers 目录是否有驱动 INF 文件
 // =============================================================================
@@ -136,14 +152,80 @@ begin
 end;
 
 // 安装初始化:关闭正在运行的终端进程(覆盖安装时文件被占用会失败)
+// 同时备份用户配置(升级安装时旧版卸载程序会清理配置,需先备份安装后再恢复)
+var
+    ConfigBackupPath: String;
+
+// 备份当前安装用户的 CanteenTerminal 配置文件(config.json)到系统临时目录。
+// 只备份当前用户({userappdata})的 config.json(核心配置),不做整目录递归复制,
+// 也不遍历 C:\Users\* 全目录树(遍历到 junction/符号链接目录会在 InitializeSetup
+// 阶段触发 Inno 的"Runtime Error")。升级安装时旧版卸载程序会清理用户配置,
+// 先备份当前用户的配置,安装后再恢复,即可保留服务器地址等核心设置。
+procedure BackupUserConfig();
+var
+    SrcFile, DestFile: String;
+begin
+    // 用 GetTempDir()(系统临时目录)而非 {tmp} 常量:{tmp} 在 InitializeSetup 阶段
+    // 可能尚未就绪,ExpandConstant 会抛运行时错误(Runtime Error at 32:54)。
+    ConfigBackupPath := GetTempDir() + '\CanteenTerminalConfigBackup';
+    ForceDirectories(ConfigBackupPath);
+
+    SrcFile := ExpandConstant('{userappdata}\CanteenTerminal\config.json');
+    if not FileExists(SrcFile) then
+        Exit;
+    DestFile := ConfigBackupPath + '\config.json';
+    try
+        FileCopy(SrcFile, DestFile, True);
+    except
+        // 备份失败不阻断安装:仅打印并继续,避免此处抛运行时错误
+        Log('BackupUserConfig: 备份用户配置失败');
+    end;
+end;
+
+// 恢复之前备份的配置文件(仅当目标 config.json 不存在时恢复,避免覆盖新默认配置)
+procedure RestoreUserConfig();
+var
+    SrcFile, DestFile, UserConfigDir: String;
+begin
+    if ConfigBackupPath = '' then
+        Exit;
+    SrcFile := ConfigBackupPath + '\config.json';
+    if not FileExists(SrcFile) then
+        Exit;
+    UserConfigDir := ExpandConstant('{userappdata}\CanteenTerminal');
+    DestFile := UserConfigDir + '\config.json';
+    if FileExists(DestFile) then
+        Exit;
+    try
+        ForceDirectories(UserConfigDir);
+        FileCopy(SrcFile, DestFile, True);
+    except
+        Log('RestoreUserConfig: 恢复用户配置失败');
+    end;
+end;
+
 function InitializeSetup(): Boolean;
 var
     ResultCode: Integer;
 begin
+    // 先关闭正在运行的终端进程,避免其占用 config.json 导致备份失败
     Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im canteen-terminal.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(1000);
+    // 升级安装时旧版卸载程序会清理用户配置,先备份以便安装后恢复
+    BackupUserConfig();
     Result := True;
+end;
+
+// 安装完成后恢复备份的配置并清理临时备份
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+    if CurStep = ssPostInstall then
+    begin
+        RestoreUserConfig();
+        if ConfigBackupPath <> '' then
+            DelTree(ConfigBackupPath, True, True, True);
+    end;
 end;
 
 // =============================================================================
@@ -161,7 +243,56 @@ begin
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // 等待 Windows 释放文件句柄(DLL 卸载有延迟)
     Sleep(1500);
+
+    // =========================================================================
+    // 创建"驱动移除选项"自定义页面(插入在卸载向导欢迎页之后)
+    // 页面内放一个复选框,默认不勾选 => 默认保留 CH375 驱动,避免影响其他读卡设备。
+    // =========================================================================
+    RemoveDriverPage := CreateCustomPage(wpWelcome, '驱动移除选项', '是否需要移除 CH375 读卡器驱动?');
+    RemoveDriverCheck := TNewCheckBox.Create(RemoveDriverPage);
+    RemoveDriverCheck.Left := ScaleX(40);
+    RemoveDriverCheck.Top := ScaleY(60);
+    RemoveDriverCheck.Width := RemoveDriverPage.SurfaceWidth - ScaleX(80);
+    RemoveDriverCheck.Height := ScaleY(20);
+    RemoveDriverCheck.Caption := '同时移除 CH375 读卡器驱动(默认不勾选,建议保留)';
+    RemoveDriverCheck.Checked := False;
+    RemoveDriverCheck.Parent := RemoveDriverPage.Surface;
+
     Result := True;
+end;
+
+// =============================================================================
+// 卸载向导:在"驱动移除选项"自定义页面点击"下一步"时,若用户勾选了"移除驱动"
+// 则弹出充足警告,让其二次确认
+// =============================================================================
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+    Msg: String;
+begin
+    Result := True;
+    // 关键修复:RemoveDriverPage 只在卸载向导(InitializeUninstall)中创建。
+    // 安装向导点击"下一步"时也会触发本函数,此时 RemoveDriverPage 为 nil,
+    // 直接访问 RemoveDriverPage.ID 会抛空引用"Runtime Error"。必须判空。
+    if RemoveDriverPage = nil then
+        Exit;
+    if CurPageID = RemoveDriverPage.ID then
+    begin
+        if RemoveDriverCheck.Checked then
+        begin
+            Msg := '您已勾选"同时移除 CH375 读卡器驱动"。'#13#10#13#10 +
+                   '强烈建议保留此驱动,除非您确定不再需要该读卡器设备。'#13#10#13#10 +
+                   '【风险提示】'#13#10 +
+                   '  · 移除驱动后,本终端及其他依赖 CH375 驱动的读卡设备将无法刷卡!'#13#10 +
+                   '  · 若其他软件或设备仍在使用该驱动,其读卡功能会立即失效。'#13#10 +
+                   '  · 如需恢复,需重新安装本终端或手动重新安装驱动。'#13#10#13#10 +
+                   '确定要继续卸载并移除该驱动吗?';
+            if MsgBox(Msg, mbConfirmation, MB_YESNO) = IDNO then
+            begin
+                // 用户反悔,取消勾选,不执行驱动移除
+                RemoveDriverCheck.Checked := False;
+            end;
+        end;
+    end;
 end;
 
 // =============================================================================
@@ -173,28 +304,83 @@ end;
 //     terminal.log 日志文件
 //     (data/LocalStorage/IndexedDB/Cookies/Network State/GPUCache 等)
 //
-// 注意:{userappdata}/{userlocalappdata} 指执行卸载的用户的目录。
-// 若程序被多个 Windows 用户使用,其他用户的数据需各自登录后清理(标准 Windows 行为)。
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+// 问题:旧版本卸载只清理"执行卸载的当前用户"的数据。若终端被多个 Windows
+// 用户使用过,其他用户目录下的 config.json 与 %LOCALAPPDATA%\CanteenTerminal
+// 缓存会一直残留在磁盘上,所谓"卸载清不干净"。
+// 解决:遍历 C:\Users\* 下所有用户配置目录,逐一清理,确保彻底。
+// =============================================================================
+
+// 清理单个用户目录下的 CanteenTerminal 数据(配置 AppData + 缓存 LocalAppData)
+procedure CleanUserCanteenData(const UserProfileDir: String);
 var
     AppDataDir: String;
     LocalAppDataDir: String;
 begin
-    if CurUninstallStep = usPostUninstall then
+    AppDataDir := UserProfileDir + '\AppData\Roaming\CanteenTerminal';
+    LocalAppDataDir := UserProfileDir + '\AppData\Local\CanteenTerminal';
+    if DirExists(AppDataDir) then
+        DelTree(AppDataDir, True, True, True);
+    if DirExists(LocalAppDataDir) then
+        DelTree(LocalAppDataDir, True, True, True);
+end;
+
+// 清理所有用户配置目录下的残留数据(含当前用户)
+procedure CleanAllUsersData();
+var
+    ProfilesDir, UserProfileDir: String;
+    FindRec: TFindRec;
+begin
+    ProfilesDir := ExpandConstant('{sd}\Users');
+    if not DirExists(ProfilesDir) then
+        Exit;
+
+    if FindFirst(ProfilesDir + '\*', FindRec) then
     begin
+        try
+            repeat
+                if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+                begin
+                    if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+                    begin
+                        UserProfileDir := ProfilesDir + '\' + FindRec.Name;
+                        CleanUserCanteenData(UserProfileDir);
+                    end;
+                end;
+            until not FindNext(FindRec);
+        finally
+            FindClose(FindRec);
+        end;
+    end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+    AppDataDir: String;
+    LocalAppDataDir: String;
+    ResultCode: Integer;
+begin
+    // usUninstall:卸载文件之前触发,此时 {app}\remove_ch375_driver.cmd 仍存在
+    if CurUninstallStep = usUninstall then
+    begin
+        // 用户勾选了"同时移除 CH375 读卡器驱动"
+        if RemoveDriverCheck.Checked then
+        begin
+            // 显示脚本窗口,让用户看到驱动清理过程(充足提示)
+            Exec(ExpandConstant('{app}\remove_ch375_driver.cmd'), '',
+                 '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+        end;
+    end
+    else if CurUninstallStep = usPostUninstall then
+    begin
+        // 1. 清理当前用户(显式,兼容非标准用户目录映射)
         AppDataDir := ExpandConstant('{userappdata}\CanteenTerminal');
         LocalAppDataDir := ExpandConstant('{userlocalappdata}\CanteenTerminal');
-
-        // 清理 %APPDATA%\CanteenTerminal(配置文件)
         if DirExists(AppDataDir) then
-        begin
             DelTree(AppDataDir, True, True, True);
-        end;
-
-        // 清理 %LOCALAPPDATA%\CanteenTerminal(QtWebEngine 数据/缓存/日志)
         if DirExists(LocalAppDataDir) then
-        begin
             DelTree(LocalAppDataDir, True, True, True);
-        end;
+
+        // 2. 清理系统上所有用户目录下的残留数据(真正彻底)
+        CleanAllUsersData();
     end;
 end;

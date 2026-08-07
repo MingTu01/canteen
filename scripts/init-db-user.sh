@@ -44,6 +44,11 @@ read_env_var() {
             elif [[ "$value" =~ ^\".*\"$ ]]; then
                 value="${value:1:-1}"
             fi
+            # 去除行尾 Windows 换行符残留(\r)
+            # 原因:.env 若在 Windows 上创建/编辑,行尾会带 \r,read 不会剥离,
+            # 导致密码尾部多一个回车符(如 canteen2026\r),MySQL 认证失败 Access denied。
+            # docker-compose 解析 .env 时会自动去掉 \r,而本脚本需手动剥离,否则两者结果不一致。
+            value="${value//$'\r'/}"
             printf '%s' "$value"
             return 0
         fi

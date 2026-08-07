@@ -129,6 +129,12 @@ public class TerminalController {
      */
     @GetMapping("/refresh")
     public ApiResponse<Map<String, Object>> refreshToken() {
+        // 仅终端 token(role=3)可续期:员工 token(role=0)同样携带 storeId,
+        // 若不校验角色,员工可换取 365 天终端 token,脱离员工生命周期管控(离职/禁用失效)
+        Integer role = SecurityContext.currentRole();
+        if (role == null || role != 3) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "仅终端设备可刷新终端令牌");
+        }
         Long storeId = SecurityContext.currentStoreId();
         if (storeId == null) {
             throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
@@ -154,6 +160,12 @@ public class TerminalController {
      */
     @GetMapping("/employee/{cardNo}")
     public ApiResponse<EmployeeVO> identifyEmployee(@PathVariable String cardNo) {
+        // 仅终端 token(role=3)可刷卡识别:员工 token 也带 storeId,
+        // 若不校验角色,员工可遍历本店卡号刺探同事姓名/余额/部门(卡号常为连号)
+        Integer role = SecurityContext.currentRole();
+        if (role == null || role != 3) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "仅终端设备可识别员工");
+        }
         // 终端 token 的 storeId 即绑定食堂,只能查本店员工
         Long storeId = SecurityContext.currentStoreId();
         if (storeId == null) {
@@ -172,5 +184,84 @@ public class TerminalController {
             }
         }
         return ApiResponse.success(vo);
+    }
+
+    /**
+     * 终端扫码验证员工身份二维码(H5「我的」页生成)。
+     * 请求体即二维码 JSON 内容:{ cardNo, storeId, employeeId, name, expire, sign }
+     * 校验顺序(全部通过才放行):
+     *   1. 仅终端 token(role=3),fail-closed,防止员工/管理员拿他人二维码查余额
+     *   2. 门店隔离:二维码 storeId 必须与终端绑定门店一致(跨食堂二维码不可用)
+     *   3. 常量时间比对 HMAC-SHA256 签名(签名已含 storeId,失败即伪码)
+     *   4. 有效期:expire 必须晚于当前时间
+     *   5. 员工存在且启用(selectByCardNoAndStore 已过滤 status=1 / is_deleted=0)
+     * 返回 EmployeeVO(含 departmentName),与刷卡识别返回结构一致。
+     */
+    @PostMapping("/verify-qrcode")
+    public ApiResponse<EmployeeVO> verifyQrcode(@RequestBody Map<String, Object> body) {
+        // 1. 仅终端可验证(员工/管理员 token 均带 storeId,必须校验角色防越权)
+        Integer role = SecurityContext.currentRole();
+        if (role == null || role != 3) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "仅终端设备可验证员工二维码");
+        }
+        Long terminalStoreId = SecurityContext.currentStoreId();
+        if (terminalStoreId == null) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
+        }
+
+        // 提取二维码字段
+        String cardNo = strVal(body.get("cardNo"));
+        Long qrStoreId = longVal(body.get("storeId"));
+        Long employeeId = longVal(body.get("employeeId"));
+        Long expire = longVal(body.get("expire"));
+        String sign = strVal(body.get("sign"));
+        if (cardNo == null || cardNo.isBlank() || qrStoreId == null
+                || employeeId == null || expire == null || sign == null || sign.isBlank()) {
+            throw new BusinessException("二维码内容不完整");
+        }
+
+        // 2. 门店隔离:二维码必须属于终端绑定的食堂
+        if (!qrStoreId.equals(terminalStoreId)) {
+            throw new BusinessException("二维码不属于本食堂");
+        }
+
+        // 3. 验签(常量时间比较,防伪码伪造)
+        if (!jwtTokenProvider.verifyQrcodeSign(cardNo, qrStoreId, employeeId, expire, sign)) {
+            throw new BusinessException("二维码签名校验失败");
+        }
+
+        // 4. 有效期
+        if (expire <= System.currentTimeMillis()) {
+            throw new BusinessException("二维码已过期,请刷新后重试");
+        }
+
+        // 5. 员工存在且启用(selectByCardNoAndStore 过滤 status=1 / is_deleted=0)
+        Employee employee = employeeService.getEmployeeByCardNoAndStore(cardNo, terminalStoreId);
+        if (employee == null || !employee.getId().equals(employeeId)) {
+            throw new BusinessException("员工不存在或已失效");
+        }
+
+        EmployeeVO vo = EmployeeVO.from(employee);
+        if (employee.getDepartmentId() != null) {
+            Department dept = departmentMapper.selectById(employee.getDepartmentId());
+            if (dept != null) {
+                vo.setDepartmentName(dept.getName());
+            }
+        }
+        return ApiResponse.success(vo);
+    }
+
+    private static String strVal(Object o) {
+        return o == null ? null : o.toString();
+    }
+
+    private static Long longVal(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number n) return n.longValue();
+        try {
+            return Long.parseLong(o.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

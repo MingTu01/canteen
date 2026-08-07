@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>员工身份二维码 · 扫码验签测试页</title>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #ffffff; --primary: #2f6bff; --ok: #07c160;
+    --err: #fa5151; --warn: #ff9500; --txt: #1f2329; --muted: #8a8f99;
+    --radius: 18px; --radius-sm: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--txt); padding: 24px 16px 48px; line-height: 1.5;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .sub code { background: #eef1f6; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  .card {
+    background: var(--card); border-radius: var(--radius); padding: 18px;
+    box-shadow: 0 4px 20px rgba(31,35,41,.06); margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type=text], input[type=password], textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid #e3e6eb; border-radius: var(--radius-sm);
+    font-size: 14px; background: #fff; outline: none; transition: border-color .15s;
+  }
+  input:focus, textarea:focus { border-color: var(--primary); }
+  textarea { min-height: 72px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .row { display: flex; gap: 8px; }
+  .row .field { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 10px 16px; border: none; border-radius: var(--radius-sm); font-size: 14px;
+    cursor: pointer; transition: transform .1s, opacity .15s; font-weight: 600;
+    background: #eef1f6; color: var(--txt);
+  }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-ghost { background: #eef1f6; color: var(--txt); }
+  .btn-danger { background: #fdeae9; color: var(--err); }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .video-box { position: relative; border-radius: var(--radius-sm); overflow: hidden; background: #000; }
+  video { width: 100%; display: block; min-height: 180px; }
+  .scan-frame {
+    position: absolute; inset: 0; pointer-events: none;
+    border: 2px solid rgba(47,107,255,0); transition: border-color .2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .scan-frame.running { border-color: rgba(47,107,255,.6); }
+  .scan-frame .corner {
+    position: absolute; width: 28px; height: 28px; border: 3px solid var(--primary);
+  }
+  .scan-frame .tl { top: 8px; left: 8px; border-right: none; border-bottom: none; border-radius: 6px 0 0 0; }
+  .scan-frame .tr { top: 8px; right: 8px; border-left: none; border-bottom: none; border-radius: 0 6px 0 0; }
+  .scan-frame .bl { bottom: 8px; left: 8px; border-right: none; border-top: none; border-radius: 0 0 0 6px; }
+  .scan-frame .br { bottom: 8px; right: 8px; border-left: none; border-top: none; border-radius: 0 0 6px 0; }
+  .scan-hint { position: absolute; bottom: 10px; left: 0; right: 0; text-align: center; color: #fff; font-size: 12px; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-ok { background: #e6f7ee; color: var(--ok); }
+  .pill-err { background: #fdeaea; color: var(--err); }
+  .pill-warn { background: #fff4e5; color: var(--warn); }
+  .result { margin-top: 12px; }
+  .kv { background: #f7f9fc; border-radius: var(--radius-sm); padding: 12px; font-size: 13px; }
+  .kv .line { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #eef1f6; }
+  .kv .line:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: ui-monospace, Consolas, monospace; word-break: break-all; text-align: right; max-width: 60%; }
+  .msg { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; }
+  .msg.ok { background: #e6f7ee; color: var(--ok); }
+  .msg.err { background: #fdeaea; color: var(--err); }
+  .msg.warn { background: #fff4e5; color: var(--warn); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.7; }
+  .note code { background: #eef1f6; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  .hidden { display: none; }
+
+  /* 输入方式 Tab */
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab {
+    padding: 8px 14px; border-radius: 999px; border: 1px solid #e3e6eb;
+    background: #fff; font-size: 13px; font-weight: 600; color: var(--muted);
+    cursor: pointer; transition: all .15s;
+  }
+  .tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .pane { }
+  .hid-zone {
+    border: 2px dashed #e3e6eb; border-radius: var(--radius-sm); padding: 16px;
+    text-align: center; background: #fafbfd;
+  }
+  .hid-zone.active { border-color: var(--primary); background: #f3f7ff; }
+  .hid-buffer {
+    font-family: ui-monospace, Consolas, monospace; font-size: 16px; min-height: 28px;
+    margin: 10px 0; word-break: break-all; color: var(--txt);
+  }
+  .hid-buffer.empty { color: var(--muted); font-size: 13px; }
+  .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
+  .dot.ok { background: var(--ok); }
+  .dot.err { background: var(--err); }
+  .dot.warn { background: var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>员工身份二维码 · 扫码验签测试</h1>
+  <div class="sub">验证 H5「我的」页生成的员工二维码，扫码后调用 <code>/terminal/verify-qrcode</code> 验签识别员工（仅 X86 取餐终端测试用）。支持摄像头 / 扫码枪(HID) / 网络扫码设备 三种输入。</div>
+
+  <!-- 连接配置 -->
+  <div class="card">
+    <h2>① 连接配置</h2>
+    <div class="row">
+      <div class="field">
+        <label>后端地址（如 http://192.168.1.100:8080）</label>
+        <input type="text" id="baseUrl" placeholder="http://192.168.1.100:8080">
+      </div>
+    </div>
+    <div class="field">
+      <label>终端 Token（role=3，验签接口要求终端身份）</label>
+      <input type="text" id="token" placeholder="粘贴终端 token">
+    </div>
+    <div class="note">
+      获取终端 token：已绑定的终端浏览器按 F12 → Console 执行
+      <code>JSON.parse(localStorage.getItem('terminal_config_v2')).token</code>；
+      或调用 <code>POST /api/terminal/bind</code>（管理员账号+密码+食堂安全码）获取。
+    </div>
+  </div>
+
+  <!-- 输入方式 -->
+  <div class="card">
+    <h2>② 输入方式</h2>
+    <div class="tabs">
+      <button class="tab active" data-tab="camera">摄像头扫码</button>
+      <button class="tab" data-tab="hid">扫码枪 HID</button>
+      <button class="tab" data-tab="network">网络扫码设备</button>
+      <button class="tab" data-tab="manual">手动输入</button>
+    </div>
+
+    <!-- 摄像头扫码 -->
+    <div class="pane" id="pane-camera">
+      <div class="video-box">
+        <video id="video" muted playsinline></video>
+        <div class="scan-frame" id="scanFrame">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <div class="scan-hint" id="scanHint">点击「开启摄像头」后对准员工二维码</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="startBtn">开启摄像头</button>
+        <button class="btn btn-danger hidden" id="stopBtn">关闭摄像头</button>
+      </div>
+      <div class="msg hidden" id="cameraMsg"></div>
+      <div class="note">
+        摄像头需在安全上下文（localhost 或 HTTPS）下运行。若在局域网 IP 访问导致摄像头被禁，请改用「扫码枪 HID」或「网络扫码设备」，或浏览器输入 <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> 把本机 IP 加入安全来源。
+      </div>
+    </div>
+
+    <!-- 扫码枪 HID -->
+    <div class="pane hidden" id="pane-hid">
+      <div class="hid-zone" id="hidZone">
+        <div style="font-size:14px;font-weight:600;">将扫码枪对准二维码，扫描后自动识别</div>
+        <div class="hid-buffer empty" id="hidBuffer">等待扫码，扫码内容会显示在这里…</div>
+        <div class="status-line"><span class="dot ok" id="hidDot"></span><span id="hidStatus">HID 监听已就绪（自动聚焦输入框）</span></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm" id="simHidBtn">模拟扫码（测试用）</button>
+      </div>
+      <input type="text" id="hidInput" class="hidden">
+      <div class="note">
+        说明：扫码枪通过 USB 或蓝牙以「键盘输入」方式工作，扫描后自动输入内容并回车。本页已自动聚焦右侧隐藏输入框，避免与你填写的 token 串扰。若扫码枪未生效，请点击「扫码枪 HID」Tab 后确保页面获得焦点，再扫码。
+      </div>
+    </div>
+
+    <!-- 网络扫码设备 -->
+    <div class="pane hidden" id="pane-network">
+      <div class="row">
+        <div class="field">
+          <label>接收服务地址（本机运行 network_scan_receiver.py）</label>
+          <input type="text" id="netHost" placeholder="默认当前主机">
+        </div>
+        <div class="field" style="max-width:120px;">
+          <label>端口</label>
+          <input type="text" id="netPort" value="8091">
+        </div>
+      </div>
+      <div class="status-line"><span class="dot" id="netDot"></span><span id="netStatus">未连接</span></div>
+      <div class="actions">
+        <button class="btn btn-primary btn-sm" id="netStartBtn">连接</button>
+        <button class="btn btn-danger btn-sm hidden" id="netStopBtn">断开</button>
+      </div>
+      <div class="msg hidden" id="netMsg"></div>
+      <div class="note">
+        适用于网络中需要「扫码后上报服务器」的收银/支付类扫码枪（如新大陆、斑马等网络扫码引擎）。
+        这类设备可在管理页面配置「扫描后发送到 URL」，配置为：
+        <code>http://&lt;本机IP&gt;:8091/scan?data=%s</code>（%s 为扫码内容占位符）。
+        本页通过 SSE 实时接收扫码结果。需先运行 <code>python network_scan_receiver.py</code>。
+      </div>
+    </div>
+
+    <!-- 手动输入 -->
+    <div class="pane hidden" id="pane-manual">
+      <div class="field">
+        <textarea id="manualInput" placeholder='粘贴二维码 JSON 内容，例如：{"cardNo":"14319688","storeId":1,"employeeId":5,"name":"张三","expire":1750000000000,"sign":"abcd..."}'></textarea>
+      </div>
+      <button class="btn btn-primary btn-sm" id="manualBtn">手动验证</button>
+    </div>
+  </div>
+
+  <!-- 结果 -->
+  <div class="card">
+    <h2>③ 验签结果 <span class="pill hidden" id="statusPill"></span></h2>
+    <div class="result">
+      <div class="kv hidden" id="qrKv"></div>
+      <div class="msg hidden" id="resultMsg"></div>
+    </div>
+    <details>
+      <summary>安全说明</summary>
+      <div class="note">
+        1. 二维码含 HMAC-SHA256 签名（128 bit），服务端常量时间比对，防伪。<br>
+        2. 验签接口仅终端角色（role=3）可调用，返回含余额的员工信息，其他角色一律 403。<br>
+        3. 二维码所属门店必须与终端绑定门店一致，跨食堂不可用。<br>
+        4. 二维码 7 天有效，过期后需在 H5「我的」页重新刷新。
+      </div>
+    </details>
+  </div>
+</div>
+
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+(function () {
+  const baseUrlEl = document.getElementById('baseUrl');
+  const tokenEl = document.getElementById('token');
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const scanFrame = document.getElementById('scanFrame');
+  const scanHint = document.getElementById('scanHint');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const cameraMsg = document.getElementById('cameraMsg');
+  const manualInput = document.getElementById('manualInput');
+  const manualBtn = document.getElementById('manualBtn');
+  const statusPill = document.getElementById('statusPill');
+  const qrKv = document.getElementById('qrKv');
+  const resultMsg = document.getElementById('resultMsg');
+
+  let stream = null;
+  let raf = 0;
+  let lastScan = '';
+  let lastScanTime = 0;
+
+  function showMsg(el, text, type) {
+    el.textContent = text;
+    el.className = 'msg ' + type;
+    el.classList.remove('hidden');
+  }
+  function hide(el) { el.classList.add('hidden'); }
+
+  function renderKv(qr) {
+    const rows = [
+      ['卡号', qr.cardNo], ['姓名', qr.name], ['门店ID', qr.storeId],
+      ['员工ID', qr.employeeId],
+      ['过期时间', new Date(qr.expire).toLocaleString()],
+      ['签名', qr.sign]
+    ];
+    qrKv.innerHTML = rows.map(function (r) {
+      return '<div class="line"><span class="k">' + r[0] + '</span><span class="v">' + (r[1] == null ? '' : r[1]) + '</span></div>';
+    }).join('');
+    qrKv.classList.remove('hidden');
+  }
+
+  function onScanned(raw) {
+    let qr;
+    try { qr = JSON.parse(raw); } catch (e) { qr = null; }
+    if (!qr || !qr.sign) {
+      statusPill.textContent = '非员工二维码';
+      statusPill.className = 'pill pill-warn';
+      statusPill.classList.remove('hidden');
+      showMsg(resultMsg, '扫描到的内容不是员工身份二维码（缺少 sign 字段），忽略。原始内容：' + raw, 'warn');
+      return;
+    }
+    renderKv(qr);
+    statusPill.textContent = '扫码成功';
+    statusPill.className = 'pill pill-ok';
+    statusPill.classList.remove('hidden');
+    verify(qr);
+  }
+
+  async function verify(qr) {
+    const base = baseUrlEl.value.trim().replace(/\/$/, '');
+    const token = tokenEl.value.trim();
+    if (!base || !token) {
+      showMsg(resultMsg, '请先填写后端地址和终端 Token。', 'warn');
+      return;
+    }
+    showMsg(resultMsg, '正在调用服务端验签...', 'warn');
+    try {
+      const res = await fetch(base + '/api/terminal/verify-qrcode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(qr)
+      });
+      const data = await res.json();
+      if (data && data.code === 200 && data.data) {
+        const d = data.data;
+        statusPill.textContent = '验证通过';
+        statusPill.className = 'pill pill-ok';
+        statusPill.classList.remove('hidden');
+        showMsg(resultMsg,
+          '✅ 验签通过，识别到员工：' + d.name +
+          '（工号 ' + d.cardNo + '，部门 ' + (d.departmentName || '未分配') +
+          '，余额 ¥' + d.balance + '）', 'ok');
+      } else {
+        statusPill.textContent = '验证失败';
+        statusPill.className = 'pill pill-err';
+        statusPill.classList.remove('hidden');
+        showMsg(resultMsg, '❌ ' + (data && data.message ? data.message : '验签失败（HTTP ' + res.status + '）'), 'err');
+      }
+    } catch (e) {
+      statusPill.textContent = '请求失败';
+      statusPill.className = 'pill pill-err';
+      statusPill.classList.remove('hidden');
+      showMsg(resultMsg, '请求服务端失败：' + (e && e.message ? e.message : e), 'err');
+    }
+  }
+
+  /* ---------- 摄像头 ---------- */
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      video.srcObject = stream;
+      await video.play();
+      scanFrame.classList.add('running');
+      scanHint.textContent = '正在扫描...';
+      startBtn.classList.add('hidden');
+      stopBtn.classList.remove('hidden');
+      hide(cameraMsg);
+      tick();
+    } catch (e) {
+      showMsg(cameraMsg, '摄像头启动失败：' + (e && e.message ? e.message : e) + '。可改用「扫码枪 HID」或「手动输入」。', 'err');
+    }
+  }
+  function stopCamera() {
+    if (raf) cancelAnimationFrame(raf); raf = 0;
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    video.srcObject = null;
+    scanFrame.classList.remove('running');
+    scanHint.textContent = '点击「开启摄像头」后对准员工二维码';
+    startBtn.classList.remove('hidden');
+    stopBtn.classList.add('hidden');
+  }
+  function tick() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.data) {
+        const now = Date.now();
+        if (code.data !== lastScan || now - lastScanTime > 1500) {
+          lastScan = code.data;
+          lastScanTime = now;
+          onScanned(code.data);
+        }
+      }
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  /* ---------- 扫码枪 HID ---------- */
+  const hidZone = document.getElementById('hidZone');
+  const hidBuffer = document.getElementById('hidBuffer');
+  const hidStatus = document.getElementById('hidStatus');
+  const hidDot = document.getElementById('hidDot');
+  const hidInput = document.getElementById('hidInput');
+  const simHidBtn = document.getElementById('simHidBtn');
+  let hidPressed = false;
+  let hidBuf = '';
+
+  function setHidStatus(text, cls) {
+    hidStatus.textContent = text;
+    hidDot.className = 'dot ' + (cls || 'ok');
+  }
+  function renderHidBuffer() {
+    hidBuffer.textContent = hidBuf || '等待扫码，扫码内容会显示在这里…';
+    hidBuffer.classList.toggle('empty', !hidBuf);
+  }
+  function activateHid() {
+    hidPressed = true;
+    hidZone.classList.add('active');
+    setHidStatus('HID 监听已就绪（自动聚焦隐藏输入框，扫码后回车识别）', 'ok');
+    hidInput.focus();
+  }
+  function deactivateHid() {
+    hidPressed = false;
+    hidBuf = '';
+    renderHidBuffer();
+    hidZone.classList.remove('active');
+  }
+  hidInput.addEventListener('keydown', function (e) {
+    e.preventDefault();
+    if (e.key === 'Enter') {
+      const code = hidBuf.trim();
+      hidBuf = '';
+      renderHidBuffer();
+      if (code) onScanned(code);
+      return;
+    }
+    if (e.key === 'Backspace') {
+      hidBuf = hidBuf.slice(0, -1);
+    } else if (e.key.length === 1) {
+      hidBuf += e.key;
+    }
+    renderHidBuffer();
+  });
+  hidInput.addEventListener('blur', function () {
+    if (hidPressed) setTimeout(function () { hidInput.focus(); }, 10);
+  });
+  simHidBtn.addEventListener('click', function () {
+    hidBuf += '{"cardNo":"14319688","storeId":1,"employeeId":3,"name":"王磊","expire":' + (Date.now() + 7 * 86400000) + '}';
+    renderHidBuffer();
+    hidInput.focus();
+  });
+
+  /* ---------- 网络扫码设备 ---------- */
+  const netHost = document.getElementById('netHost');
+  const netPort = document.getElementById('netPort');
+  const netDot = document.getElementById('netDot');
+  const netStatus = document.getElementById('netStatus');
+  const netStartBtn = document.getElementById('netStartBtn');
+  const netStopBtn = document.getElementById('netStopBtn');
+  const netMsg = document.getElementById('netMsg');
+  let es = null;
+  function setNetStatus(text, cls) {
+    netStatus.textContent = text;
+    netDot.className = 'dot ' + (cls || '');
+  }
+  function startNet() {
+    const host = netHost.value.trim() || location.hostname || 'localhost';
+    const port = netPort.value.trim() || '8091';
+    const url = 'http://' + host + ':' + port + '/events';
+    try {
+      es = new EventSource(url);
+      es.onopen = function () { setNetStatus('已连接 ' + url, 'ok'); hide(netMsg); };
+      es.onerror = function () { setNetStatus('连接断开/重连中', 'err'); };
+      es.onmessage = function (ev) {
+        try {
+          const d = JSON.parse(ev.data);
+          if (d.data) onScanned(String(d.data));
+        } catch (e) { /* 忽略非 JSON 心跳 */ }
+      };
+      netStartBtn.classList.add('hidden');
+      netStopBtn.classList.remove('hidden');
+    } catch (e) {
+      showMsg(netMsg, '连接失败：' + (e && e.message ? e.message : e) + '。请确认已运行 network_scan_receiver.py。', 'err');
+    }
+  }
+  function stopNet() {
+    if (es) { es.close(); es = null; }
+    setNetStatus('未连接', '');
+    netStartBtn.classList.remove('hidden');
+    netStopBtn.classList.add('hidden');
+  }
+  netStartBtn.addEventListener('click', startNet);
+  netStopBtn.addEventListener('click', stopNet);
+
+  /* ---------- Tab 切换 ---------- */
+  const tabs = document.querySelectorAll('.tab');
+  const panes = { camera: document.getElementById('pane-camera'), hid: document.getElementById('pane-hid'), network: document.getElementById('pane-network'), manual: document.getElementById('pane-manual') };
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      var name = tab.getAttribute('data-tab');
+      Object.keys(panes).forEach(function (k) { panes[k].classList.add('hidden'); });
+      panes[name].classList.remove('hidden');
+      if (name === 'hid') activateHid();
+      else if (name === 'camera') { deactivateHid(); }
+      else if (name === 'network') { deactivateHid(); }
+      else { deactivateHid(); }
+    });
+  });
+
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
+  manualBtn.addEventListener('click', function () {
+    const raw = manualInput.value.trim();
+    if (!raw) { showMsg(resultMsg, '请先粘贴二维码 JSON 内容。', 'warn'); return; }
+    let qr;
+    try { qr = JSON.parse(raw); } catch (e) { showMsg(resultMsg, 'JSON 解析失败，请检查内容格式。', 'err'); return; }
+    renderKv(qr);
+    statusPill.textContent = '已解析';
+    statusPill.className = 'pill pill-ok';
+    statusPill.classList.remove('hidden');
+    verify(qr);
+  });
+})();
+</script>
+</body>
+</html>

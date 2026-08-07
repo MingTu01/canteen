@@ -20,7 +20,14 @@
         LIMIT 1
     </select>
 
-    <select id="selectByPickupCode" resultType="com.example.canteen.entity.Order">
-        SELECT * FROM `order` WHERE pickup_code = #{pickupCode} LIMIT 1
+    <!-- 取餐码按「门店+日期」收口:防止跨店/跨日碰撞导致错核销;storeId 为 null(超管)时不过滤门店 -->
+    <select id="selectByStoreDatePickupCode" resultType="com.example.canteen.entity.Order">
+        SELECT * FROM `order`
+        WHERE pickup_code = #{pickupCode}
+          AND date = #{date}
+        <if test="storeId != null">
+          AND store_id = #{storeId}
+        </if>
+        LIMIT 1
     </select>
 </mapper>

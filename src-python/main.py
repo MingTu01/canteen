@@ -186,15 +186,16 @@ if sys.platform == 'win32':
     # 保存 mutex_handle 到全局,防止被 GC 回收(Mutex 生命周期 = 进程生命周期)
     _single_instance_mutex = mutex_handle
 
-from PyQt5.QtCore import Qt, QUrl, QObject, pyqtSignal
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PyQt5.QtCore import Qt, QUrl, QObject, pyqtSignal, QThread, QTimer
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QProgressDialog
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineScript
 from PyQt5.QtGui import QKeyEvent
 
-from config import read_config, ensure_config_json, get_exe_dir, get_local_appdata_dir, read_full_config
+from config import read_config, ensure_config_json, get_exe_dir, get_local_appdata_dir, read_full_config, write_config
 from server import find_web_dist, start_server
 from bridge import ShellBridge
 from card_reader import CardReader
+import updater
 
 
 class FullscreenWebPage(QWebEnginePage):
@@ -325,6 +326,147 @@ def push_card_to_frontend(page, card_no):
     safe_card = card_no.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
     js = f"window.__onCardRead && window.__onCardRead('{safe_card}');"
     page.runJavaScript(js)
+
+
+# ===== 在线更新 =====
+class UpdateCheckWorker(QThread):
+    """后台线程:检测 GitHub 是否有新版本,避免阻塞主线程。"""
+    result = pyqtSignal(object)  # 传递查到的 release dict,或 None
+
+    def __init__(self, cfg, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+
+    def run(self):
+        try:
+            release = updater.check_for_update(
+                config_update_check_url=self.cfg.get('update_check_url', ''),
+                ignored_version=self.cfg.get('ignored_version', ''),
+            )
+        except Exception as e:
+            print(f'[Updater] 检查更新异常: {e}')
+            release = None
+        self.result.emit(release)
+
+
+def _show_update_dialog(parent, release):
+    """弹出更新提示对话框。
+
+    提供三个选项:
+      下载更新 / 取消 / 忽略此版本
+    """
+    version = release.get('version', '')
+    notes = (release.get('notes') or '').strip()
+    asset_name = release.get('asset_name') or ''
+    msg = f'检测到新版本 {version},是否立即更新?\n\n当前版本:{updater.get_current_version()}'
+    if notes:
+        msg += f'\n\n更新说明:\n{notes[:500]}'
+    msg += '\n\n点击"下载更新"将自动下载并安装,您的配置会保留。'
+    box = QMessageBox(parent)
+    box.setWindowTitle('发现新版本')
+    box.setIcon(QMessageBox.Information)
+    box.setText(msg)
+    btn_update = box.addButton('下载更新', QMessageBox.AcceptRole)
+    box.addButton('取消', QMessageBox.RejectRole)
+    btn_ignore = box.addButton('忽略此版本', QMessageBox.DestructiveRole)
+    box.exec_()
+    if box.clickedButton() == btn_update:
+        return 'update'
+    if box.clickedButton() == btn_ignore:
+        return 'ignore'
+    return 'cancel'
+
+
+def _save_ignored_version(version):
+    """记录用户忽略的版本号,下次检测到该版本时不再提示。"""
+    try:
+        write_config({'ignored_version': version})
+    except Exception as e:
+        print(f'[Updater] 记录忽略版本失败: {e}')
+
+
+class UpdateDownloadWorker(QThread):
+    """下载安装包线程。"""
+    finished = pyqtSignal(bool, str)  # (成功, 安装包路径或错误信息)
+
+    def __init__(self, release, dest_path, parent=None):
+        super().__init__(parent)
+        self.release = release
+        self.dest_path = dest_path
+
+    def run(self):
+        try:
+            url = self.release.get('asset_url', '')
+            if not url:
+                self.finished.emit(False, '未找到安装包下载地址')
+                return
+            updater.download_installer(url, self.dest_path)
+            self.finished.emit(True, self.dest_path)
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
+def start_update_check(window, card_reader):
+    """启动在线更新检测(后台线程)。
+
+    检测到新版本时弹窗提示;用户选择"下载更新"后自动下载、
+    退出本程序并静默运行新安装包。
+    """
+    cfg = read_full_config()
+
+    def on_check_result(release):
+        if not release:
+            return
+        choice = _show_update_dialog(window, release)
+        if choice == 'ignore':
+            _save_ignored_version(release.get('version', ''))
+            return
+        if choice != 'update':
+            return
+
+        # 6. 下载安装包
+        asset_name = release.get('asset_name') or f'CanteenTerminal-Setup-{release.get("version", "")}.exe'
+        from config import get_local_appdata_dir
+        dest_dir = os.path.join(get_local_appdata_dir(), 'updates')
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, asset_name)
+
+        progress = QProgressDialog('正在下载更新,请稍候...', '取消', 0, 100, window)
+        progress.setWindowTitle('下载更新')
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        worker = UpdateDownloadWorker(release, dest_path)
+
+        def on_download_progress(done, total):
+            if total > 0:
+                progress.setValue(int(done * 100 / total))
+
+        worker.finished.connect(progress.close)
+
+        def on_download_finished(ok, msg):
+            progress.close()
+            if not ok:
+                QMessageBox.critical(window, '更新失败', f'下载失败:{msg}\n请稍后重试或手动下载。')
+                return
+            print(f'[Updater] 下载完成,启动安装: {msg}')
+            updater.run_installer(msg)
+            # 退出本程序,让安装包接管
+            QTimer.singleShot(500, card_reader.stop)
+            QTimer.singleShot(1000, QApplication.quit)
+
+        worker.finished.connect(on_download_finished)
+        worker.start()
+        # 引用 worker,防止被 GC(进度条关闭时释放)
+        worker.setParent(window)
+
+    check_thread = UpdateCheckWorker(cfg)
+    check_thread.result.connect(on_check_result)
+    check_thread.finished.connect(check_thread.deleteLater)
+    check_thread.start()
+    # 持有引用,防 GC
+    check_thread.setParent(window)
 
 
 def main():
@@ -487,6 +629,12 @@ def main():
     card_reader.card_read.connect(
         lambda card_no: push_card_to_frontend(window.page, card_no)
     )
+
+    # 9.1 在线更新检测(后台线程,不阻塞启动)
+    try:
+        start_update_check(window, card_reader)
+    except Exception as e:
+        print(f'[Init] 在线更新检测启动失败(可忽略): {e}')
 
     # 10. 启动读卡器(页面加载后)
     # 延迟启动,确保前端已就绪

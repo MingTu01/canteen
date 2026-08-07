@@ -40,9 +40,8 @@ public class RechargeRecordController {
     @OperationLog(value = "员工充值", detail = "'员工 ' + #resolver.employeeName(#dto.employeeId) + ' 金额 ' + #dto.amount")
     @PostMapping
     public ApiResponse<RechargeRecord> recharge(@Valid @RequestBody RechargeDTO dto) {
-        // P1-3 员工(role=0)和终端(role=3)无权充值,防止资金漏洞
-        Integer role = SecurityContext.currentRole();
-        if (role == null || role == 0 || role == 3) {
+        // 充值属资金操作:对齐前端充值页 [1,2,4,6](超管/店管/财务/店长),厨师(5)无权充值
+        if (!SecurityContext.canViewFinance()) {
             throw new com.example.canteen.exception.SecurityException("无权充值");
         }
         Long storeId = dto.getStoreId();
@@ -71,9 +70,8 @@ public class RechargeRecordController {
                                                               @RequestParam(defaultValue = "10") int size,
                                                               @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                                               @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        // P1-3 员工(role=0)和终端(role=3)无权查看门店充值记录
-        Integer role = SecurityContext.currentRole();
-        if (role == null || role == 0 || role == 3) {
+        // 充值记录属资金数据:对齐前端充值页 [1,2,4,6],厨师(5)无权查看
+        if (!SecurityContext.canViewFinance()) {
             throw new com.example.canteen.exception.SecurityException("无权查看充值记录");
         }
         SecurityContext.checkStoreAccess(storeId);

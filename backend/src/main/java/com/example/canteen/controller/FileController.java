@@ -41,9 +41,9 @@ public class FileController {
 
     @PostMapping("/upload-image")
     public ApiResponse<Map<String, Object>> uploadImage(@RequestParam("file") MultipartFile file) {
-        // 仅管理员(超管 role=1 或门店管理员 role=2)可上传,拒绝员工(role=0)和终端(role=3)
-        Integer role = SecurityContext.currentRole();
-        if (role == null || (role != SecurityContext.ROLE_SUPER_ADMIN && role != SecurityContext.ROLE_STORE_ADMIN)) {
+        // 管理级别角色(超管/店管/财务/厨师长/店长)均可上传,与员工头像上传(uploadAvatar)口径一致;
+        // 拒绝员工(role=0)与终端(role=3)。厨师长传菜品图、店长传通知图都依赖此接口。
+        if (!SecurityContext.hasAdminLevel()) {
             throw new com.example.canteen.exception.SecurityException("仅管理员可上传文件");
         }
 

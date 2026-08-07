@@ -136,6 +136,8 @@ public class JwtAuthenticationFilter implements Filter {
                     if (remainingMs > 0 && remainingMs < ttlMs / 4) {
                         String newToken = jwtTokenProvider.renewToken(claims);
                         authCookieUtil.setCookieByRole(httpResponse, newToken, httpRequest, role);
+                        // 续期后吊销旧 token(旧 jti 入黑名单),缩小 token 泄露后的并行有效窗口
+                        tokenBlacklistService.blacklist(token);
                     }
                 }
             } catch (Exception renewEx) {

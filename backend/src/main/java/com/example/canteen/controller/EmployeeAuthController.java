@@ -70,14 +70,16 @@ public class EmployeeAuthController {
         if (cardNo == null || cardNo.isBlank()) {
             return ApiResponse.error(400, "卡号不能为空");
         }
-        rateLimiter.checkLocked(cardNo);
+        // 限流 key 带门店:卡号可跨店重复,不带门店会跨店互相锁定
+        String lockKey = storeId + ":" + cardNo;
+        rateLimiter.checkLocked(lockKey);
 
         EmployeeAuthService.LoginResult result = authService.login(cardNo, password, storeId);
         if (!result.isSuccess()) {
-            rateLimiter.recordFail(cardNo);
+            rateLimiter.recordFail(lockKey);
             return ApiResponse.error(401, result.getErrorMessage());
         }
-        rateLimiter.recordSuccess(cardNo);
+        rateLimiter.recordSuccess(lockKey);
         authCookieUtil.setEmployeeCookie(httpResponse, result.getToken(), httpRequest);
         Map<String, Object> data = new HashMap<>();
         data.put("token", result.getToken());
@@ -265,10 +267,16 @@ public class EmployeeAuthController {
             return ApiResponse.error(400, "手机号和密码不能为空");
         }
 
+        // 绑定接口同样走手机号限流:bindToken 持有者可枚举手机号+密码组合,必须限速
+        String lockKey = "phone:" + phone;
+        rateLimiter.checkLocked(lockKey);
+
         EmployeeAuthService.LoginResult result = wechatAuthService.bindByPhoneAndPassword(bindToken, phone, password);
         if (!result.isSuccess()) {
+            rateLimiter.recordFail(lockKey);
             return ApiResponse.error(401, result.getErrorMessage());
         }
+        rateLimiter.recordSuccess(lockKey);
 
         authCookieUtil.setEmployeeCookie(httpResponse, result.getToken(), httpRequest);
         Map<String, Object> data = new HashMap<>();

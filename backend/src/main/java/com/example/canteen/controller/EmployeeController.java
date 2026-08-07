@@ -101,15 +101,29 @@ public class EmployeeController {
         Long targetStore = storeId != null ? storeId : SecurityContext.currentStoreId();
         // P0-2 多租户:校验门店归属,防止门店管理员越权查询其他门店员工
         SecurityContext.checkStoreAccess(targetStore);
+        // 水平越权防护:员工角色只能查自己(卡号需与本人匹配)或查自己的卡号,
+        // 禁止员工凭他人卡号刺探同事姓名/余额/部门(仅手机号脱敏不足以防枚举)。
+        // 管理角色(1/2/6)与终端(3)可查任意本店员工。
+        if (SecurityContext.isEmployee()) {
+            Employee self = employeeService.getEmployeeById(SecurityContext.currentEmployeeId());
+            if (self == null || !cardNo.equals(self.getCardNo())) {
+                throw new com.example.canteen.exception.SecurityException("无权查看他人信息");
+            }
+        }
         Employee employee = employeeService.getEmployeeByCardNoAndStore(cardNo, targetStore);
+        if (employee == null) {
+            // 显式 404 语义,避免前端无法区分「无此人」与「空数据」
+            throw new com.example.canteen.exception.BusinessException("员工不存在");
+        }
         return ApiResponse.success(EmployeeVO.from(employee));
     }
 
     @OperationLog(value = "创建员工", detail = "'员工 ' + #employee.name + ' 工号 ' + #employee.cardNo")
     @PostMapping
     public ApiResponse<EmployeeVO> createEmployee(@RequestBody Employee employee) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 与前端路由对齐(员工管理 [1,2,6]):厨师(5)/财务(4)不可管理员工
+        if (!SecurityContext.hasAnyRole(1, 2, 6)) {
+            throw new com.example.canteen.exception.SecurityException("仅超管/门店管理员/店长可管理员工");
         }
         SecurityContext.checkStoreAccess(employee.getStoreId());
         return ApiResponse.success(EmployeeVO.from(employeeService.createEmployee(employee)));
@@ -118,8 +132,9 @@ public class EmployeeController {
     @OperationLog(value = "更新员工", detail = "'员工ID ' + #id + ' 姓名 ' + #employee.name")
     @PutMapping("/{id}")
     public ApiResponse<EmployeeVO> updateEmployee(@PathVariable Long id, @RequestBody Employee employee) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 与前端路由对齐(员工管理 [1,2,6])
+        if (!SecurityContext.hasAnyRole(1, 2, 6)) {
+            throw new com.example.canteen.exception.SecurityException("仅超管/门店管理员/店长可管理员工");
         }
         employee.setId(id);
         // storeId 校验和覆盖在 service 层基于 existing 完成,避免信任 body storeId
@@ -129,8 +144,9 @@ public class EmployeeController {
     @OperationLog(value = "删除员工", detail = "'员工ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteEmployee(@PathVariable Long id) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 删除类操作剔除店长(6)(其角色定位为「全店管理但不可删数据」)与厨师/财务
+        if (!SecurityContext.hasAnyRole(1, 2)) {
+            throw new com.example.canteen.exception.SecurityException("仅超管/门店管理员可删除员工");
         }
         Employee existing = employeeService.getEmployeeById(id);
         if (existing != null) {
@@ -154,8 +170,9 @@ public class EmployeeController {
     @OperationLog(value = "批量导入员工", detail = "'门店ID ' + #body['storeId'] + ' 行数 ' + #body['employees'].size()")
     @PostMapping("/batch")
     public ApiResponse<Map<String, Object>> batchImport(@RequestBody Map<String, Object> body) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 与前端路由对齐(员工管理 [1,2,6])
+        if (!SecurityContext.hasAnyRole(1, 2, 6)) {
+            throw new com.example.canteen.exception.SecurityException("仅超管/门店管理员/店长可管理员工");
         }
         Object storeIdObj = body.get("storeId");
         if (storeIdObj == null) {
@@ -207,8 +224,9 @@ public class EmployeeController {
     @OperationLog(value = "批量充值", detail = "'门店ID ' + #body['storeId'] + ' 金额 ' + #body['amount']")
     @PostMapping("/batch-recharge")
     public ApiResponse<Map<String, Object>> batchRecharge(@RequestBody Map<String, Object> body) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 充值属资金操作:对齐前端充值页 [1,2,4,6],厨师(5)无权充值
+        if (!SecurityContext.canViewFinance()) {
+            throw new com.example.canteen.exception.SecurityException("仅财务相关角色可充值");
         }
         Object storeIdObj = body.get("storeId");
         Long storeId = storeIdObj != null
@@ -266,8 +284,9 @@ public class EmployeeController {
             @RequestParam Long storeId,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long department) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 导出含 PII:对齐前端员工管理页 [1,2,6]
+        if (!SecurityContext.hasAnyRole(1, 2, 6)) {
+            throw new com.example.canteen.exception.SecurityException("仅超管/门店管理员/店长可导出员工");
         }
         SecurityContext.checkStoreAccess(storeId);
 
@@ -301,7 +320,8 @@ public class EmployeeController {
         for (Employee e : list) {
             sb.append(csvEscape(e.getName())).append(',');
             sb.append(csvEscape(e.getCardNo())).append(',');
-            sb.append(csvEscape(e.getPhone())).append(',');
+            // 导出文件会脱离系统边界流转,手机号按 PII 规范脱敏(页面查看不受影响)
+            sb.append(csvEscape(com.example.canteen.dto.EmployeeVO.maskPhone(e.getPhone()))).append(',');
             sb.append(csvEscape(e.getDepartmentId() == null ? "" : deptNameMap.getOrDefault(e.getDepartmentId(), ""))).append(',');
             sb.append(e.getBalance() == null ? "0" : e.getBalance().toPlainString()).append(',');
             sb.append(e.getStatus() != null && e.getStatus() == 1 ? "启用" : "禁用").append(',');
@@ -346,8 +366,9 @@ public class EmployeeController {
     public ApiResponse<Map<String, Object>> uploadAvatar(@PathVariable String identifier,
                                                          @RequestParam(required = false) Long storeId,
                                                          @RequestParam("file") MultipartFile file) {
-        if (!SecurityContext.hasAdminLevel()) {
-            throw new com.example.canteen.exception.SecurityException("无权执行此操作");
+        // 员工资料变更:对齐员工管理页 [1,2,6]
+        if (!SecurityContext.hasAnyRole(1, 2, 6)) {
+            throw new com.example.canteen.exception.SecurityException("仅超管/门店管理员/店长可管理员工");
         }
         Long targetStore = storeId != null ? storeId : SecurityContext.currentStoreId();
         if (targetStore == null) {
@@ -409,7 +430,10 @@ public class EmployeeController {
             result.put("employeeName", employee.getName());
             return ApiResponse.success(result);
         } catch (IOException e) {
-            return ApiResponse.error(500, "文件保存失败: " + e.getMessage());
+            // 不回显 e.getMessage():可能泄露服务器绝对路径等内部信息
+            org.slf4j.LoggerFactory.getLogger(EmployeeController.class)
+                    .warn("头像文件保存失败: {}", e.getMessage());
+            return ApiResponse.error(500, "文件保存失败,请重试");
         }
     }
 

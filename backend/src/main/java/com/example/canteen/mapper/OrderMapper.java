@@ -19,6 +19,11 @@ public interface OrderMapper extends BaseMapper<Order> {
                                    @Param("date") LocalDate date,
                                    @Param("mealType") Integer mealType);
 
-    /** 核销:按取餐码查询订单 */
-    Order selectByPickupCode(@Param("pickupCode") String pickupCode);
+    /**
+     * 核销/取餐码查重:按门店+日期+取餐码查询订单。
+     * storeId 为 null 时不按门店过滤(超管场景);date 限定当天,防止跨日错核销。
+     */
+    Order selectByStoreDatePickupCode(@Param("storeId") Long storeId,
+                                      @Param("date") LocalDate date,
+                                      @Param("pickupCode") String pickupCode);
 }
