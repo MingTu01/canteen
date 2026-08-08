@@ -267,21 +267,26 @@ read_input() {
 # 读取密码(隐藏输入,带确认,3 次重试)
 read_password() {
     local prompt="$1" pwd1 pwd2 attempt
+    # 关键: 本函数通过 $(read_password ...) 调用,stdout 被 $() 捕获。
+    # 所有交互输出(echo/warn/read -p)必须重定向到 stderr,只有最终的
+    # echo "$pwd1" 输出到 stdout。否则 echo "" 的换行符会污染返回值,
+    # 导致密码变成 "\n\nqweasd2864..",write_env_line 输出跨多行,
+    # cleanup_sensitive_env 的 grep -v 只删第一行,残留脏数据破坏 .env。
     for attempt in 1 2 3; do
         pwd1=""
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} ${prompt}: ")" pwd1
         if [[ -z "$pwd1" ]]; then
             read -r -p "$(echo -e "${CYAN}[?]${NC} ${prompt}(可见输入): ")" pwd1 || pwd1=""
         fi
-        echo ""
+        echo "" >&2
         if [[ -z "$pwd1" ]]; then
-            warn "未捕获到密码输入(第 ${attempt}/3 次)"
+            warn "未捕获到密码输入(第 ${attempt}/3 次)" >&2
             continue
         fi
         # 禁止双引号和反斜杠:Docker Compose dotenv 解析器不认 \" 转义,
         # 密码含 " 会导致整个 .env 解析失败,所有 docker compose 命令全挂
         if [[ "$pwd1" == *'"'* ]] || [[ "$pwd1" == *'\\'* ]]; then
-            warn "密码不能包含双引号(\")或反斜杠(\\),请更换密码"
+            warn "密码不能包含双引号(\")或反斜杠(\\),请更换密码" >&2
             continue
         fi
         pwd2=""
@@ -289,16 +294,17 @@ read_password() {
         if [[ -z "$pwd2" ]]; then
             read -r -p "$(echo -e "${CYAN}[?]${NC} 确认密码(可见输入): ")" pwd2 || pwd2=""
         fi
-        echo ""
+        echo "" >&2
         if [[ "$pwd1" != "$pwd2" ]]; then
-            warn "两次输入不一致,请重新输入"
+            warn "两次输入不一致,请重新输入" >&2
             continue
         fi
         if [[ ${#pwd1} -lt 8 ]]; then
-            warn "密码至少 8 位,请重新输入"
+            warn "密码至少 8 位,请重新输入" >&2
             continue
         fi
-        echo "$pwd1"
+        # 唯一输出到 stdout 的行:密码值(被 $() 捕获)
+        printf '%s' "$pwd1"
         return 0
     done
     return 1
@@ -792,10 +798,24 @@ cleanup_sensitive_env() {
 
     info "清理 .env 中的临时敏感变量..."
     local tmp; tmp=$(mktemp)
-    # 删除以 INIT_ADMIN_PASSWORD= 或 INIT_ADMIN_FORCE= 开头的行
-    # 同时删除任何残留的、不以合法 KEY= 开头的脏行(防止 .env 写坏后残留)
-    if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null \
-        | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [[ -s "$tmp" ]]; then
+    # 删除 INIT_ADMIN_PASSWORD 和 INIT_ADMIN_FORCE 相关行
+    # 关键: 密码值可能因 read_password 的 echo "" 污染而跨多行,
+    # grep -v "^INIT_ADMIN_PASSWORD=" 只能删第一行,残留的密码碎片行需要额外清理。
+    # 用 awk 状态机:遇到 INIT_ADMIN_PASSWORD= 开头的行开始跳过,直到遇到下一个合法 KEY= 行
+    awk '
+        BEGIN { skip = 0 }
+        # 合法 KEY= 行(字母/下划线开头,含=):结束跳过
+        /^[A-Za-z_][A-Za-z0-9_]*=/ { skip = 0 }
+        # INIT_ADMIN_PASSWORD 行:开始跳过(密码值可能跨行)
+        /^INIT_ADMIN_PASSWORD=/ { skip = 1; next }
+        # INIT_ADMIN_FORCE 行:直接跳过
+        /^INIT_ADMIN_FORCE=/ { next }
+        # 跳过模式中:如果是空行或不像合法KEY=,可能是密码残留,跳过
+        skip == 1 { next }
+        { print }
+    ' "$envfile" > "$tmp" 2>/dev/null
+
+    if [[ -s "$tmp" ]]; then
         cp "$envfile" "${envfile}.bak" 2>/dev/null
         mv "$tmp" "$envfile"
         chmod 600 "$envfile"
