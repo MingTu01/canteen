@@ -89,21 +89,23 @@ jwt:
   # 终端 token 过期时间(默认 365 天,避免 7x24 终端频繁失绑)
   terminal-expiration: ${JWT_TERMINAL_EXPIRATION:31536000000}
 
-# 微信公众号网页授权配置(可选,未配置时 H5 微信登录按钮提示"未配置")
-# 在微信公众号后台 → 设置与开发 → 公众号设置 → 功能设置 → 网页授权域名 填写 H5 访问域名
+# 微信公众号配置(可选,未配置时微信功能不可用,手机号登录正常)
+# 2025-12-01 起开发接口管理迁移至微信开发者平台(developers.weixin.qq.com)
+# AppID/AppSecret/IP白名单在开发者平台获取;网页授权域名在 mp.weixin.qq.com 功能设置配置
 wechat:
   app-id: ${WECHAT_APP_ID:}
   app-secret: ${WECHAT_APP_SECRET:}
-  # 模板消息(可选):配置后在公众号后台「模板消息」中申请对应模板,填入模板ID即可启用推送
-  # 通知/公告/活动模板:字段需含 title / content / time(在公众号后台按此命名申请)
+  # 订阅消息模板(可选):旧版模板消息已于2021-04-30下线,现使用订阅消息
+  # 在公众号后台「广告与服务→订阅消息」申请模板,填入模板ID即可启用推送
+  # 通知/公告/活动模板:字段需含 title / content / time
   template:
     notify: ${WECHAT_TEMPLATE_NOTIFY:}
     # 订单创建模板:字段需含 orderDate / mealType / amount / pickupCode / time
     order: ${WECHAT_TEMPLATE_ORDER:}
-  # H5 访问基础URL(用于模板消息点击跳转,如 https://canteen.example.com)
-  # 反向代理场景填外网域名;末尾不带斜杠
+  # H5 访问基础URL(用于订阅消息点击跳转,如 https://canteen.example.com)
+  # 需以标准443端口提供HTTPS(微信域名配置不支持带端口);末尾不带斜杠
   h5-base-url: ${WECHAT_H5_BASE_URL:}
-  # 服务器配置Token(用于消息/事件回调签名校验,公众号后台「基本配置→服务器配置」填写)
+  # 服务器配置Token(用于消息/事件回调签名校验,开发者平台「域名与消息推送配置」填写)
   # 配置后启用关注后自动回复图文卡片等功能;不配置则回调接口拒绝请求
   token: ${WECHAT_TOKEN:}
   # 图文卡片封面图URL(关注后自动回复用,建议 900x500,公网可访问)

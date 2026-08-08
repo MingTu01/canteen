@@ -5,10 +5,10 @@
 ==============================================================
 
 功能:
-  1. 交互式收集微信公众号配置(AppID / AppSecret / 模板ID / H5 URL)
+  1. 交互式收集微信公众号配置(AppID / AppSecret / 订阅消息模板ID / H5 URL)
   2. 实时校验 AppID/AppSecret 是否正确(调用微信 API 获取 access_token)
   3. 将配置写入项目根目录的 .env 文件(保留已有内容,仅更新微信相关行)
-  4. 可选发送测试模板消息,验证模板ID是否正确
+  4. 可选发送测试订阅消息,验证模板ID是否正确
   5. 可选自动重启后端容器以应用新配置
 
 使用方式:
@@ -18,14 +18,23 @@
 注意:
   - 本脚本仅修改 .env 文件,不会泄露或上传任何信息到第三方
   - AppSecret 是敏感信息,请确保 .env 已在 .gitignore 中
-  - 员工需在 H5 端使用微信登录并绑定后,才能收到模板消息推送
+  - 员工需在 H5 端使用微信登录并绑定后,才能收到订阅消息推送
+  - 订阅消息需员工在 H5 端主动订阅(wx-open-subscribe 开放标签),
+    每次订阅可发送一条消息
 
 前置条件:
-  - 已注册微信公众号(服务号,订阅号不支持网页授权和模板消息)
-  - 已在公众号后台「设置与开发 → 基本配置」获取 AppID 和 AppSecret
-  - 已在公众号后台「功能 → 模板消息」申请所需模板
-  - 已在公众号后台「功能设置 → 网页授权域名」填写 H5 访问域名
-  - 已在公众号后台「基本配置 → IP白名单」添加服务器公网IP
+  - 已注册微信公众号(认证服务号,订阅号不支持网页授权和订阅消息)
+  - 微信开发者平台(developers.weixin.qq.com)获取 AppID 和 AppSecret
+  - 微信开发者平台「API IP白名单」添加服务器公网IP
+  - 公众号后台(mp.weixin.qq.com)「功能设置 → 网页授权域名」填写 H5 域名(需 443 端口)
+  - 公众号后台「广告与服务 → 订阅消息」申请所需订阅消息模板
+
+重要变更:
+  - 2025-12-01 起,开发接口管理迁移至微信开发者平台(developers.weixin.qq.com)
+  - 旧版模板消息(message/template/send)已于 2021-04-30 下线,
+    现使用订阅消息(message/subscribe/bizsend)
+  - 网页授权域名/业务域名/JS接口安全域名 均要求 80/443 端口,不支持带端口
+  - 服务器配置(消息推送)URL 也要求 80/443 端口
 """
 
 import json
@@ -45,14 +54,15 @@ ENV_FILE = os.path.join(PROJECT_DIR, ".env")
 
 # 微信 API 端点
 WECHAT_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token"
-WECHAT_SEND_TEMPLATE_URL = "https://api.weixin.qq.com/cgi-bin/message/template/send"
+# 订阅消息发送接口(旧版模板消息 message/template/send 已于 2021-04-30 下线)
+WECHAT_SEND_TEMPLATE_URL = "https://api.weixin.qq.com/cgi-bin/message/subscribe/bizsend"
 
 # 需要管理的 .env 变量清单(变量名 → 中文说明)
 WECHAT_VARS = {
     "WECHAT_APP_ID": "公众号 AppID",
     "WECHAT_APP_SECRET": "公众号 AppSecret",
-    "WECHAT_TEMPLATE_NOTIFY": "通知/公告/活动 模板ID",
-    "WECHAT_TEMPLATE_ORDER": "订单创建 模板ID",
+    "WECHAT_TEMPLATE_NOTIFY": "通知/公告/活动 订阅消息模板ID",
+    "WECHAT_TEMPLATE_ORDER": "订单创建 订阅消息模板ID",
     "WECHAT_H5_BASE_URL": "H5 访问基础URL",
     "WECHAT_TOKEN": "服务器配置Token(回调签名)",
     "WECHAT_H5_BANNER_URL": "图文卡片封面图URL",
@@ -206,8 +216,9 @@ def get_access_token(app_id, app_secret):
 
 def send_template_message(access_token, openid, template_id, data, url=None):
     """
-    发送模板消息。
+    发送订阅消息(旧版模板消息已下线)。
     返回 (msgid, error_msg),成功时 error_msg 为 None。
+    注意:接收人需已订阅该模板,否则返回 43101。
     """
     api_url = f"{WECHAT_SEND_TEMPLATE_URL}?access_token={access_token}"
     payload = {
