@@ -415,12 +415,8 @@ set_env_var() {
         echo "$new_line" >> "$envfile"
     fi
 
-    # P2-7 安全修复:每次写入 .env 后强制权限 600
-    chmod 600 "$envfile"
-    # sudo 运行时 chown 给实际用户,避免后续 canteen.sh 写入失败
-    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
-        chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
-    fi
+    # P2-7 安全修复:每次写入 .env 后强制权限 600 并交给运维用户
+    chown_env_to_operator "$envfile"
 }
 
 # 安全读取 .env 变量(不执行 source,避免特殊字符导致 shell 展开/命令执行)
@@ -458,6 +454,25 @@ read_env_var() {
         fi
     done < "$envfile"
     return 1
+}
+
+# 将 .env 属主改给实际运维用户(SUDO_USER 优先,否则回退到 canteen 系统用户)
+# 原因:deploy.sh 常以 sudo 运行,.env 默认归 root;而后续 canteen 升级/重置
+# 以普通用户运行,写 .env 会报 "permission denied"。这里统一把属主交给运维用户。
+# 用法: chown_env_to_operator <envfile>
+chown_env_to_operator() {
+    local envfile="$1"
+    local target=""
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        target="$SUDO_USER"
+    elif id "canteen" >/dev/null 2>&1; then
+        target="canteen"
+    fi
+    if [[ -n "$target" ]]; then
+        chown "$target:$target" "$envfile" 2>/dev/null || true
+    fi
+    # 敏感文件强制 600
+    chmod 600 "$envfile" 2>/dev/null || true
 }
 
 #==============================================================
@@ -578,12 +593,14 @@ EOF
 configure_env() {
     step "3/9 配置环境变量"
 
-    # 密码策略:所有敏感凭证每次配置 .env 时一律随机生成,不复用旧值。
-    # 原因:固定/复用密码会引入真实风险——
-    #   - 复用旧密码:若旧密码曾外泄/被猜中,将长期暴露;
-    #   - 数据卷与密码绑定:重新生成新密码后,如 MySQL 数据卷仍保留旧密码会导致
-    #     认证失败。正确做法是首次部署初始化数据卷,或在需要更换密码时清空数据卷后重来。
-    # 因此这里不做"复用旧 .env 凭证"的逻辑,保证每次都是高强度随机新密码。
+    # 密码策略(重配 = 复用旧凭证,不破坏已有数据):
+    # 重跑 deploy.sh 对已部署系统重装/重配时,若 .env 已存在,敏感凭证
+    # (MYSQL_ROOT_PASSWORD / REDIS_PASSWORD / JWT_SECRET / DB_APP_PASSWORD /
+    #  BACKUP_ENCRYPTION_KEY)一律复用旧值,不重新随机生成。
+    # 原因:MySQL root 密码与数据卷绑定——首次初始化后,若重配时换成新随机密码,
+    # 与数据卷里的旧密码不一致,导致 init-db-user.sh 无法登录、后端无法连库。
+    # 只有全新安装(无 .env)或用户主动删除 .env 时才生成新随机密码。
+    # 这样"重跑 deploy.sh 重装/重配"不再破坏已有数据库。
 
     if [[ -f .env ]] && ! confirm_overwrite_env; then
         info "保留现有 .env 文件"
@@ -593,36 +610,67 @@ configure_env() {
     info "即将生成 .env 配置文件,请按提示输入:"
     echo ""
 
-    # MySQL 密码:一律随机生成(数据卷首次初始化时绑定该密码)
-    local mysql_pwd
-    ask "MySQL 数据库密码(留空=自动生成随机密码)"
-    read -r mysql_pwd
-    if [[ -z "$mysql_pwd" ]]; then
-        mysql_pwd=$(rand_hex 16)
-        info "已生成随机 MySQL 密码"
-    elif [[ ${#mysql_pwd} -lt 8 ]]; then
-        warn "密码不足 8 位,改为自动生成"
-        mysql_pwd=$(rand_hex 16)
+    # 复用旧值策略(P1-6 修复):若 .env 已存在,敏感凭证默认复用旧值,不重新随机生成。
+    # 原因:MySQL root 密码与数据卷绑定——首次初始化后,若重配时换成新随机密码,
+    # 与数据卷里的旧密码不一致,导致 init-db-user.sh 无法登录、后端无法连库。
+    # 只有全新安装(无 .env)或用户主动删除 .env 时才生成新随机密码。
+    # 这样"重跑 deploy.sh 重装/重配"不再破坏已有数据库。
+    local old_mysql_pwd="" old_redis_pwd="" old_jwt_secret="" old_db_app_user="" old_db_app_pwd="" old_backup_key=""
+    if [[ -f .env ]]; then
+        old_mysql_pwd=$(read_env_var "MYSQL_ROOT_PASSWORD" ".env" 2>/dev/null) || old_mysql_pwd=""
+        old_redis_pwd=$(read_env_var "REDIS_PASSWORD" ".env" 2>/dev/null) || old_redis_pwd=""
+        old_jwt_secret=$(read_env_var "JWT_SECRET" ".env" 2>/dev/null) || old_jwt_secret=""
+        old_db_app_user=$(read_env_var "DB_APP_USERNAME" ".env" 2>/dev/null) || old_db_app_user=""
+        old_db_app_pwd=$(read_env_var "DB_APP_PASSWORD" ".env" 2>/dev/null) || old_db_app_pwd=""
+        old_backup_key=$(read_env_var "BACKUP_ENCRYPTION_KEY" ".env" 2>/dev/null) || old_backup_key=""
     fi
 
-    # Redis 密码(P1-4 安全修复:Redis 强制密码,随机生成)
-    local redis_pwd
-    redis_pwd=$(rand_hex 16)
-    info "已生成随机 Redis 密码"
+    # MySQL 密码:已有则复用(与数据卷绑定),否则询问/随机生成
+    local mysql_pwd="$old_mysql_pwd"
+    if [[ -n "$mysql_pwd" ]]; then
+        info "已复用现有 MySQL root 密码(与数据卷保持一致)"
+    else
+        ask "MySQL 数据库密码(留空=自动生成随机密码)"
+        read -r mysql_pwd
+        if [[ -z "$mysql_pwd" ]]; then
+            mysql_pwd=$(rand_hex 16)
+            info "已生成随机 MySQL 密码"
+        elif [[ ${#mysql_pwd} -lt 8 ]]; then
+            warn "密码不足 8 位,改为自动生成"
+            mysql_pwd=$(rand_hex 16)
+        fi
+    fi
 
-    # JWT 密钥(随机生成)
-    local jwt_secret
-    jwt_secret=$(rand_hex 32)
+    # Redis 密码(P1-4 安全修复:Redis 强制密码,随机生成;已有则复用)
+    local redis_pwd="$old_redis_pwd"
+    if [[ -n "$redis_pwd" ]]; then
+        info "已复用现有 Redis 密码"
+    else
+        redis_pwd=$(rand_hex 16)
+        info "已生成随机 Redis 密码"
+    fi
 
-    # MySQL 应用专用用户(P1-3:最小权限,仅 DML,随机生成)
-    local db_app_user="canteen_app"
-    local db_app_pwd
-    db_app_pwd=$(rand_hex 16)
-    info "已创建 MySQL 应用专用用户: ${db_app_user}(仅 DML 权限)"
+    # JWT 密钥(已有则复用,否则随机生成)
+    local jwt_secret="$old_jwt_secret"
+    if [[ -z "$jwt_secret" ]]; then
+        jwt_secret=$(rand_hex 32)
+    fi
 
-    # 备份加密密钥(P1-1:备份 AES-256 加密,随机生成)
-    local backup_key
-    backup_key=$(rand_hex 32)
+    # MySQL 应用专用用户(P1-3:最小权限,仅 DML;已有则复用)
+    local db_app_user="${old_db_app_user:-canteen_app}"
+    local db_app_pwd="$old_db_app_pwd"
+    if [[ -n "$db_app_pwd" ]]; then
+        info "已复用 MySQL 应用用户 ${db_app_user}(仅 DML 权限)"
+    else
+        db_app_pwd=$(rand_hex 16)
+        info "已创建 MySQL 应用专用用户: ${db_app_user}(仅 DML 权限)"
+    fi
+
+    # 备份加密密钥(P1-1:备份 AES-256 加密,随机生成;已有则复用)
+    local backup_key="$old_backup_key"
+    if [[ -z "$backup_key" ]]; then
+        backup_key=$(rand_hex 32)
+    fi
 
     # P1-5 容器降权:检测宿主机运行用户 UID/GID,容器以此 UID 运行(非 root)
     # 默认 1000(Ubuntu/Debian 第一个普通用户),sudo 运行时取 SUDO_USER 的实际 UID/GID
@@ -715,13 +763,8 @@ configure_env() {
     warn "请妥善保管 .env 文件,包含敏感信息!"
 
     # sudo 部署时,.env 会被创建为 root 所有,后续 canteen 用户无法写入
-    # 立即 chown 给实际用户,避免 canteen.sh 重置密码时权限失败
-    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
-        if ! chown "$SUDO_USER:$SUDO_USER" .env 2>/dev/null; then
-            warn "无法将 .env 所有权转给 $SUDO_USER,请手动执行: sudo chown $SUDO_USER:$SUDO_USER .env"
-            warn "否则普通用户运行 canteen 时可能无法读写 .env"
-        fi
-    fi
+    # 立即 chown 给实际运维用户(SUDO_USER 或 canteen),避免 canteen.sh 重置密码时权限失败
+    chown_env_to_operator ".env"
 }
 
 # 确认是否覆盖已有 .env
@@ -1157,10 +1200,11 @@ cmd_deploy() {
     fix_ownership
     fix_permissions
 
-    # .env 由 configure_env 在 sudo 权限下创建(归 root),必须 chown 给 SUDO_USER
-    # 否则普通用户运行 docker compose 会报 "open .env: permission denied"
-    if [[ -f "$PROJECT_DIR/.env" ]] && [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
-        chown "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR/.env" 2>/dev/null || true
+    # .env 由 configure_env 在 sudo 权限下创建(归 root)。
+    # 统一交给运维用户(SUDO_USER 或 canteen),否则普通用户 docker compose /
+    # canteen 升级会报 "open .env: permission denied"。
+    if [[ -f "$PROJECT_DIR/.env" ]]; then
+        chown_env_to_operator "$PROJECT_DIR/.env"
     fi
 
     # P2-7:确保 .env 权限为 600(仅属主可读写)
