@@ -2,9 +2,11 @@
 #==============================================================
 # 企业智慧食堂系统 - 一键安装脚本(install.sh)
 #==============================================================
-# 用法(在任意全新服务器上执行一行命令即可完成部署):
+# 用法(在任意全新服务器上执行,多加速器自动切换):
 #
-#   curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
+#   for p in https://gh-proxy.com/https/ https://ghfast.top/https/ https://mirror.ghproxy.com/https/ https://; do
+#     curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+#   done && sudo bash /tmp/canteen-install.sh
 #
 # 或指定安装目录:
 #
@@ -46,10 +48,40 @@ fi
 #==============================================================
 # 配置
 #==============================================================
-REPO_URL="https://github.com/MingTu01/canteen.git"
+# GitHub 加速器列表(国内服务器直连 GitHub 会超时,必须走加速器)
+GITHUB_PROXIES=(
+    "https://api.gitproxy.dev/https://github.com/"
+    "https://gh-proxy.com/https://github.com/"
+    "https://ghfast.top/https://github.com/"
+)
 BRANCH="deploy"
 DEFAULT_INSTALL_DIR="/opt/canteen"
 INSTALL_DIR="${1:-$DEFAULT_INSTALL_DIR}"
+
+# 为项目配置 GitHub 加速器(git url.insteadOf 重写)
+# 自动探测可用的加速器,逐个尝试 ls-remote,成功后固定使用
+setup_git_proxy() {
+    local dir="${1:-$INSTALL_DIR}"
+
+    # 先清除旧的 insteadOf 配置
+    for p in "${GITHUB_PROXIES[@]}"; do
+        git -C "$dir" config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
+        sudo -u "$REAL_USER" git -C "$dir" config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
+    done
+
+    # 逐个尝试加速器
+    for proxy in "${GITHUB_PROXIES[@]}"; do
+        sudo -u "$REAL_USER" git -C "$dir" config "url.${proxy}.insteadOf" "https://github.com/" 2>/dev/null
+        if sudo -u "$REAL_USER" git -C "$dir" ls-remote "https://github.com/MingTu01/canteen.git" HEAD 2>/dev/null | head -1 | grep -q '.'; then
+            info "GitHub 加速器: $(echo "$proxy" | sed 's|/https://github.com/||')"
+            return 0
+        fi
+        sudo -u "$REAL_USER" git -C "$dir" config --unset-all "url.${proxy}.insteadOf" 2>/dev/null || true
+    done
+
+    warn "所有 GitHub 加速器均不可用,尝试直连..."
+    return 1
+}
 
 #==============================================================
 # 1. root 权限检查
@@ -129,6 +161,8 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
     cd "$INSTALL_DIR"
     # 修正 git safe.directory(避免 dubious ownership 错误)
     sudo -u "$REAL_USER" git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+    # 配置 GitHub 加速器(国内服务器必须走代理)
+    setup_git_proxy "$INSTALL_DIR"
     sudo -u "$REAL_USER" git fetch origin "$BRANCH" 2>/dev/null || git fetch origin 2>/dev/null || true
     sudo -u "$REAL_USER" git checkout "$BRANCH" 2>/dev/null || true
     sudo -u "$REAL_USER" git pull origin "$BRANCH" 2>/dev/null || git pull origin 2>/dev/null || true
@@ -139,9 +173,13 @@ else
     # 将安装目录所有权交给实际用户,再以其身份克隆(避免文件归 root 所有)
     if [[ "$REAL_USER" != "root" ]]; then
         chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
-        sudo -u "$REAL_USER" git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
+    fi
+    # 配置 GitHub 加速器(在临时空目录中设置全局 insteadOf,影响后续 clone)
+    setup_git_proxy "$INSTALL_DIR"
+    if [[ "$REAL_USER" != "root" ]]; then
+        sudo -u "$REAL_USER" git clone --branch "$BRANCH" --single-branch "https://github.com/MingTu01/canteen.git" "$INSTALL_DIR"
     else
-        git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
+        git clone --branch "$BRANCH" --single-branch "https://github.com/MingTu01/canteen.git" "$INSTALL_DIR"
     fi
     cd "$INSTALL_DIR"
 fi
@@ -160,6 +198,7 @@ if [[ ! -f "deploy/backend/app.jar" ]]; then
         case "$choice" in
             2)
                 info "切换到 main 分支..."
+                setup_git_proxy "$INSTALL_DIR"
                 sudo -u "$REAL_USER" git fetch origin main 2>/dev/null || true
                 sudo -u "$REAL_USER" git checkout main 2>/dev/null || true
                 sudo -u "$REAL_USER" git pull origin main 2>/dev/null || true

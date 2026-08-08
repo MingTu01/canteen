@@ -72,6 +72,40 @@ warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
 error() { echo -e "${RED}[错误]${NC} $1"; }
 step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
 
+# GitHub 加速器列表(国内服务器直连 GitHub 会超时,必须走加速器)
+# 按优先级排列:api.gitproxy.dev 稳定性最佳(已在 clean-redeploy.sh 验证)
+GITHUB_PROXIES=(
+    "https://api.gitproxy.dev/https://github.com/"
+    "https://gh-proxy.com/https://github.com/"
+    "https://ghfast.top/https://github.com/"
+)
+
+# 为项目配置 GitHub 加速器(git url.insteadOf 重写)
+# 自动探测可用的加速器,逐个尝试 ls-remote,成功后固定使用
+setup_git_proxy() {
+    local dir="${1:-$PROJECT_DIR}"
+    [[ -d "$dir/.git" ]] || return 1
+
+    # 先清除旧的 insteadOf 配置(避免残留无效代理)
+    for p in "${GITHUB_PROXIES[@]}"; do
+        git -C "$dir" config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
+    done
+
+    # 逐个尝试加速器,ls-remote 成功即固定使用
+    for proxy in "${GITHUB_PROXIES[@]}"; do
+        git -C "$dir" config "url.${proxy}.insteadOf" "https://github.com/" 2>/dev/null
+        if git -C "$dir" ls-remote origin HEAD 2>/dev/null | head -1 | grep -q '.'; then
+            info "GitHub 加速器: $(echo "$proxy" | sed 's|/https://github.com/||')"
+            return 0
+        fi
+        git -C "$dir" config --unset-all "url.${proxy}.insteadOf" 2>/dev/null || true
+    done
+
+    # 所有加速器都失败,尝试直连(最后手段)
+    warn "所有 GitHub 加速器均不可用,尝试直连..."
+    return 1
+}
+
 # 安全读取 .env 变量(不执行 source,避免密码含 $/空格/#/反引号 时 shell 展开导致值篡改)
 read_env_var() {
     local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
@@ -423,6 +457,8 @@ show_version_diff() {
     local remote_commit="" remote_be="" remote_hw="" remote_h5=""
     if [ -d "$PROJECT_DIR/.git" ]; then
         info "检查远程仓库最新版本(分支: ${TRACK_BRANCH})..."
+        # 配置 GitHub 加速器
+        setup_git_proxy "$PROJECT_DIR"
         # 获取远程跟踪分支最新 commit(不修改本地代码)
         remote_commit=$(git -C "$PROJECT_DIR" ls-remote origin "$TRACK_BRANCH" 2>/dev/null | awk '{print $1}' | cut -c1-12)
 
@@ -723,24 +759,45 @@ main() {
         step "步骤 2/${total_steps} 拉取最新代码"
     fi
     if [ -d "$PROJECT_DIR/.git" ]; then
+        # 配置 GitHub 加速器(国内服务器必须走代理,否则 git pull 超时)
+        setup_git_proxy "$PROJECT_DIR"
         info "执行 git pull (分支: ${CURRENT_BRANCH})..."
         # 显式指定远程和分支,避免 detached HEAD 时 pull 失败
-        if git -C "$PROJECT_DIR" pull origin "$CURRENT_BRANCH" 2>/dev/null; then
+        # 不用 2>/dev/null,捕获 stderr 以便诊断真实失败原因
+        local pull_err
+        if pull_err=$(git -C "$PROJECT_DIR" pull origin "$CURRENT_BRANCH" 2>&1); then
             info "已更新"
         else
-            # git pull 失败不回退(可能是网络问题),但提醒用户
-            warn "git pull 失败(可能是网络问题或冲突)"
+            # 显示真实错误信息(之前被 2>/dev/null 吞掉,无法诊断)
+            warn "git pull 失败,错误信息:"
+            echo "$pull_err" | sed 's/^/    /'
+            # 兜底:deploy 分支是 CI 强制推送的 orphan 分支,用 fetch+reset 更可靠
+            # (pull 需要合并,fetch+reset 直接对齐远程,绕过合并/冲突问题)
             if [ "$NO_BUILD" = "true" ]; then
-                warn "将使用当前产物继续。如需更新请手动 git pull origin deploy"
+                info "尝试 fetch + reset 兜底(deploy 分支强制推送场景)..."
+                if git -C "$PROJECT_DIR" fetch origin "$CURRENT_BRANCH" 2>&1 | sed 's/^/    /' && \
+                   git -C "$PROJECT_DIR" reset --hard "origin/${CURRENT_BRANCH}" 2>&1 | sed 's/^/    /'; then
+                    info "fetch + reset 成功,已对齐远程"
+                else
+                    warn "fetch + reset 也失败(加速器可能不可用或网络中断)"
+                    warn "将使用当前产物继续。如需更新请手动执行:"
+                    warn "  git fetch origin deploy && git reset --hard origin/deploy"
+                    read -p "$(echo -e "${CYAN}[?]${NC} 是否继续? [y/N]: ")" cont
+                    [ "$cont" != "y" ] && [ "$cont" != "Y" ] && {
+                        info "已取消升级"
+                        info "快照 $snap_id 已保留,可手动清理"
+                        exit 0
+                    }
+                fi
             else
                 warn "将使用当前代码继续构建。如需更新代码请手动 git pull"
+                read -p "$(echo -e "${CYAN}[?]${NC} 是否继续? [y/N]: ")" cont
+                [ "$cont" != "y" ] && [ "$cont" != "Y" ] && {
+                    info "已取消升级"
+                    info "快照 $snap_id 已保留,可手动清理"
+                    exit 0
+                }
             fi
-            read -p "$(echo -e "${CYAN}[?]${NC} 是否继续? [y/N]: ")" cont
-            [ "$cont" != "y" ] && [ "$cont" != "Y" ] && {
-                info "已取消升级"
-                info "快照 $snap_id 已保留,可手动清理"
-                exit 0
-            }
         fi
     else
         info "非 Git 项目,跳过拉取"
