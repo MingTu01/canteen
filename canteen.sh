@@ -595,7 +595,16 @@ menu_reset_admin() {
     info "清理临时配置..."
     local tmp
     tmp=$(mktemp)
-    if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [ -s "$tmp" ]; then
+    # 用 awk 状态机清理:密码值可能跨多行,grep -v 只删第一行会残留脏数据
+    awk '
+        BEGIN { skip = 0 }
+        /^[A-Za-z_][A-Za-z0-9_]*=/ { skip = 0 }
+        /^INIT_ADMIN_PASSWORD=/ { skip = 1; next }
+        /^INIT_ADMIN_FORCE=/ { next }
+        skip == 1 { next }
+        { print }
+    ' "$envfile" > "$tmp" 2>/dev/null
+    if [ -s "$tmp" ]; then
         cp "$envfile" "${envfile}.bak" 2>/dev/null
         chmod 600 "${envfile}.bak" 2>/dev/null || true
         mv "$tmp" "$envfile"
