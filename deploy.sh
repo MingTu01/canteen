@@ -371,18 +371,28 @@ configure_docker_mirror() {
 
     local daemon_json="/etc/docker/daemon.json"
 
-    if [[ -f "$daemon_json" ]] && grep -q "registry-mirrors" "$daemon_json"; then
+    # 检测是否已有镜像加速器配置(用 sudo cat 兼容非 root 运行场景)
+    local has_mirror=false
+    if [[ -f "$daemon_json" ]]; then
+        if sudo cat "$daemon_json" 2>/dev/null | grep -q "registry-mirrors"; then
+            has_mirror=true
+        fi
+    fi
+
+    if [[ "$has_mirror" == "true" ]]; then
         info "检测到已有镜像加速器配置"
         ask "是否替换为推荐配置? [y/N]"
         read -r ans
         [[ "$ans" != "y" && "$ans" != "Y" ]] && { info "保留现有配置"; return; }
+    else
+        info "未检测到镜像加速器配置,将写入推荐配置"
     fi
 
     info "写入国内 Docker 镜像加速器..."
-    mkdir -p /etc/docker
-    [[ -f "$daemon_json" ]] && [[ ! -f "${daemon_json}.bak" ]] && cp "$daemon_json" "${daemon_json}.bak"
+    sudo mkdir -p /etc/docker
+    [[ -f "$daemon_json" ]] && [[ ! -f "${daemon_json}.bak" ]] && sudo cp "$daemon_json" "${daemon_json}.bak"
 
-    cat > "$daemon_json" <<'EOF'
+    sudo tee "$daemon_json" > /dev/null <<'EOF'
 {
   "registry-mirrors": [
     "https://docker.1panel.live",
@@ -398,8 +408,8 @@ configure_docker_mirror() {
   }
 }
 EOF
-    systemctl daemon-reload
-    systemctl restart docker
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
     info "镜像加速器配置完成"
 }
 

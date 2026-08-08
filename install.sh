@@ -225,24 +225,21 @@ echo "    - 超级管理员账号密码设置"
 echo "    - 服务启动和验证"
 echo ""
 
-# 以实际用户身份运行 deploy.sh(通过 sudo -u 切换)
-# 保留环境变量(PUID/PGID 等),保留 stdin/stdout/stderr
-if [[ "$REAL_USER" != "root" ]] && [[ "$REAL_USER" != "$(whoami)" ]]; then
-    # 检查用户是否在 docker 组(如果 docker 已安装)
-    if command -v docker &>/dev/null; then
-        if ! id -nG "$REAL_USER" 2>/dev/null | grep -qw "docker"; then
-            info "将用户 ${REAL_USER} 加入 docker 组..."
-            usermod -aG docker "$REAL_USER" 2>/dev/null && \
-                warn "已加入 docker 组,需重新登录后生效" || true
-        fi
+# 检查用户是否在 docker 组(如果 docker 已安装)
+if command -v docker &>/dev/null; then
+    if [[ "$REAL_USER" != "root" ]] && ! id -nG "$REAL_USER" 2>/dev/null | grep -qw "docker"; then
+        info "将用户 ${REAL_USER} 加入 docker 组..."
+        usermod -aG docker "$REAL_USER" 2>/dev/null && \
+            warn "已加入 docker 组,需重新登录后生效" || true
     fi
-
-    info "以用户 ${REAL_USER} 身份运行 deploy.sh..."
-    # 用 sudo -u 保留 HOME 和 PATH,同时传入必要的环境变量
-    exec sudo -E -u "$REAL_USER" \
-        PUID="$REAL_UID" PGID="$REAL_GID" \
-        SUDO_USER="$SUDO_USER" \
-        bash "$INSTALL_DIR/deploy.sh" --from-install
-else
-    exec bash "$INSTALL_DIR/deploy.sh" --from-install
 fi
+
+# 以 root 运行 deploy.sh(需要 root 权限来写 /etc/docker/daemon.json、
+# systemctl restart docker、安装 Docker、配置 systemd 等)
+# deploy.sh 通过 SUDO_USER 知道实际运维用户,fix_all_permissions 会把
+# 项目文件所有权修正给该用户
+info "启动部署向导..."
+export SUDO_USER="${SUDO_USER:-$REAL_USER}"
+export PUID="$REAL_UID"
+export PGID="$REAL_GID"
+exec bash "$INSTALL_DIR/deploy.sh" --from-install
