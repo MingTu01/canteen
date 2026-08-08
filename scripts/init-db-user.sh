@@ -71,6 +71,12 @@ if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
     exit 1
 fi
 
+# 转义用户名/密码中的单引号,防止 SQL 注入(密码可能含单引号)
+# 注意:必须在构造 SQL 前定义,否则 ${ESCAPED_USER}/${ESCAPED_PASS} 为空,
+# 会误创建 ''@'%' 空用户,导致 canteen_app 实际未创建、后端连接失败。
+ESCAPED_USER="${DB_APP_USERNAME//\'/\'\'}"
+ESCAPED_PASS="${DB_APP_PASSWORD//\'/\'\'}"
+
 info "创建应用数据库用户: ${DB_APP_USERNAME}@% (数据库: ${MYSQL_DATABASE})"
 
 # 创建应用用户并授予 DML 权限(必须成功,不忽略错误)
