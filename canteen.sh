@@ -498,6 +498,11 @@ menu_reset_admin() {
             read -r -p "$(echo -e "${CYAN}[?]${NC} 新密码(可见输入): ")" pwd1 || pwd1=""
         fi
         echo ""
+        # 禁止双引号和反斜杠:Docker Compose dotenv 不认 \" 转义
+        if [[ "$pwd1" == *'"'* ]] || [[ "$pwd1" == *'\\'* ]]; then
+            warn "密码不能包含双引号(\")或反斜杠(\\),请更换密码"
+            continue
+        fi
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
         if [[ -z "$pwd2" ]]; then
             read -r -p "$(echo -e "${CYAN}[?]${NC} 确认密码(可见输入): ")" pwd2 || pwd2=""

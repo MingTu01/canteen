@@ -278,6 +278,12 @@ read_password() {
             warn "未捕获到密码输入(第 ${attempt}/3 次)"
             continue
         fi
+        # 禁止双引号和反斜杠:Docker Compose dotenv 解析器不认 \" 转义,
+        # 密码含 " 会导致整个 .env 解析失败,所有 docker compose 命令全挂
+        if [[ "$pwd1" == *'"'* ]] || [[ "$pwd1" == *'\\'* ]]; then
+            warn "密码不能包含双引号(\")或反斜杠(\\),请更换密码"
+            continue
+        fi
         pwd2=""
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
         if [[ -z "$pwd2" ]]; then
@@ -786,15 +792,25 @@ cleanup_sensitive_env() {
 
     info "清理 .env 中的临时敏感变量..."
     local tmp; tmp=$(mktemp)
+    # 删除以 INIT_ADMIN_PASSWORD= 或 INIT_ADMIN_FORCE= 开头的行
+    # 同时删除任何残留的、不以合法 KEY= 开头的脏行(防止 .env 写坏后残留)
     if grep -v "^INIT_ADMIN_FORCE=" "$envfile" 2>/dev/null \
         | grep -v "^INIT_ADMIN_PASSWORD=" > "$tmp" && [[ -s "$tmp" ]]; then
         cp "$envfile" "${envfile}.bak" 2>/dev/null
         mv "$tmp" "$envfile"
         chmod 600 "$envfile"
+        # chown 给运维用户
+        local chown_user=""
+        if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+            chown_user="$SUDO_USER"
+        elif [[ "$OPERATOR" != "root" ]] && [[ "$(whoami)" == "root" ]]; then
+            chown_user="$OPERATOR"
+        fi
+        [[ -n "$chown_user" ]] && chown "$chown_user:$chown_user" "$envfile" 2>/dev/null || true
         info "已清理 INIT_ADMIN_PASSWORD 和 INIT_ADMIN_FORCE"
     else
         rm -f "$tmp"
-        warn "清理 .env 失败,请手动删除 INIT_ADMIN_PASSWORD"
+        warn "清理 .env 失败,请手动删除 INIT_ADMIN_PASSWORD 行"
     fi
 }
 
@@ -892,10 +908,11 @@ cmd_deploy() {
     if [[ -n "$admin_user" ]] && verify_admin_initialized "$admin_user"; then
         cleanup_sensitive_env
     else
-        warn "未能确认超管已初始化,保留 .env 中的 INIT_ADMIN_PASSWORD"
+        warn "未能确认超管已初始化,但仍清理 .env 中的临时密码(避免明文残留)"
         warn "请排查后端日志: docker compose logs --tail=100 backend"
         warn "后端就绪后执行: docker compose up -d --no-deps backend"
         warn "或运行 canteen -> 重置管理员密码"
+        cleanup_sensitive_env
     fi
 
     verify_and_summary
