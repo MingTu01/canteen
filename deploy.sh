@@ -353,26 +353,36 @@ cmd_reset_admin() {
 
 #==============================================================
 # 设置 .env 变量(若不存在则追加,存在则更新)
-# 用单引号包裹值,避免 $/空格/#/反引号 等 shell 特殊字符在 source 时被展开
+# 用双引号包裹值(escape_env_value 已做 Compose 兼容转义),避免 $/空格/#/反引号等被 shell 展开,
+# 也保证含单引号的密码能被 Docker Compose 的 dotenv 解析器正确读取。
 # 用 awk + ENVIRON 传递值,彻底避免 sed 对 | & / \ 等特殊字符的转义问题
 #==============================================================
-# 转义值中的单引号(单引号包裹的值中,单引号用 '\'' 转义)
+# 转义值,使其在 .env 的双引号包裹下能被 Docker Compose 正确解析。
+# Docker Compose 的 dotenv 解析规则:
+#   - 单引号值:全部字面量,无任何转义,值内不能出现单引号 → 不能用单引号包裹含单引号的密码。
+#   - 双引号值:支持转义,`\` 可转义 `\`、`"`、`$`、反引号;且 `$` 会触发变量插值。
+# 因此统一用双引号包裹,并转义 `\`、`"`、`$`、反引号,确保含单引号/特殊字符的密码可被解析。
+# 注意:必须先转义 `\`,再转义 `"`/`$`/反引号,顺序不能反。
 escape_env_value() {
     local v="$1"
-    v="${v//\'/\'\\\'\'}"
+    v="${v//\\/\\\\}"   # \ -> \\
+    v="${v//\"/\\\"}"   # " -> \"
+    v="${v//\$/\\\$}"   # $ -> \$(防止 Compose 插值)
+    v="${v//\`/\\\`}"   # ` -> \`
     printf '%s' "$v"
 }
 
-# 安全写入 .env 一行:KEY='value'(单引号包裹,值中的单引号已由 escape_env_value 处理)
+# 安全写入 .env 一行:KEY="value"(双引号包裹,值已由 escape_env_value 做 Compose 兼容转义)
 # 关键修复:用 printf %s 写入,绝不做 shell 展开。
-# 原因:不能用未加引号的 heredoc(cat <<EOF)写用户输入的密码——
-# heredoc 会对值做参数/命令展开,密码若含 $xxx 会被展开成空,导致
-# INIT_ADMIN_PASSWORD 被静默写成空值,AdminInitializer 跳过创建超管、无法登录。
+# 原因:①不能用未加引号的 heredoc(cat <<EOF)写用户输入的密码——heredoc 会对值做参数/命令展开,
+# 密码若含 $xxx 会被展开成空,导致 INIT_ADMIN_PASSWORD 被静默写成空值,AdminInitializer 跳过创建超管、无法登录。
 # 这正是 canteen 重置(用 set_env_var 的 awk 方式、不展开)能成功、而 deploy 失败的原因。
+# ②不能用单引号包裹 + shell 的 '\'' 转义——那是 shell 的转义规则,Docker Compose dotenv 不认,
+# 密码含单引号时(如 qweasd2864..')会报 "unexpected character "'"",导致整个 .env 无法被 Compose 读取。
 write_env_line() {
     local key="$1" value="$2"
     if [[ -n "$value" ]]; then
-        printf "%s='%s'\n" "$key" "$value"
+        printf "%s=\"%s\"\n" "$key" "$value"
     else
         printf "%s=\n" "$key"
     fi
@@ -386,10 +396,10 @@ set_env_var() {
     # 确保 .env 存在
     touch "$envfile"
 
-    # 用单引号包裹值,避免特殊字符在 source/读取时被 shell 展开
+    # 用双引号包裹值,避免特殊字符在 source/读取时被 shell 展开,且兼容 Compose dotenv 解析
     local escaped_value
     escaped_value=$(escape_env_value "$value")
-    local new_line="${key}='${escaped_value}'"
+    local new_line="${key}=\"${escaped_value}\""
 
     if grep -q "^${key}=" "$envfile" 2>/dev/null; then
         # 更新已有行:匹配以 key= 开头的行,整行替换为 key='value'
@@ -424,11 +434,20 @@ read_env_var() {
         [[ -z "${line// }" ]] && continue
         if [[ "$line" =~ ^${key}= ]]; then
             value="${line#*=}"
-            # 去除外层引号(单引号或双引号)
+            local quoted=""
+            # 去除外层引号(单引号或双引号),双引号需再反转义
             if [[ "$value" =~ ^\'.*\'$ ]]; then
                 value="${value:1:-1}"
             elif [[ "$value" =~ ^\".*\"$ ]]; then
                 value="${value:1:-1}"
+                quoted="double"
+            fi
+            # 双引号包裹的值:反转义 \\  \"  \$  \`(与 escape_env_value 对应)
+            if [[ "$quoted" == "double" ]]; then
+                value="${value//\\\\/\\}"   # \\  -> \
+                value="${value//\\\"/\"}"   # \"  -> "
+                value="${value//\\\$/\$}"   # \$  -> $(去掉转义反斜杠,保留字面 $)
+                value="${value//\\\`/\`}"   # \`  -> `
             fi
             # 去除行尾 Windows 换行符残留(\r)
             # 原因:.env 若在 Windows 上创建/编辑,行尾会带 \r,read 不会剥离,
@@ -635,8 +654,8 @@ configure_env() {
         return 1
     fi
 
-    # 转义所有用户输入值中的单引号(用于 .env 单引号包裹)
-    # 单引号包裹的值中,单引号用 '\'' 转义,避免 $/空格/#/反引号 等在 source 时被 shell 展开
+    # 转义所有用户输入值(用于 .env 双引号包裹,兼容 Docker Compose dotenv 解析)
+    # 双引号包裹的值中,`\` 转义 `\`、`"`、`$`、反引号,可保留含单引号/特殊字符的密码
     local e_mysql_pwd e_db_app_user e_db_app_pwd e_redis_pwd e_jwt_secret e_backup_key e_admin_user e_admin_pwd
     e_mysql_pwd=$(escape_env_value "$mysql_pwd")
     e_db_app_user=$(escape_env_value "$db_app_user")
@@ -647,10 +666,12 @@ configure_env() {
     e_admin_user=$(escape_env_value "$admin_user")
     e_admin_pwd=$(escape_env_value "$admin_pwd")
 
-    # 写入 .env(所有用户输入值用单引号包裹,固定数字/布尔值无需引号)
+    # 写入 .env(所有用户输入值用双引号包裹并做 Compose 兼容转义,固定数字/布尔值无需引号)
     # 链路修复:改用 write_env_line/printf 逐行写入,不再用未加引号的 heredoc。
-    # 原因:heredoc 会对值做 shell 展开,用户密码若含 $xxx/反引号/反斜杠会被展开成空或截断,
+    # 原因:①heredoc 会对值做 shell 展开,用户密码若含 $xxx/反引号/反斜杠会被展开成空或截断,
     # 导致 INIT_ADMIN_PASSWORD 静默变空、AdminInitializer 跳过建超管、无法登录。
+    # ②必须用双引号而非单引号包裹——单引号包裹 + shell '\'' 转义不被 Docker Compose dotenv 解析,
+    # 密码含单引号时(如 qweasd2864..')会报 unexpected character,整个 .env 无法被 Compose 读取。
     # 与 cmd_reset_admin 的 set_env_var(awk 不展开)行为保持一致。
     {
         echo "# MySQL 数据库密码"
