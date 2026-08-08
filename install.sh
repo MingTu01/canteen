@@ -134,10 +134,11 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
     sudo -u "$REAL_USER" git pull origin "$BRANCH" 2>/dev/null || git pull origin 2>/dev/null || true
 else
     info "克隆仓库到 ${INSTALL_DIR} ..."
-    mkdir -p "$(dirname "$INSTALL_DIR")"
-
-    # 以实际用户身份克隆(避免文件归 root 所有)
+    # 先以 root 创建安装目录(父目录如 /opt 通常归 root 所有,普通用户无权创建)
+    mkdir -p "$INSTALL_DIR"
+    # 将安装目录所有权交给实际用户,再以其身份克隆(避免文件归 root 所有)
     if [[ "$REAL_USER" != "root" ]]; then
+        chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
         sudo -u "$REAL_USER" git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
     else
         git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
