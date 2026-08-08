@@ -1,24 +1,20 @@
 # 企业智慧食堂预定餐系统
 
-> 版本：V1.0 ｜ 更新日期：2026-08-01
+> 版本：V0.7.0 ｜ 更新日期：2026-08-08
 
 集团级企业智慧食堂预定餐系统，支持多门店数据隔离、多端适配（管理后台、H5 订餐端、X86 终端），采用企业级架构标准。
 
 ## 快速部署（生产环境）
 
-```bash
-# 国内推荐使用 GitHub 加速器克隆（任选其一）
-git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
-cd /opt/canteen
+一行命令完成部署（自动安装 git、克隆代码、配置权限、引导设置超管账号密码）：
 
-# 一键部署（自动安装 Docker + 国内源 + 构建 + 启动）
-chmod +x deploy.sh
-sudo ./deploy.sh
+```bash
+curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
 ```
 
-部署完成后访问 `http://服务器IP`，默认账号 `admin / 123456`。
+部署向导会引导你设置超管账号密码（至少 8 位），完成后访问 `http://服务器IP:18080`（管理后台）/ `:18081`（H5 订餐端）。
 
-> 详细部署与更新流程见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+> 详细部署与更新流程见 [DEPLOY.md](DEPLOY.md)。
 
 ## 技术栈
 
@@ -65,14 +61,17 @@ canteen/
 ├── src-python/                 # X86 终端桌面壳 (Python + PyQt5)
 ├── scripts/                    # 运维脚本
 │   ├── build.sh                # 构建产物脚本（Docker 容器中构建）
-│   ├── update.sh               # 更新脚本（pull + build + restart）
+│   ├── upgrade.sh              # 安全升级（分支感知，含快照+自动回退）
+│   ├── update.sh               # 快速更新（无备份，仅 main 分支开发用）
 │   ├── backup.sh               # 数据库备份
 │   ├── restore.sh              # 数据库恢复
 │   └── cron_backup.sh          # 定时备份入口
 ├── docs/                       # 需求文档（各端完整说明）
 ├── docker-compose.yml          # Docker 编排（卷映射模式，更新无需重建镜像）
-├── deploy.sh                   # 一键部署（含 Docker 安装 + 国内源）
-├── DEPLOYMENT.md               # 部署方案与更新流程
+├── install.sh                  # 一键安装脚本（GitHub 一行命令部署入口）
+├── deploy.sh                   # 部署 CLI（含 Docker 安装 + 国内源 + 权限修正）
+├── canteen.sh                  # 服务器管理面板（输入 canteen 打开）
+├── DEPLOY.md                   # 部署运维指南
 ├── .env.example                # 环境变量模板
 └── .gitignore
 ```
@@ -94,37 +93,31 @@ canteen/
 ### 一键部署（生产环境）
 
 ```bash
-# 1. 克隆项目（国内使用 GitHub 加速器）
-git clone https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
-cd /opt/canteen
-
-# 2. 一键部署（自动安装 Docker + 配置国内源 + 构建 + 启动）
-chmod +x deploy.sh
-sudo ./deploy.sh
+# 一行命令完成部署（自动安装 git、克隆代码、配置权限、引导设置超管账号密码）
+curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
 ```
 
-部署脚本会自动完成：Docker 安装 → 镜像加速器配置 → 环境变量生成 → 构建产物 → 启动服务 → 健康检查。
+部署脚本会自动完成：环境检查 → git 安装 → 克隆 deploy 分支（含 CI 预构建产物）→ 权限修正 → Docker 安装 → 环境变量生成 → 启动服务 → 健康检查。
 
-> 已安装 Docker 的服务器可使用 `./deploy.sh --skip-env` 跳过环境安装。
+> 国内服务器若 GitHub raw 访问慢，可先手动 clone 再运行 install.sh。详见 [DEPLOY.md](DEPLOY.md)。
 
-### 更新服务（不重建镜像）
+### 更新服务（安全升级，含快照+自动回退）
 
 ```bash
 cd /opt/canteen
 
-# 更新全部
-./scripts/update.sh
+# 交互式菜单（推荐）
+canteen          # 菜单 → 1) 升级全部
 
-# 仅更新后端
-./scripts/update.sh backend
-
-# 仅更新前端
-./scripts/update.sh admin-web    # 或 h5
+# 或命令行直接升级
+canteen upgrade all          # 升级全部（后端+前端）
+canteen upgrade backend      # 仅升级后端
+canteen upgrade frontend     # 仅升级前端（admin-web + h5）
 ```
 
-更新脚本自动完成：`git pull` → 在 Docker 容器中构建产物 → 重启对应服务。**全程不涉及镜像重建**。
+升级脚本自动完成：创建快照 → git pull → docker compose up -d → 健康检查（失败自动回退）→ 清理旧快照。
 
-> X86 终端不在 Docker 中部署,需在 Windows 上运行 `src-python/build_installer.py` 打包为 EXE 安装包,详见 [DEPLOYMENT.md](DEPLOYMENT.md) 第十章。
+> X86 终端不在 Docker 中部署，需在 Windows 上运行 `src-python/build_installer.py` 打包为 EXE 安装包，详见 [DEPLOY.md](DEPLOY.md) 第八章。
 
 ### 本机开发（恢复测试数据）
 
@@ -159,7 +152,7 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 
 ## 版本规范
 
-- 当前版本：**V0.0.8**（各模块版本号集中管理于 `VERSIONS.json`）
+- 当前版本：**V0.7.0**（各模块版本号集中管理于 `VERSIONS.json`）
 - 版本号统一管理：`MAJOR.MINOR.PATCH`（语义化版本）
 - 版本号文件（修改时必须同步更新）：
   - `backend/src/main/resources/version.json`
@@ -168,7 +161,7 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
   - `h5/package.json`
   - `terminal/package.json`
 
-详细版本管理与升级流程见 [DEPLOYMENT.md](file:///d:/文档/enterprise-canteen/enterprise-canteen/DEPLOYMENT.md)。
+详细版本管理与升级流程见 [DEPLOY.md](DEPLOY.md)。
 
 ## 多租户数据隔离
 
@@ -181,7 +174,7 @@ docker exec canteen-mysql mysql -uroot -p<pwd> canteen -e "source /tmp/seed-dev.
 
 终端使用 **Python + PyQt5 + QWebEngineView** 打包为正式 Windows EXE 安装包（`src-python/output/CanteenTerminal-Setup-1.0.0.exe`），**内置 CH375 读卡器驱动自动安装**，默认连接 `https://canteen.908521.xyz`，兼容 Win7/Win10/Win11 32/64 位。
 
-> X86 终端不参与 Docker 部署,需在 Windows 打包机上运行 `src-python/build_installer.py` 生成安装包。详细打包流程见 [DEPLOYMENT.md](DEPLOYMENT.md) 第十章。
+> X86 终端不参与 Docker 部署,需在 Windows 打包机上运行 `src-python/build_installer.py` 生成安装包。详细打包流程见 [DEPLOY.md](DEPLOY.md) 第八章。
 
 ### 一键打包
 

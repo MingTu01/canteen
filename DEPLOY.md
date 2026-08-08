@@ -14,32 +14,33 @@
 
 ---
 
-## 〇、分支架构说明（v0.0.3+）
+## 〇、分支架构说明（v0.7.0+）
 
 本仓库采用**双分支架构**，将源代码与部署产物分离：
 
 | 分支 | 用途 | 内容 | 谁使用 |
 |------|------|------|--------|
-| `main` | 源代码 | backend/admin-web/h5 源码 + 构建脚本 + publish.sh | 开发机 |
-| `deploy` | 部署产物（orphan 分支，独立历史） | 构建产物(jar/dist) + docker-compose.yml + 运行时脚本 | 服务器 |
+| `main` | 源代码 | backend/admin-web/h5 源码 + 构建脚本 | 开发机 |
+| `deploy` | 部署产物（orphan 分支，独立历史） | 构建产物(jar/dist) + docker-compose.yml + 运行时脚本 + install.sh | 服务器 |
 
 **核心优势：**
 - 服务器**无需安装 Maven / Node.js**，秒级更新（git pull + docker restart）
 - 杜绝服务器构建失败导致的升级回退（如 TypeScript 严格模式报错）
-- 源码与产物版本原子化绑定（一次 publish 同时推送）
+- 源码与产物版本原子化绑定（CI 一次构建同时推送）
+- **一行命令部署**：服务器执行 install.sh 即可完成全部部署
 
-**开发机发布流程（有 Maven/Node.js 环境）：**
+**CI 自动构建发布（推荐）：**
+
+推送 `main` 分支后，GitHub Actions 自动构建后端/管理后台/H5 产物，组装并推送到 `deploy` 分支（`.github/workflows/deploy.yml`）。CI 在 Linux runner 上设置脚本可执行位，彻底规避 Windows 不保留 +x 导致的权限问题。
 
 ```bash
 # 1. 在 main 分支修改代码并提交
 git add -A && git commit -m "feat: xxx"
 git push origin main
-
-# 2. 构建产物并发布到 deploy 分支
-./scripts/publish.sh all          # 全部(后端+前端)
-./scripts/publish.sh backend      # 仅后端
-./scripts/publish.sh frontend     # 仅前端
+# 2. GitHub Actions 自动构建并发布到 deploy 分支(无需手动操作)
 ```
+
+> CI 不可用时，仍可在开发机手动发布：`./scripts/publish.sh all`（需 Maven/Node.js 环境）。
 
 **服务器更新流程（deploy 分支，免构建）：**
 
@@ -57,51 +58,54 @@ canteen upgrade all
 
 ### 1.1 一键部署（推荐）
 
-> **避免权限问题的关键：** 用普通用户克隆，仅 Docker 安装和系统命令安装用 sudo。`deploy.sh` v0.0.5+ 已自动处理权限（chown 项目目录 + 加入 docker 组）。
+> **一行命令完成全部部署**：`install.sh` 自动检查环境、安装 git、克隆 deploy 分支（含 CI 预构建产物）、创建专用用户、修正权限，然后调用 `deploy.sh` 引导你设置超管账号密码。彻底解决权限和密码易出错的问题。
 
 ```bash
-# 1. 用普通用户登录(如 canteen / ubuntu),不要用 root
-# /opt 通常需要 root 创建,所以先 sudo mkdir 再 chown 给自己
-sudo mkdir -p /opt/canteen
-sudo chown -R $(whoami):$(whoami) /opt/canteen
+# 在任意全新服务器上执行一行命令(root 或 sudo):
+curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
 
-# 2. 用普通用户克隆 deploy 分支(不要 sudo clone!)
-git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
-cd /opt/canteen
-
-# 3. 赋予执行权限
-chmod +x deploy.sh scripts/*.sh canteen.sh
-
-# 4. 用 sudo 运行 deploy.sh(仅 Docker 安装和系统命令需要 sudo)
-sudo ./deploy.sh
-
-# 5. 重新登录让 docker 组生效(deploy.sh 会自动把你加入 docker 组)
-exit
-# 重新 SSH 登录后,验证:docker compose ps 应该不需要 sudo 就能运行
+# 或指定安装目录:
+sudo bash /tmp/canteen-install.sh /opt/my-canteen
 ```
 
-部署向导会交互式引导你完成以下步骤：
+`install.sh` 自动完成：
+1. **环境检查**：root 权限、基础依赖（curl/tar/gzip）、磁盘空间（≥2GB）
+2. **安装 git**：如缺失自动安装（apt-get/yum）
+3. **克隆仓库**：以实际用户身份克隆 deploy 分支（含 CI 预构建产物，无需编译）
+4. **创建专用用户**：root 直接运行时自动创建 `canteen` 用户
+5. **全面修正权限**：目录所有权、脚本 +x、git safe.directory、运行时目录、.env 600
+6. **调用 deploy.sh**：以实际用户身份启动部署向导（curl|bash 模式自动重定向 stdin）
+
+> **国内服务器加速**：若 GitHub raw 访问慢，可先手动 clone 再运行：
+> ```bash
+> git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
+> cd /opt/canteen && sudo bash install.sh
+> ```
+
+部署向导（deploy.sh）会交互式引导你完成以下步骤：
 
 1. **检测 Docker 环境**（已安装自动跳过，未安装则使用阿里云源安装）
    - 自动把当前用户加入 docker 组（避免后续 canteen 需要 sudo）
 2. **配置镜像加速器**（已有配置会询问是否替换 y/n，首次自动配置国内加速源）
 3. **配置环境变量**：
-   - MySQL 密码（留空则自动生成随机密码）
+   - MySQL 密码（自动生成随机高强度密码，重配时复用旧值不破坏已有数据库）
    - JWT 密钥（自动生成 64 位随机十六进制）
-   - **超管账号密码**（自定义设置，至少 8 位）
-   - 自动 chown `.env` 给当前用户
-4. **构建业务产物**（deploy 分支已含产物时自动跳过；main 分支则在 Docker 容器中构建 jar/dist）
-5. **构建运行时镜像**（首次需要，仅含 JRE+curl，不含业务代码；deploy 分支已含产物，无需构建）
-6. **启动服务**（Docker Compose 分阶段启动：MySQL→创建应用用户→backend→回收元数据权限）
-7. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
-8. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
-9. **部署验证**（健康检查 + 访问地址输出）
-   - 自动 chown 项目目录给当前用户（避免 dubious ownership）
+   - **超管账号密码**（自定义设置，至少 8 位；密码含特殊字符安全保留，不做 shell 展开）
+   - 自动 chown `.env` 给当前用户，权限 600
+4. **构建运行时镜像**（首次需要，仅含 JRE+curl，不含业务代码；deploy 分支已含产物，无需构建）
+5. **启动服务**（分阶段启动：MySQL+Redis 健康 → 创建应用用户 → backend+前端，消除竞态）
+6. **配置开机启动**（systemd service，服务器重启后自动恢复服务）
+7. **安装 canteen 命令**（自动安装到系统 PATH，无需单独操作）
+8. **部署验证**（健康检查 + 超管账号落库校验 + 访问地址输出）
+   - `fix_all_permissions` 统一修正权限（目录所有权/脚本+x/git safe.directory/.env 600/Docker组）
 
-> **重要：** 
-> - 必须克隆 `deploy` 分支（`-b deploy`），不要克隆 `main` 分支。`main` 分支只含源码，服务器构建会因缺少 Maven/Node.js 失败。
-> - 不要用 `sudo git clone`！会让整个项目目录归 root 所有。用普通用户克隆，仅 `sudo ./deploy.sh` 时用 sudo。
-> - 部署完成后必须**重新登录**让 docker 组生效，否则 `canteen` 命令仍需 sudo。
+> **权限与密码安全保障（v0.7.0+）：**
+> - `install.sh` 以实际用户身份克隆，避免文件归 root 所有；root 直接运行时自动创建专用用户 `canteen`
+> - `deploy.sh` 的 `fix_all_permissions` 统一处理所有权限问题（目录所有权/脚本+x/git safe.directory/运行时目录/.env 600/Docker组）
+> - 密码处理用 `escape_env_value` 转义特殊字符 + `write_env_line`/printf 逐行写入 .env（不做 shell 展开），密码含 `$`/单引号/反引号/反斜杠均原样保留
+> - `read_password` 有界 3 次重试 + 空值防护 + 非交互环境明确失败，杜绝静默写入空密码
+> - `verify_admin_initialized` 先校验超管落库、后清理 .env 中的 INIT_ADMIN_PASSWORD，未确认则保留提示
+> - 部署完成后**重新登录**让 docker 组生效，否则 `canteen` 命令仍需 sudo
 
 ### 1.2 ZIP 包部署（国内服务器推荐）
 
@@ -305,9 +309,9 @@ canteen
 ╔══════════════════════════════════════════════╗
 ║   企业智慧食堂系统 - 管理面板                 ║
 ╠══════════════════════════════════════════════╣
-║  系统版本: v0.0.8    状态: ● 全部运行中       ║
-║  后端: v0.0.7  管理后台: v0.0.3  H5: v0.0.2  ║
-║  终端: v1.0.0  分支: deploy                   ║
+║  系统版本: v0.7.0    状态: ● 全部运行中       ║
+║  后端: v0.0.16  管理后台: v0.0.16  H5: v0.0.14 ║
+║  终端: v1.0.4  分支: deploy                   ║
 ╠══════════════════════════════════════════════╣
 ║                                              ║
 ║  【升级】                                     ║
@@ -321,7 +325,7 @@ canteen
 ║   6) 查看快照列表                            ║
 ║                                              ║
 ║  【管理】                                     ║
-║   7) 查看服务状态                            ║
+║   7) 查看服务状态 (含容器资源使用+运行时间)   ║
 ║   8) 重置管理员密码                          ║
 ║   9) 查看日志                                ║
 ║  10) 重启服务                                ║
@@ -330,12 +334,16 @@ canteen
 ║  【系统】                                     ║
 ║  12) 修复 canteen 系统命令                   ║
 ║  13) 查看版本详情与更新日志                  ║
+║  14) 系统诊断 (OS/CPU/内存/磁盘/Docker/端口)  ║
+║  15) 清理 Docker 镜像 (释放磁盘空间)          ║
+║  16) 查看配置信息 (.env 关键配置脱敏展示)     ║
 ║                                              ║
 ║   0) 退出                                     ║
 ╚══════════════════════════════════════════════╝
 ```
 
 > 菜单顶部显示当前分支（`deploy` 或 `main` 或 `detached`），升级步骤会根据分支自动适配。
+> 每次操作前自动执行权限自愈（`self_heal_permissions`），检测并修复运行时目录/.env/脚本+x/git safe.directory/Docker组等常见权限问题。
 
 选择 `1`（升级全部）即可，升级脚本会自动完成安全升级全流程。
 
@@ -873,14 +881,18 @@ python build_installer.py
 
 ```
 enterprise-canteen/
+├── install.sh                 # 一键安装脚本（GitHub 一行命令部署入口）
 ├── canteen.sh                 # 服务器管理面板（输入 canteen 打开）
 ├── deploy.sh                  # 部署 CLI 入口
+├── pack_deploy_zip.py         # 打包 deploy 分支为 zip（离线部署用）
 ├── docker-compose.yml         # Docker 编排配置
 ├── VERSIONS.json              # 版本号集中管理
 ├── .env / .env.example        # 环境变量
+├── .github/workflows/
+│   └── deploy.yml            # GitHub Actions CI（自动构建并发布到 deploy 分支）
 ├── scripts/
 │   ├── build.sh              # 构建产物（Docker 容器内构建）
-│   ├── publish.sh            # 构建并发布到 deploy 分支（开发机用）
+│   ├── publish.sh            # 构建并发布到 deploy 分支（CI 不可用时手动用）
 │   ├── upgrade.sh            # 安全升级（分支感知：deploy免构建/main构建）
 │   ├── update.sh             # 快速更新（无备份，仅 main 分支开发用）
 │   ├── snapshot.sh           # 快照管理（创建/列出/恢复/清理）
@@ -905,6 +917,7 @@ enterprise-canteen/
 
 ```
 enterprise-canteen/            # 服务器 /opt/canteen
+├── install.sh                 # 一键安装脚本（curl 获取后运行）
 ├── canteen.sh                 # 服务器管理面板
 ├── deploy.sh                  # 部署 CLI 入口
 ├── docker-compose.yml         # Docker 编排配置

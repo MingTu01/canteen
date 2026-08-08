@@ -226,7 +226,11 @@ cp "$PROJECT_DIR/.env.example" .
 cp "$PROJECT_DIR/canteen.sh" .
 chmod +x canteen.sh
 
-# deploy.sh(一键部署 CLI,服务器克隆 deploy 分支后依赖它;pack_deploy_zip.py / push_deploy.py 均包含)
+# install.sh(一键安装脚本,GitHub 一行命令部署入口)
+cp "$PROJECT_DIR/install.sh" .
+chmod +x install.sh
+
+# deploy.sh(一键部署 CLI,服务器克隆 deploy 分支后依赖它)
 cp "$PROJECT_DIR/deploy.sh" .
 chmod +x deploy.sh
 

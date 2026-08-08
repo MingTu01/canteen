@@ -6,6 +6,10 @@
 #          deploy 分支(orphan 分支,独立历史)。
 # 服务器只需跟踪 deploy 分支,git pull 即可更新,无需构建。
 #
+# deploy 分支包含一键安装脚本 install.sh,服务器一行命令即可部署:
+#   curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh \
+#       -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
+#
 # 相比手动 publish.sh / push_deploy.py 的优势:
 #   - 免去人工重复构建与推送(避免 GitHub 45MB 大文件推送超时)
 #   - 在 Linux runner 上构建并设置 +x,彻底规避 Windows 不保留执行权限
@@ -147,6 +151,7 @@ jobs:
           cp "$WS/.env.example" .
           cp "$WS/canteen.sh" . && chmod +x canteen.sh
           cp "$WS/deploy.sh" . && chmod +x deploy.sh
+          cp "$WS/install.sh" . && chmod +x install.sh
           cp "$WS/VERSIONS.json" .
 
           # 后端运行时基础镜像 Dockerfile
