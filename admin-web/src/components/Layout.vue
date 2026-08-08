@@ -80,6 +80,11 @@ const formatDate = (iso: string) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+/** 在新标签页打开备用下载链接 */
+const openExternal = (url: string) => {
+  window.open(url, '_blank', 'noopener')
+}
+
 const menuItems: MenuItem[] = [
   // 角色定义:1=超管,2=门店管理员,3=终端,4=财务,5=厨师长,6=店长
   { path: '/dashboard', name: '数据总览', icon: LayoutDashboard, roles: [1, 2, 4, 5, 6] },
@@ -484,7 +489,7 @@ onBeforeUnmount(() => {
     <ElDialog
       v-model="downloadDialogVisible"
       title="下载中心"
-      width="520px"
+      width="560px"
       :close-on-click-modal="false"
       append-to-body
     >
@@ -496,28 +501,40 @@ onBeforeUnmount(() => {
               <CreditCard class="h-6 w-6" />
             </div>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <h4 class="font-semibold text-text">读卡助手</h4>
                 <span v-if="downloadCenter.cardHelper.value" class="text-xs text-text-muted">
                   v{{ downloadCenter.cardHelper.value.version }}
                 </span>
+                <span
+                  v-if="downloadCenter.cardHelper.value && !downloadCenter.cardHelper.value.fromApi"
+                  class="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning"
+                >备用链接</span>
               </div>
               <p class="mt-1 text-sm text-text-secondary">
                 用于 CH375/CH372 读卡器刷卡识别,管理员录入员工卡号时需要安装。
               </p>
-              <p v-if="downloadCenter.cardHelper.value" class="mt-1 text-xs text-text-muted">
+              <p v-if="downloadCenter.cardHelper.value && downloadCenter.cardHelper.value.publishedAt" class="mt-1 text-xs text-text-muted">
                 发布日期: {{ formatDate(downloadCenter.cardHelper.value.publishedAt) }}
               </p>
-              <ElButton
-                type="warning"
-                size="small"
-                class="mt-2"
-                :loading="downloadCenter.downloading.value"
-                :disabled="!downloadCenter.cardHelper.value"
-                @click="downloadCenter.download(downloadCenter.cardHelper.value)"
-              >
-                <Download :size="14" class="mr-1" />下载读卡助手
-              </ElButton>
+              <div class="mt-2 flex items-center gap-2 flex-wrap">
+                <ElButton
+                  type="warning"
+                  size="small"
+                  :disabled="!downloadCenter.cardHelper.value"
+                  @click="downloadCenter.download(downloadCenter.cardHelper.value)"
+                >
+                  <Download :size="14" class="mr-1" />下载
+                </ElButton>
+                <ElButton
+                  v-for="link in downloadCenter.getAllUrls(downloadCenter.cardHelper.value)"
+                  :key="link.url"
+                  link
+                  size="small"
+                  type="info"
+                  @click="openExternal(link.url)"
+                >{{ link.label }}</ElButton>
+              </div>
             </div>
           </div>
         </div>
@@ -529,35 +546,42 @@ onBeforeUnmount(() => {
               <Monitor class="h-6 w-6" />
             </div>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <h4 class="font-semibold text-text">X86 终端程序</h4>
                 <span v-if="downloadCenter.terminal.value" class="text-xs text-text-muted">
                   v{{ downloadCenter.terminal.value.version }}
                 </span>
+                <span
+                  v-if="downloadCenter.terminal.value && !downloadCenter.terminal.value.fromApi"
+                  class="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning"
+                >备用链接</span>
               </div>
               <p class="mt-1 text-sm text-text-secondary">
                 食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。
               </p>
-              <p v-if="downloadCenter.terminal.value" class="mt-1 text-xs text-text-muted">
+              <p v-if="downloadCenter.terminal.value && downloadCenter.terminal.value.publishedAt" class="mt-1 text-xs text-text-muted">
                 发布日期: {{ formatDate(downloadCenter.terminal.value.publishedAt) }}
               </p>
-              <ElButton
-                type="primary"
-                size="small"
-                class="mt-2"
-                :loading="downloadCenter.downloading.value"
-                :disabled="!downloadCenter.terminal.value"
-                @click="downloadCenter.download(downloadCenter.terminal.value)"
-              >
-                <Download :size="14" class="mr-1" />下载 X86 终端
-              </ElButton>
+              <div class="mt-2 flex items-center gap-2 flex-wrap">
+                <ElButton
+                  type="primary"
+                  size="small"
+                  :disabled="!downloadCenter.terminal.value"
+                  @click="downloadCenter.download(downloadCenter.terminal.value)"
+                >
+                  <Download :size="14" class="mr-1" />下载
+                </ElButton>
+                <ElButton
+                  v-for="link in downloadCenter.getAllUrls(downloadCenter.terminal.value)"
+                  :key="link.url"
+                  link
+                  size="small"
+                  type="info"
+                  @click="openExternal(link.url)"
+                >{{ link.label }}</ElButton>
+              </div>
             </div>
           </div>
-        </div>
-
-        <!-- 加载失败提示 -->
-        <div v-if="!downloadCenter.loading.value && !downloadCenter.cardHelper.value && !downloadCenter.terminal.value" class="py-4 text-center text-sm text-text-muted">
-          无法获取下载信息,请检查网络连接或稍后重试。
         </div>
       </div>
       <template #footer>
