@@ -166,10 +166,28 @@ validate_env_completeness() {
 
     # 检查 .env 可写(自动修复需要写入)
     if [[ ! -w "$envfile" ]]; then
-        error ".env 文件不可写: $envfile"
-        warn "  所有者: $(stat -c '%U' "$envfile" 2>/dev/null || echo '?'), 当前用户: $(whoami)"
-        warn "  请执行: sudo chown $(whoami):$(whoami) $envfile"
-        return 1
+        # 自愈:常见原因是 sudo ./deploy.sh 部署后 .env 归 root 所有,
+        # 普通用户(canteen)运行升级时写 .env 被拒。若属主是 root 且有 sudo,
+        # 自动改为当前运维用户,避免只能手动 sudo chown。
+        local env_owner
+        env_owner=$(stat -c '%U' "$envfile" 2>/dev/null || echo '?')
+        if [[ "$env_owner" == "root" ]] && command -v sudo &>/dev/null \
+            && [[ "$(id -u)" != "0" ]] && [[ -n "$(id -un)" ]]; then
+            warn ".env 属于 root,尝试自动修复所有权(sudo chown)..."
+            if sudo chown "$(id -un):$(id -un)" "$envfile" 2>/dev/null; then
+                info "已自动修复 .env 所有权: root -> $(id -un)"
+            else
+                error ".env 文件不可写且 sudo 修复失败: $envfile"
+                warn "  所有者: ${env_owner}, 当前用户: $(id -un)"
+                warn "  请执行: sudo chown $(id -un):$(id -un) $envfile"
+                return 1
+            fi
+        else
+            error ".env 文件不可写: $envfile"
+            warn "  所有者: ${env_owner}, 当前用户: $(id -un)"
+            warn "  请执行: sudo chown $(id -un):$(id -un) $envfile"
+            return 1
+        fi
     fi
 
     # docker-compose.yml 中用 ${VAR:?...} 强制校验的必需变量(敏感:密码/密钥)
@@ -268,9 +286,21 @@ ensure_runtime_dirs() {
             }
         fi
         if [[ ! -w "$PROJECT_DIR/$d" ]]; then
+            # 自愈:与 .env 同理,若属主是 root 且有 sudo,自动改为当前运维用户,
+            # 否则 snapshot.sh 在 backup/ 下创建子目录会 Permission denied。
+            local d_owner
+            d_owner=$(stat -c '%U' "$PROJECT_DIR/$d" 2>/dev/null || echo '?')
+            if [[ "$d_owner" == "root" ]] && command -v sudo &>/dev/null \
+                && [[ "$(id -u)" != "0" ]] && [[ -n "$(id -un)" ]]; then
+                warn "$PROJECT_DIR/$d 属于 root,尝试自动修复所有权(sudo chown)..."
+                if sudo chown -R "$(id -un):$(id -un)" "$PROJECT_DIR/$d" 2>/dev/null; then
+                    info "已自动修复 $PROJECT_DIR/$d 所有权: root -> $(id -un)"
+                    continue
+                fi
+            fi
             error "$PROJECT_DIR/$d 不可写(属主可能是 root)"
-            warn "  当前用户: $(whoami), 目录属主: $(stat -c '%U' "$PROJECT_DIR/$d" 2>/dev/null || echo '?')"
-            warn "  修复: sudo chown -R $(whoami):$(whoami) $PROJECT_DIR/$d"
+            warn "  当前用户: $(id -un), 目录属主: ${d_owner}"
+            warn "  修复: sudo chown -R $(id -un):$(id -un) $PROJECT_DIR/$d"
             return 1
         fi
     done
