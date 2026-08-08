@@ -28,10 +28,33 @@ NC='\033[0m'
 info() { echo -e "${GREEN}[更新]${NC} $1"; }
 warn() { echo -e "${YELLOW}[警告]${NC} $1"; }
 
+# GitHub 加速器(国内服务器直连 GitHub 会超时)
+GITHUB_PROXIES=(
+    "https://api.gitproxy.dev/https://github.com/"
+    "https://gh-proxy.com/https://github.com/"
+    "https://ghfast.top/https://github.com/"
+)
+setup_git_proxy() {
+    for p in "${GITHUB_PROXIES[@]}"; do
+        git config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
+    done
+    for proxy in "${GITHUB_PROXIES[@]}"; do
+        git config "url.${proxy}.insteadOf" "https://github.com/" 2>/dev/null
+        if git ls-remote origin HEAD 2>/dev/null | head -1 | grep -q '.'; then
+            info "GitHub 加速器: $(echo "$proxy" | sed 's|/https://github.com/||')"
+            return 0
+        fi
+        git config --unset-all "url.${proxy}.insteadOf" 2>/dev/null || true
+    done
+    warn "所有 GitHub 加速器均不可用,尝试直连..."
+    return 1
+}
+
 TARGET=${1:-all}
 
 # 1. 拉取最新代码
 info "拉取最新代码..."
+setup_git_proxy
 git pull
 
 # 2. 构建产物

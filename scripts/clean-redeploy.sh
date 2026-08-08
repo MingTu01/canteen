@@ -16,9 +16,14 @@
 set -e
 
 PROJECT_DIR="/opt/canteen"
-# 国内服务器使用 api.gitproxy.dev 加速(ghproxy.net 不稳定,易断流)
-REPO_URL="https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git"
 BRANCH="deploy"
+
+# GitHub 加速器列表(国内服务器直连 GitHub 会超时,必须走加速器)
+GITHUB_PROXIES=(
+    "https://api.gitproxy.dev/https://github.com/"
+    "https://gh-proxy.com/https://github.com/"
+    "https://ghfast.top/https://github.com/"
+)
 
 # 颜色
 RED='\033[0;31m'
@@ -31,6 +36,23 @@ info()  { echo -e "${GREEN}[清理]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
 error() { echo -e "${RED}[错误]${NC} $1"; }
 step()  { echo -e "\n${CYAN}========== $1 ==========${NC}"; }
+
+# 逐个尝试加速器克隆,成功即返回
+clone_with_proxy() {
+    local url="https://github.com/MingTu01/canteen.git"
+    for proxy in "${GITHUB_PROXIES[@]}"; do
+        local proxied_url="${proxy}github.com/MingTu01/canteen.git"
+        info "尝试加速器: $(echo "$proxy" | sed 's|/https://github.com/||')"
+        if git clone --depth 1 --single-branch --branch "$BRANCH" "$proxied_url" "$PROJECT_DIR" 2>/dev/null; then
+            info "克隆成功"
+            return 0
+        fi
+        rm -rf "$PROJECT_DIR" 2>/dev/null || true
+    done
+    # 最后尝试直连
+    warn "所有加速器均失败,尝试直连 GitHub..."
+    git clone --depth 1 --single-branch --branch "$BRANCH" "$url" "$PROJECT_DIR"
+}
 
 # 必须用 root 或 sudo 执行
 if [ "$(id -u)" -ne 0 ]; then
@@ -110,7 +132,7 @@ info "旧目录已删除"
 step "步骤 3/4 克隆 deploy 分支"
 
 info "克隆 $BRANCH 分支..."
-git clone --depth 1 --single-branch --branch "$BRANCH" "$REPO_URL" "$PROJECT_DIR"
+clone_with_proxy
 cd "$PROJECT_DIR"
 
 # 设置脚本执行权限

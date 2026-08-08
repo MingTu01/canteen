@@ -9,7 +9,10 @@
 一行命令完成部署（自动安装 git、克隆代码、配置权限、引导设置超管账号密码）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
+# 多加速器自动切换,一个不行自动换下一个
+for p in https://gh-proxy.com/https:// https://ghfast.top/https:// https://mirror.ghproxy.com/https/ https://; do
+  curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+done && sudo bash /tmp/canteen-install.sh
 ```
 
 部署向导会引导你设置超管账号密码（至少 8 位），完成后访问 `http://服务器IP:18080`（管理后台）/ `:18081`（H5 订餐端）。
@@ -93,13 +96,15 @@ canteen/
 ### 一键部署（生产环境）
 
 ```bash
-# 一行命令完成部署（自动安装 git、克隆代码、配置权限、引导设置超管账号密码）
-curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
+# 多加速器自动切换,一个不行自动换下一个
+for p in https://gh-proxy.com/https:// https://ghfast.top/https:// https://mirror.ghproxy.com/https/ https://; do
+  curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+done && sudo bash /tmp/canteen-install.sh
 ```
 
 部署脚本会自动完成：环境检查 → git 安装 → 克隆 deploy 分支（含 CI 预构建产物）→ 权限修正 → Docker 安装 → 环境变量生成 → 启动服务 → 健康检查。
 
-> 国内服务器若 GitHub raw 访问慢，可先手动 clone 再运行 install.sh。详见 [DEPLOY.md](DEPLOY.md)。
+> 已内置 GitHub 加速器，国内服务器可直接使用。详见 [DEPLOY.md](DEPLOY.md)。
 
 ### 更新服务（安全升级，含快照+自动回退）
 

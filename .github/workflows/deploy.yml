@@ -6,9 +6,10 @@
 #          deploy 分支(orphan 分支,独立历史)。
 # 服务器只需跟踪 deploy 分支,git pull 即可更新,无需构建。
 #
-# deploy 分支包含一键安装脚本 install.sh,服务器一行命令即可部署:
-#   curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh \
-#       -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
+# deploy 分支包含一键安装脚本 install.sh,服务器执行(多加速器自动切换):
+#   for p in https://gh-proxy.com/https/ https://ghfast.top/https/ https://mirror.ghproxy.com/https/ https://; do
+#     curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+#   done && sudo bash /tmp/canteen-install.sh
 #
 # 相比手动 publish.sh / push_deploy.py 的优势:
 #   - 免去人工重复构建与推送(避免 GitHub 45MB 大文件推送超时)

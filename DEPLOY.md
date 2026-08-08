@@ -61,8 +61,11 @@ canteen upgrade all
 > **一行命令完成全部部署**：`install.sh` 自动检查环境、安装 git、克隆 deploy 分支（含 CI 预构建产物）、创建专用用户、修正权限，然后调用 `deploy.sh` 引导你设置超管账号密码。彻底解决权限和密码易出错的问题。
 
 ```bash
-# 在任意全新服务器上执行一行命令(root 或 sudo):
-curl -fsSL https://raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh -o /tmp/canteen-install.sh && sudo bash /tmp/canteen-install.sh
+# 在任意全新服务器上执行(root 或 sudo):
+# 多加速器自动切换,一个不行自动换下一个
+for p in https://gh-proxy.com/https:// https://ghfast.top/https/ https://mirror.ghproxy.com/https/ https://; do
+  curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+done && sudo bash /tmp/canteen-install.sh
 
 # 或指定安装目录:
 sudo bash /tmp/canteen-install.sh /opt/my-canteen
