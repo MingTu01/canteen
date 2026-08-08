@@ -160,6 +160,10 @@ services:
       WECHAT_TEMPLATE_NOTIFY: ${WECHAT_TEMPLATE_NOTIFY:-}
       WECHAT_TEMPLATE_ORDER: ${WECHAT_TEMPLATE_ORDER:-}
       WECHAT_H5_BASE_URL: ${WECHAT_H5_BASE_URL:-}
+      # 微信公众号消息/事件回调(可选,关注后自动回复图文卡片)
+      WECHAT_TOKEN: ${WECHAT_TOKEN:-}
+      WECHAT_H5_BANNER_URL: ${WECHAT_H5_BANNER_URL:-}
+      WECHAT_CANTEEN_NAME: ${WECHAT_CANTEEN_NAME:-}
       # P0-5: CORS 允许的 Origin 白名单(逗号分隔,空则使用默认内网规则)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       # P1-1: 后端备份加密密钥(可选,配置后 Java 端备份自动加密)
