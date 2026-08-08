@@ -150,7 +150,12 @@ FLYWAY_TABLE_EXISTS=$(docker exec -i canteen-mysql mysql -uroot -p"${MYSQL_ROOT_
     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='flyway_schema_history';" 2>/dev/null || echo "0")
 
 if [ "$FLYWAY_TABLE_EXISTS" -gt 0 ] 2>/dev/null; then
-    info "flyway_schema_history 表存在,回收写权限..."
+    info "flyway_schema_history 表存在,尝试回收写权限..."
+    # P0 说明:应用用户是库级 DML 授权(GRANT ... ON db.*),对单张表做 REVOKE
+    # 时 MySQL 找不到"表级授权记录",会返回 1141(no such grant)而失败。
+    # 库级授权下无法按表选择性撤销——唯一彻底方案是去掉 db.* 通配、改为逐表 GRANT。
+    # 因此这里不因 1141 中断脚本(避免 set -e 误报失败),失败仅告警说明。
+    set +e
     docker exec -i canteen-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" 2>/dev/null <<SQL
 -- 回收 flyway_schema_history 的所有权限(撤销 DML GRANT 给的写权限)
 REVOKE ALL PRIVILEGES ON ${MYSQL_DATABASE}.flyway_schema_history FROM '${ESCAPED_USER}'@'%';
@@ -158,7 +163,14 @@ REVOKE ALL PRIVILEGES ON ${MYSQL_DATABASE}.flyway_schema_history FROM '${ESCAPED
 GRANT SELECT ON ${MYSQL_DATABASE}.flyway_schema_history TO '${ESCAPED_USER}'@'%';
 FLUSH PRIVILEGES;
 SQL
-    info "flyway_schema_history 权限已回收为仅 SELECT"
+    revoke_rc=$?
+    set -e
+    if [[ $revoke_rc -ne 0 ]]; then
+        warn "flyway_schema_history 写权限回收失败(应用用户为库级授权,无法按表 REVOKE)。"
+        warn "该表仅被库级 SELECT 覆盖,应用无法写迁移记录;如需严格隔离请改为逐表 GRANT。"
+    else
+        info "flyway_schema_history 权限已回收为仅 SELECT"
+    fi
 else
     warn "flyway_schema_history 表不存在(首次部署,Flyway 未运行),跳过权限回收"
     warn "请在 backend 启动后重新执行本脚本: bash scripts/init-db-user.sh"

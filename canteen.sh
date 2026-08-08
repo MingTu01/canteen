@@ -396,12 +396,18 @@ menu_reset_admin() {
         fi
     fi
 
-    # 写入 INIT_ADMIN_* 环境变量(用单引号包裹值,避免 $/空格/#/反引号 等特殊字符在 source 时被展开)
+    # 写入 INIT_ADMIN_* 环境变量(用双引号包裹值,兼容 Docker Compose dotenv 解析)
     info "写入配置..."
-    # 转义值中的单引号(单引号包裹的值中,单引号用 '\'' 转义)
+    # 转义值,使其在 .env 的双引号包裹下能被 Docker Compose 正确解析。
+    # 不能用单引号包裹 + shell 的 '\'' 转义——那是 shell 规则,Docker Compose dotenv 不认,
+    # 密码含单引号(如 qweasd2864..')会报 "unexpected character",导致整个 .env 无法被 Compose 读取。
+    # 双引号值支持转义,`\` 转义 `\`、`"`、`$`、反引号;单引号在双引号内字面保留。
     _escape_val() {
         local v="$1"
-        v="${v//\'/\'\\\'\'}"
+        v="${v//\\/\\\\}"
+        v="${v//\"/\\\"}"
+        v="${v//\$/\\\$}"
+        v="${v//\`/\\\`}"
         printf '%s' "$v"
     }
     for kv in "INIT_ADMIN_USERNAME=$username" "INIT_ADMIN_PASSWORD=$pwd1" "INIT_ADMIN_FORCE=true"; do
@@ -409,7 +415,7 @@ menu_reset_admin() {
         local val="${kv#*=}"
         local escaped_val new_line
         escaped_val=$(_escape_val "$val")
-        new_line="${key}='${escaped_val}'"
+        new_line="${key}=\"${escaped_val}\""
         if grep -q "^${key}=" "$envfile" 2>/dev/null; then
             local tmp
             tmp=$(mktemp)
