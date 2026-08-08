@@ -125,6 +125,28 @@ class CardReader(QObject):
         self.start()
         return self._running
 
+    def status_info(self):
+        """返回读卡器状态字典(供前端设备状态页展示)。
+
+        Returns:
+            dict: {
+                running: 读卡线程是否运行,
+                dll_loaded: DLL 是否加载成功,
+                connected: 设备是否连接(线程运行 + DLL 加载),
+                description: 设备描述,
+                interval: 防抖间隔,
+            }
+        """
+        dll_loaded = self._dll is not None
+        return {
+            'running': self._running,
+            'dll_loaded': dll_loaded,
+            'connected': self._running and dll_loaded,
+            'description': 'CH375/CH372 USB 读卡器(OUR_IDR.dll)',
+            'mode': 'OUR_IDR',
+            'interval': self._card_interval,
+        }
+
     def _find_dll_dir(self):
         """查找 OUR_IDR.dll 所在目录。
 

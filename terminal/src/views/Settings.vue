@@ -27,11 +27,16 @@ import {
   Monitor,
   CreditCard,
   Timer,
+  Camera,
+  Usb,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
 } from 'lucide-vue-next'
 import { loadConfig, bindTerminal, clearConfig, saveConfig, type TerminalConfig } from '@/api'
 import { clearBranding } from '@/store/branding'
 import { destroyLocalCache } from '@/utils/cache'
-import { getServerUrl, setRuntimeConfig } from '@/api/shellApi'
+import { getServerUrl, setRuntimeConfig, getDeviceStatus, restartCardReader, type CardReaderStatus } from '@/api/shellApi'
 import {
   loadRuntimeConfig,
   windowMode,
@@ -39,6 +44,7 @@ import {
   idleTimeoutSeconds,
   isPythonShell,
 } from '@/store/terminalSettings'
+import { isCameraSupported } from '@/composables/useCameraScanner'
 import TopBar from '@/components/TopBar.vue'
 
 const router = useRouter()
@@ -83,6 +89,100 @@ const runtimeForm = ref({
 const runtimeSaving = ref(false)
 const runtimeMsg = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 let runtimeMsgTimer: ReturnType<typeof setTimeout> | null = null
+
+// ===== 设备状态检查(读卡器 + 摄像头/扫码枪) =====
+/** 读卡器状态(null = 未检测) */
+const cardReaderStatus = ref<CardReaderStatus | null>(null)
+/** 摄像头设备列表 */
+const cameraDevices = ref<{ label: string; deviceId: string }[]>([])
+/** 设备检测中 */
+const deviceChecking = ref(false)
+/** 读卡器重启中 */
+const cardReaderRestarting = ref(false)
+/** 摄像头是否支持 */
+const cameraSupported = isCameraSupported()
+
+/**
+ * 检测读卡器状态(Python Shell 环境)。
+ * 通过 /__api__/device_status 端点获取 card_reader.status_info()。
+ */
+const checkCardReader = async () => {
+  if (!isPythonShell.value) {
+    cardReaderStatus.value = null
+    return
+  }
+  try {
+    const result = await getDeviceStatus()
+    cardReaderStatus.value = result?.cardReader ?? null
+  } catch {
+    cardReaderStatus.value = null
+  }
+}
+
+/**
+ * 检测摄像头/扫码枪设备。
+ * 使用 navigator.mediaDevices.enumerateDevices() 枚举视频输入设备。
+ * 需要先获得 getUserMedia 权限才能拿到设备 label。
+ */
+const checkCameras = async () => {
+  if (!cameraSupported) {
+    cameraDevices.value = []
+    return
+  }
+  try {
+    // 先请求权限,这样才能拿到设备 label
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+    stream.getTracks().forEach((t) => t.stop())
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    cameraDevices.value = devices
+      .filter((d) => d.kind === 'videoinput')
+      .map((d) => ({
+        label: d.label || `摄像头 ${d.deviceId.slice(0, 8)}`,
+        deviceId: d.deviceId,
+      }))
+  } catch {
+    // 权限被拒绝或无摄像头
+    cameraDevices.value = []
+  }
+}
+
+/** 一键检查所有设备 */
+const checkAllDevices = async () => {
+  deviceChecking.value = true
+  try {
+    await Promise.all([checkCardReader(), checkCameras()])
+  } finally {
+    deviceChecking.value = false
+  }
+}
+
+/** 重启读卡器 */
+const onRestartCardReader = async () => {
+  cardReaderRestarting.value = true
+  try {
+    await restartCardReader()
+    // 重启后重新检测状态
+    await new Promise((r) => setTimeout(r, 1000))
+    await checkCardReader()
+  } finally {
+    cardReaderRestarting.value = false
+  }
+}
+
+/** 读卡器状态文字 */
+const cardReaderStatusText = (): string => {
+  if (!isPythonShell.value) return '浏览器环境(不支持检测)'
+  if (!cardReaderStatus.value) return '未检测'
+  if (cardReaderStatus.value.connected) return '已连接'
+  if (cardReaderStatus.value.dll_loaded && !cardReaderStatus.value.running) return '驱动已加载,线程未运行'
+  if (!cardReaderStatus.value.dll_loaded) return '驱动未加载(DLL 未找到)'
+  return '未连接'
+}
+
+/** 读卡器是否正常 */
+const cardReaderOk = (): boolean => {
+  return cardReaderStatus.value?.connected ?? false
+}
 
 /** 从 store 同步到本地表单(进入页面/保存后调用) */
 function syncRuntimeForm() {
@@ -387,6 +487,8 @@ onMounted(async () => {
   // 主动加载运行时配置(不等 App.vue 的异步加载,确保 isPythonShell 及时更新)
   await loadRuntimeConfig().catch(() => {})
   syncRuntimeForm()
+  // 自动检测设备状态
+  checkAllDevices()
 })
 onBeforeUnmount(() => {
   if (bindSuccessTimer) clearTimeout(bindSuccessTimer)
@@ -549,6 +651,98 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
+          <!-- 设备状态检查卡 -->
+          <section class="card">
+            <header class="card__header">
+              <h2 class="card__title">
+                <Usb :size="22" class="card__icon card__icon--primary" />
+                设备连接状态
+              </h2>
+              <button
+                class="settings__refresh-btn btn-press"
+                :disabled="deviceChecking"
+                @click="checkAllDevices"
+              >
+                <Loader2 v-if="deviceChecking" class="spinner" :size="14" />
+                <RefreshCw v-else :size="14" />
+                <span>{{ deviceChecking ? '检测中...' : '刷新' }}</span>
+              </button>
+            </header>
+
+            <div class="settings__device-list">
+              <!-- 读卡器状态 -->
+              <div class="settings__device-item">
+                <div class="settings__device-icon" :class="cardReaderOk() ? 'settings__device-icon--ok' : 'settings__device-icon--err'">
+                  <CheckCircle v-if="cardReaderOk()" :size="20" />
+                  <XCircle v-else :size="20" />
+                </div>
+                <div class="settings__device-info">
+                  <div class="settings__device-name">
+                    <CreditCard :size="14" />
+                    <span>读卡器</span>
+                    <span
+                      class="settings__device-badge"
+                      :class="cardReaderOk() ? 'settings__device-badge--ok' : 'settings__device-badge--err'"
+                    >
+                      {{ cardReaderStatusText() }}
+                    </span>
+                  </div>
+                  <div class="settings__device-desc">
+                    <template v-if="cardReaderStatus">
+                      {{ cardReaderStatus.description }} · 防抖 {{ cardReaderStatus.interval }}秒
+                    </template>
+                    <template v-else-if="!isPythonShell">
+                      浏览器环境不支持读卡器检测,请在终端 Python Shell 环境下使用
+                    </template>
+                    <template v-else>
+                      点击"刷新"重新检测
+                    </template>
+                  </div>
+                  <!-- 读卡器异常时显示重启按钮 -->
+                  <button
+                    v-if="isPythonShell && !cardReaderOk()"
+                    class="settings__device-action btn-press"
+                    :disabled="cardReaderRestarting"
+                    @click="onRestartCardReader"
+                  >
+                    <Loader2 v-if="cardReaderRestarting" class="spinner" :size="14" />
+                    <RotateCcw v-else :size="14" />
+                    <span>{{ cardReaderRestarting ? '重启中...' : '重启读卡器' }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 摄像头/扫码枪状态 -->
+              <div class="settings__device-item">
+                <div class="settings__device-icon" :class="cameraDevices.length > 0 ? 'settings__device-icon--ok' : 'settings__device-icon--err'">
+                  <CheckCircle v-if="cameraDevices.length > 0" :size="20" />
+                  <XCircle v-else :size="20" />
+                </div>
+                <div class="settings__device-info">
+                  <div class="settings__device-name">
+                    <Camera :size="14" />
+                    <span>摄像头/扫码枪</span>
+                    <span
+                      class="settings__device-badge"
+                      :class="cameraDevices.length > 0 ? 'settings__device-badge--ok' : 'settings__device-badge--err'"
+                    >
+                      {{ cameraDevices.length > 0 ? `已连接(${cameraDevices.length}个)` : '未检测到' }}
+                    </span>
+                  </div>
+                  <div v-if="cameraDevices.length > 0" class="settings__device-desc">
+                    <div v-for="cam in cameraDevices" :key="cam.deviceId" class="settings__device-sub">
+                      · {{ cam.label }}
+                    </div>
+                  </div>
+                  <div v-else class="settings__device-desc">
+                    <template v-if="!cameraSupported">浏览器不支持摄像头 API</template>
+                    <template v-else>未检测到摄像头设备,或权限被拒绝。USB 扫码枪(键盘模拟)不需要摄像头,可正常使用。</template>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- 主操作按钮(自动保存运行设置后跳转) -->
           <button
             class="settings__primary-btn btn-press"
@@ -704,7 +898,7 @@ onBeforeUnmount(() => {
           <dl class="settings__info-list">
             <div class="settings__info-row">
               <dt>系统版本</dt>
-              <dd>v0.0.1</dd>
+              <dd>v0.0.4</dd>
             </div>
             <div class="settings__info-row">
               <dt>浏览器</dt>
@@ -1083,6 +1277,116 @@ onBeforeUnmount(() => {
   opacity: 0.85;
 }
 .settings__runtime-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============ 设备状态检查 ============ */
+.settings__refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--doubao-border);
+  background: var(--doubao-card);
+  color: var(--doubao-text-secondary);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.settings__refresh-btn:hover:not(:disabled) {
+  border-color: var(--doubao-primary);
+  color: var(--doubao-primary);
+}
+.settings__refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings__device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.settings__device-item {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--doubao-radius);
+  background: var(--doubao-bg-secondary, #f5f5f7);
+}
+.settings__device-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.settings__device-icon--ok {
+  background: rgba(7, 193, 96, 0.12);
+  color: #07c160;
+}
+.settings__device-icon--err {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+.settings__device-info {
+  flex: 1;
+  min-width: 0;
+}
+.settings__device-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--doubao-text, #1d1d1f);
+}
+.settings__device-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.settings__device-badge--ok {
+  background: rgba(7, 193, 96, 0.12);
+  color: #07c160;
+}
+.settings__device-badge--err {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+.settings__device-desc {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--doubao-text-secondary, #86868b);
+  line-height: 1.5;
+}
+.settings__device-sub {
+  font-size: var(--fs-sm);
+  color: var(--doubao-text-secondary, #86868b);
+}
+.settings__device-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--doubao-primary, #007aff);
+  background: transparent;
+  color: var(--doubao-primary, #007aff);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.settings__device-action:hover:not(:disabled) {
+  background: var(--doubao-primary, #007aff);
+  color: #fff;
+}
+.settings__device-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

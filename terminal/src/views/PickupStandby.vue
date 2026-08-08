@@ -16,10 +16,12 @@ import api from '@/api'
 import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2 } from 'lucide-vue-next'
+import { CreditCard, Loader2, Camera } from 'lucide-vue-next'
 import BrandingBg from '@/components/BrandingBg.vue'
 import Modal from '@/components/Modal.vue'
 import { useCardReader } from '@/composables/useCardReader'
+import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
+import { cardInterval } from '@/store/terminalSettings'
 
 const router = useRouter()
 const clock = ref('')
@@ -33,6 +35,10 @@ const storeName = computed(() => branding.value?.name || '企业智慧食堂')
 const showError = ref(false)
 const errorTitle = ref('')
 const errorMsg = ref('')
+/** 错误弹窗 5 秒自动消失定时器 */
+let errorTimer: ReturnType<typeof setTimeout> | null = null
+/** 错误弹窗自动关闭延迟(毫秒) */
+const ERROR_AUTO_CLOSE_DELAY = 5000
 
 /* 取餐成功提示(非阻塞,2 秒后自动消失) */
 const showSuccess = ref(false)
@@ -44,6 +50,30 @@ const updateClock = () => {
   const now = new Date()
   clock.value = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
   dateLabel.value = fullDateLabel(now)
+}
+
+/**
+ * 显示错误弹窗并启动 5 秒自动关闭定时器。
+ * 每次调用前清除旧定时器,确保倒计时从本次显示开始。
+ */
+const showErrorWithAutoClose = (title: string, msg: string) => {
+  errorTitle.value = title
+  errorMsg.value = msg
+  showError.value = true
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => {
+    showError.value = false
+    errorTimer = null
+  }, ERROR_AUTO_CLOSE_DELAY)
+}
+
+/** 关闭错误弹窗并清除定时器 */
+const dismissError = () => {
+  showError.value = false
+  if (errorTimer) {
+    clearTimeout(errorTimer)
+    errorTimer = null
+  }
 }
 
 /**
@@ -89,41 +119,65 @@ const handleInput = async (code: string) => {
     } catch { /* 非员工卡,继续尝试取餐码 */ }
 
     // 3. 作为取餐码核销
-    const resp = await api.post('/order/pickup', { pickupCode: trimmed })
-    if (resp.data.code === 200) {
-      successMsg.value = '取餐成功,请前往取餐口领取餐品'
-      showSuccess.value = true
-      if (successTimer) clearTimeout(successTimer)
-      successTimer = setTimeout(() => {
-        showSuccess.value = false
-      }, 2000)
-      return
+    try {
+      const resp = await api.post('/order/pickup', { pickupCode: trimmed })
+      if (resp.data.code === 200) {
+        successMsg.value = '取餐成功,请前往取餐口领取餐品'
+        showSuccess.value = true
+        if (successTimer) clearTimeout(successTimer)
+        successTimer = setTimeout(() => {
+          showSuccess.value = false
+        }, 2000)
+        return
+      }
+      // 取餐码核销失败:后端返回业务错误(如"取餐码无效")
+      showErrorWithAutoClose('取餐失败', resp.data.message ?? '取餐码无效')
+    } catch (e: any) {
+      // 取餐码请求异常:输入既非员工卡也非有效取餐码 → 提示卡号不存在
+      showErrorWithAutoClose('取餐失败', '卡号不存在')
     }
-    errorTitle.value = '取餐失败'
-    errorMsg.value = resp.data.message ?? '卡号/取餐码无效,请重试'
-    showError.value = true
   } catch (e: any) {
-    errorTitle.value = '取餐失败'
-    errorMsg.value = e?.response?.data?.message ?? '卡号/取餐码无效,请重试'
-    showError.value = true
+    showErrorWithAutoClose('取餐失败', '卡号不存在')
   } finally {
     scanning.value = false
   }
 }
 
 // 使用统一读卡器 composable:支持 Python Shell 读卡器 + USB HID 键盘(降级)
-// 弹窗显示时不接受刷卡
+// 弹窗显示时仍接受刷卡:新刷卡会关闭弹窗并处理新卡号,不影响下一位员工
 useCardReader((cardNo) => {
-  if (showError.value || scanning.value) return
+  // 正在处理中时不接受新输入(避免并发)
+  if (scanning.value) return
+  // 弹窗显示时:先关闭弹窗,再处理新卡号(不影响下一位员工刷卡)
+  if (showError.value) {
+    dismissError()
+  }
   handleInput(cardNo)
 })
+
+// ===== 摄像头后台扫码(无感,与读卡器并行) =====
+// 自动启动摄像头,持续扫码,与读卡器同时工作,接受同一个防抖间隔
+const cameraSupported = isCameraSupported()
+const videoRef = ref<HTMLVideoElement | null>(null)
+const cameraActive = ref(false) // 摄像头是否已启动
+
+const {
+  start: startCamera,
+  stop: stopCamera,
+} = useCameraScanner(
+  (code) => {
+    // 摄像头扫描到码:关闭弹窗并走统一输入处理(与读卡器共用)
+    if (showError.value) dismissError()
+    handleInput(code)
+  },
+  // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
+  { debounceMs: cardInterval.value * 1000 },
+)
 
 /** 主刷卡图标点击:仅显示提示(生产环境需真实读卡器) */
 const onCardClick = () => {
   if (scanning.value) return
-  errorTitle.value = '提示'
-  errorMsg.value = '请将员工卡放置在读卡器上,或使用扫码枪扫描取餐码'
-  showError.value = true
+  showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描取餐码')
 }
 
 onMounted(() => {
@@ -132,10 +186,19 @@ onMounted(() => {
   timer = window.setInterval(updateClock, 1000)
   // 前台拉取品牌信息(首次加载也立即展示缓存,再异步校验)
   fetchBranding()
+  // 自动启动摄像头后台扫码(无感,与读卡器并行)
+  if (cameraSupported) {
+    // 等待 DOM 渲染 <video> 后再启动
+    setTimeout(async () => {
+      cameraActive.value = await startCamera(videoRef.value)
+    }, 200)
+  }
 })
 onUnmounted(() => {
   clearInterval(timer)
   if (successTimer) clearTimeout(successTimer)
+  if (errorTimer) clearTimeout(errorTimer)
+  stopCamera()
 })
 </script>
 
@@ -181,7 +244,25 @@ onUnmounted(() => {
         <div class="pickup-standby__scan-hint">
           {{ scanning ? '识别中...' : '请刷卡或扫码取餐' }}
         </div>
+
+        <!-- 摄像头扫码按钮 -->
       </div>
+    </div>
+
+    <!-- 摄像头后台扫码(隐藏 video,仅用于 ZXing 解码) -->
+    <video
+      v-if="cameraSupported"
+      ref="videoRef"
+      autoplay
+      playsinline
+      muted
+      class="pickup-standby__camera-hidden"
+    />
+
+    <!-- 摄像头状态指示器(右上角小图标) -->
+    <div v-if="cameraSupported" class="pickup-standby__camera-status">
+      <Camera :size="16" />
+      <span class="pickup-standby__camera-status-dot" :class="cameraActive ? 'pickup-standby__camera-status-dot--on' : ''" />
     </div>
 
     <!-- 取餐成功提示(非阻塞,2 秒后消失) -->
@@ -191,14 +272,17 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- 错误提示弹窗(替换原生 alert) -->
+    <!-- 错误提示弹窗(5 秒自动消失,下一位刷卡也会关闭) -->
     <Modal
       v-model="showError"
       :title="errorTitle"
       :message="errorMsg"
       variant="warning"
       :cancel-text="''"
+      :close-on-overlay="false"
       confirm-text="知道了"
+      @confirm="dismissError"
+      @cancel="dismissError"
     />
   </main>
 </template>
@@ -336,6 +420,44 @@ onUnmounted(() => {
   font-weight: 700;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
+}
+
+/* 摄像头后台扫码:隐藏 video 元素(ZXing 解码用,用户不可见) */
+.pickup-standby__camera-hidden {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  top: -9999px;
+  left: -9999px;
+}
+
+/* 摄像头状态指示器(右上角小图标) */
+.pickup-standby__camera-status {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--fs-xs);
+}
+.pickup-standby__camera-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.8);
+}
+.pickup-standby__camera-status-dot--on {
+  background: rgba(7, 193, 96, 0.9);
+  box-shadow: 0 0 6px rgba(7, 193, 96, 0.6);
 }
 
 /* 竖屏适配 */

@@ -33,7 +33,7 @@ import { useOrderConfig } from '@/composables/useOrderConfig'
 import { formatMoney } from '@/composables/useFormat'
 import { toDateKey, dateWindow, parseDateKey, relativeLabel, pad2 } from '@/utils'
 import { mealTypeLabel } from '@/utils'
-import { menuInvalidated } from '@/utils/cache'
+import { menuInvalidated, getCachedMenu, cacheMenu } from '@/utils/cache'
 import { ShoppingCart, X, Plus, Minus, Trash2 } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import DatePicker from '@/components/DatePicker.vue'
@@ -84,32 +84,76 @@ const selectedDate = computed({
 })
 
 /**
- * 加载某日菜单(带缓存)。
- * 后端返回结构 [{menu:{id,mealType,...}, items:[{item,dish}]}]
+ * 将后端菜单响应拍平为前端结构。
+ * 后端返回 [{menu:{id,mealType,...}, items:[{item,dish}]}]
  * 前端拍平成 [{id, mealType, menuItems:[{dishId,dishName,price,category,image}]}]
+ */
+const transformMenu = (raw: any[]) =>
+  raw.map((m: any) => ({
+    id: m.menu?.id,
+    mealType: Number(m.menu?.mealType),
+    menuItems: (m.items || []).map((it: any) => ({
+      dishId: it.dish?.id,
+      dishName: it.dish?.name,
+      price: it.dish?.price,
+      category: it.dish?.category,
+      image: it.dish?.image,
+    })),
+  }))
+
+/**
+ * 加载某日菜单(三级缓存:内存 → IndexedDB → 后端)。
+ * 1. 内存命中 → 直接返回(最快,同次会话内)
+ * 2. IndexedDB 命中 → 秒开,后台静默刷新后端数据
+ * 3. 后端拉取 → 写入 IndexedDB + 内存
  */
 const loadMenu = async (date: string) => {
   if (!date || (menuCache.value[date] && menuCache.value[date].length > 0) || loadingSet.value.has(date)) return
   loadingSet.value.add(date)
+  const storeId = orderStore.employee?.storeId
   try {
-    const storeId = orderStore.employee?.storeId
-    const resp = await api.get(`/menu/store/${storeId}/date/${date}`)
-    const raw = resp.data.code === 200 ? resp.data.data || [] : []
-    menuCache.value[date] = raw.map((m: any) => ({
-      id: m.menu?.id,
-      mealType: Number(m.menu?.mealType),
-      menuItems: (m.items || []).map((it: any) => ({
-        dishId: it.dish?.id,
-        dishName: it.dish?.name,
-        price: it.dish?.price,
-        category: it.dish?.category,
-        image: it.dish?.image,
-      })),
-    }))
+    // 1. 先查 IndexedDB 本地缓存(秒开,页面刷新后仍可用)
+    if (storeId) {
+      const local = await getCachedMenu<any[]>(storeId, date)
+      if (local && local.length > 0) {
+        menuCache.value[date] = transformMenu(local)
+        // 后台静默刷新后端数据(不阻塞 UI,有变化时覆盖)
+        refreshMenuFromBackend(storeId, date).catch(() => {})
+        return
+      }
+    }
+    // 2. 本地无缓存 → 直接请求后端
+    await fetchAndCacheMenu(storeId, date)
   } catch {
     menuCache.value[date] = []
   } finally {
     loadingSet.value.delete(date)
+  }
+}
+
+/** 从后端拉取菜单并写入 IndexedDB + 内存 */
+const fetchAndCacheMenu = async (storeId: number | undefined, date: string) => {
+  const resp = await api.get(`/menu/store/${storeId}/date/${date}`)
+  const raw = resp.data.code === 200 ? resp.data.data || [] : []
+  menuCache.value[date] = transformMenu(raw)
+  // 写入 IndexedDB 持久化缓存(下次启动仍可秒开)
+  if (storeId) {
+    await cacheMenu(storeId, date, raw).catch(() => {})
+  }
+}
+
+/** 后台静默刷新:从后端拉取最新菜单,有变化时更新内存 + IndexedDB */
+const refreshMenuFromBackend = async (storeId: number | undefined, date: string) => {
+  const resp = await api.get(`/menu/store/${storeId}/date/${date}`)
+  const raw = resp.data.code === 200 ? resp.data.data || [] : []
+  const transformed = transformMenu(raw)
+  // 仅在数据变化时更新(避免不必要的响应式触发)
+  const current = JSON.stringify(menuCache.value[date] || [])
+  if (JSON.stringify(transformed) !== current) {
+    menuCache.value[date] = transformed
+    if (storeId) {
+      await cacheMenu(storeId, date, raw).catch(() => {})
+    }
   }
 }
 

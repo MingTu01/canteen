@@ -59,7 +59,13 @@ const revokeLocalImgUrls = () => {
   }
 }
 
-/** 加载本地图片 URL(命中 IndexedDB 则用 Blob,否则降级后端 URL) */
+/**
+ * 加载本地图片 URL(命中 IndexedDB 则用 Blob,否则降级后端 URL)。
+ *
+ * 关键:在 localImgUrls 就绪前不渲染 <img>,避免终端用相对路径
+ * (/uploads/xxx.jpg?v=...) 直接请求本地服务器导致 404 → erroredDishIds
+ * 永久锁定 → 即使缓存就绪后仍显示占位图标。
+ */
 const loadLocalImg = async (item: MenuItem) => {
   const url = item.image || item.imageUrl
   if (!url) return
@@ -69,6 +75,8 @@ const loadLocalImg = async (item: MenuItem) => {
       // 释放旧的 ObjectURL(如果存在)
       const old = localImgUrls[item.dishId]
       if (old && old.startsWith('blob:')) URL.revokeObjectURL(old)
+      // 清除可能存在的旧错误状态(切换日期后图片 URL 变化)
+      erroredDishIds.delete(item.dishId)
       localImgUrls[item.dishId] = localUrl
     }
   } catch { /* 降级直查后端 */ }
@@ -147,9 +155,10 @@ const onClick = (item: MenuItem) => {
       >
         <!-- 图片区 80×80 -->
         <div class="dish__img">
+          <!-- 仅在本地 URL 就绪后渲染 <img>,避免相对路径直查本地服务器 404 -->
           <img
-            v-if="(item.image || item.imageUrl) && !erroredDishIds.has(item.dishId)"
-            :src="localImgUrls[item.dishId] || item.image || item.imageUrl"
+            v-if="localImgUrls[item.dishId] && !erroredDishIds.has(item.dishId)"
+            :src="localImgUrls[item.dishId]"
             :alt="item.dishName"
             @error="onImgError(item.dishId)"
           />

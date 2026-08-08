@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * 规则:
  *   - 长度 ≥ 8
  *   - 必须同时包含字母和数字
- *   - 允许特殊字符 !@#$%^&*()_+-=
+ *   - 允许任意字符(包括所有特殊符号),只要满足上述复杂度即可
  *   - 拒绝常见弱密码
  *
  * 注意:默认初始密码(如 12345678)不经过此校验,因为首次登录会强制修改(mustChangePassword=1)。
@@ -22,7 +22,7 @@ public final class PasswordValidator {
     private PasswordValidator() {}
 
     private static final Pattern PATTERN =
-            Pattern.compile("^(?=.*[a-zA-Z])(?=.*\\d)[a-zA-Z\\d!@#$%^&*()_+\\-=]{8,}$");
+            Pattern.compile("^(?=.*[a-zA-Z])(?=.*\\d).{8,}$", Pattern.DOTALL);
 
     private static final Set<String> COMMON_WEAK = Set.of(
             "12345678", "password", "11111111",

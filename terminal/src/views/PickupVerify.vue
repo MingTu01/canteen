@@ -8,10 +8,11 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
-import { pickupStore, type PickupOrder } from '@/store/pickup'
+import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey } from '@/utils'
 import { getCachedAvatar } from '@/utils/imageCache'
+import { useCardReader } from '@/composables/useCardReader'
 import { User } from 'lucide-vue-next'
 import BrandingBg from '@/components/BrandingBg.vue'
 import Modal from '@/components/Modal.vue'
@@ -58,6 +59,39 @@ const showError = ref(false)
 const errorMsg = ref('')
 const errorVariant = ref<'warning' | 'info'>('warning')
 const errorTitle = ref('')
+/** 错误弹窗 5 秒自动关闭定时器 */
+let errorTimer: ReturnType<typeof setTimeout> | null = null
+/** 错误弹窗自动关闭延迟(毫秒) */
+const ERROR_AUTO_CLOSE_DELAY = 5000
+
+/** 关闭错误弹窗并清除定时器(不导航) */
+const dismissError = () => {
+  showError.value = false
+  if (errorTimer) {
+    clearTimeout(errorTimer)
+    errorTimer = null
+  }
+}
+
+/**
+ * 显示错误弹窗并启动 5 秒自动关闭。
+ * 自动关闭后返回取餐待机页,不影响下一位员工刷卡。
+ */
+const showErrorWithAutoClose = (
+  title: string,
+  msg: string,
+  variant: 'warning' | 'info' = 'warning',
+) => {
+  errorTitle.value = title
+  errorMsg.value = msg
+  errorVariant.value = variant
+  showError.value = true
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => {
+    dismissError()
+    router.replace('/pickup')
+  }, ERROR_AUTO_CLOSE_DELAY)
+}
 
 /** 拉取员工今日待取餐订单,选第一条 status===1 的,设置 store 后跳转取餐信息页 */
 const fetchAndAdvance = async () => {
@@ -73,11 +107,12 @@ const fetchAndAdvance = async () => {
       .filter((o) => o.date === today && o.status === 1)
       .sort((a, b) => Number(a.mealType) - Number(b.mealType))
     if (pending.length === 0) {
-      // 无待取餐订单:提示用户并返回待机页
-      errorTitle.value = '暂无待取餐订单'
-      errorMsg.value = '今日暂无待取餐订单,请先在订餐端下单'
-      errorVariant.value = 'info'
-      showError.value = true
+      // 无待取餐订单:5 秒后自动消失,不影响下一位刷卡
+      showErrorWithAutoClose(
+        '暂无待取餐订单',
+        '今日暂无待取餐订单,请先在订餐端下单',
+        'info',
+      )
       return
     }
     const o = pending[0]
@@ -106,16 +141,51 @@ const fetchAndAdvance = async () => {
       router.replace('/pickup/info')
     }, wait)
   } catch (e: any) {
-    errorTitle.value = '查询失败'
-    errorMsg.value = e?.response?.data?.message ?? '查询订餐信息失败,请重试'
-    errorVariant.value = 'warning'
-    showError.value = true
+    showErrorWithAutoClose(
+      '查询失败',
+      e?.response?.data?.message ?? '查询订餐信息失败,请重试',
+    )
   }
 }
 
+/**
+ * 处理新刷卡(弹窗显示时):识别员工并重新查询订单。
+ * 不导航到待机页,直接在当前页处理新卡号,实现"刷卡即切换"。
+ */
+const handleNewCard = async (cardNo: string) => {
+  const trimmed = cardNo.trim()
+  if (!trimmed) return
+  try {
+    const empResp = await api.get(`/terminal/employee/${encodeURIComponent(trimmed)}`)
+    if (empResp.data.code === 200 && empResp.data.data) {
+      // 识别成功:重置流程,设置新员工,重新查询订单
+      resetPickupFlow()
+      pickupStore.employee = empResp.data.data
+      done = false
+      startedAt.value = Date.now()
+      fetchAndAdvance()
+      return
+    }
+    // 未识别为员工:提示卡号不存在
+    showErrorWithAutoClose('取餐失败', '卡号不存在')
+  } catch {
+    showErrorWithAutoClose('取餐失败', '卡号不存在')
+  }
+}
+
+/**
+ * 读卡器:弹窗显示时接受刷卡,关闭弹窗并处理新卡号。
+ * 弹窗未显示时(验证中/跳转中)不接受刷卡,避免干扰流程。
+ */
+useCardReader((cardNo) => {
+  if (!showError.value) return
+  dismissError()
+  handleNewCard(cardNo)
+})
+
 /** 错误弹窗确认后返回待机 */
 const onErrorConfirm = () => {
-  showError.value = false
+  dismissError()
   router.replace('/pickup')
 }
 
@@ -127,6 +197,7 @@ onMounted(() => {
 onUnmounted(() => {
   done = true
   if (advanceTimer) clearTimeout(advanceTimer)
+  if (errorTimer) clearTimeout(errorTimer)
   revokeAvatarUrl()
 })
 </script>
@@ -161,13 +232,14 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 错误弹窗:无待取餐订单 / 查询失败 -->
+    <!-- 错误弹窗:无待取餐订单 / 查询失败(5 秒自动消失,下一位刷卡也会关闭) -->
     <Modal
       v-model="showError"
       :title="errorTitle"
       :message="errorMsg"
       :variant="errorVariant"
       :cancel-text="''"
+      :close-on-overlay="false"
       confirm-text="知道了"
       @confirm="onErrorConfirm"
       @cancel="onErrorConfirm"

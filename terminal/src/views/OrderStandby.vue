@@ -18,9 +18,11 @@ import api from '@/api'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey, fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2 } from 'lucide-vue-next'
+import { CreditCard, Loader2, Camera } from 'lucide-vue-next'
 import BrandingBg from '@/components/BrandingBg.vue'
 import { useCardReader } from '@/composables/useCardReader'
+import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
+import { cardInterval } from '@/store/terminalSettings'
 
 const router = useRouter()
 const clock = ref('')
@@ -39,12 +41,34 @@ const updateClock = () => {
   dateLabel.value = fullDateLabel(now)
 }
 
-const scan = async (cardNo: string) => {
-  if (scanning.value || !cardNo.trim()) return
+const scan = async (input: string) => {
+  if (scanning.value || !input.trim()) return
   scanning.value = true
   scanError.value = ''
   try {
-    const resp = await api.get(`/terminal/employee/${encodeURIComponent(cardNo.trim())}`)
+    const trimmed = input.trim()
+
+    // 1. 员工身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名)
+    if (trimmed.startsWith('{')) {
+      try {
+        const qr = JSON.parse(trimmed)
+        if (qr.sign && qr.cardNo && qr.storeId && qr.employeeId && qr.expire) {
+          const resp = await api.post('/terminal/verify-qrcode', qr)
+          if (resp.data.code === 200 && resp.data.data) {
+            resetOrderFlow()
+            orderStore.employee = resp.data.data
+            orderStore.selectedDate = toDateKey(new Date())
+            router.push('/order/menu')
+            return
+          }
+        }
+      } catch {
+        /* 非合法二维码 JSON,继续按卡号处理 */
+      }
+    }
+
+    // 2. 作为卡号识别员工
+    const resp = await api.get(`/terminal/employee/${encodeURIComponent(trimmed)}`)
     if (resp.data.code === 200 && resp.data.data) {
       resetOrderFlow()
       orderStore.employee = resp.data.data
@@ -77,15 +101,39 @@ useCardReader((cardNo) => {
   scan(cardNo)
 })
 
+// ===== 摄像头后台扫码(无感,与读卡器并行) =====
+// 自动启动摄像头,持续扫码,与读卡器同时工作,接受同一个防抖间隔
+const cameraSupported = isCameraSupported()
+const videoRef = ref<HTMLVideoElement | null>(null)
+const cameraActive = ref(false) // 摄像头是否已启动
+
+const {
+  start: startCamera,
+  stop: stopCamera,
+} = useCameraScanner(
+  (code) => {
+    scan(code)
+  },
+  // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
+  { debounceMs: cardInterval.value * 1000 },
+)
+
 onMounted(() => {
   resetOrderFlow()
   updateClock()
   timer = window.setInterval(updateClock, 1000)
   fetchBranding({ background: true })
+  // 自动启动摄像头后台扫码(无感,与读卡器并行)
+  if (cameraSupported) {
+    setTimeout(async () => {
+      cameraActive.value = await startCamera(videoRef.value)
+    }, 200)
+  }
 })
 onUnmounted(() => {
   clearInterval(timer)
   if (scanErrorTimer) clearTimeout(scanErrorTimer)
+  stopCamera()
 })
 </script>
 
@@ -134,7 +182,25 @@ onUnmounted(() => {
 
         <!-- 错误提示 -->
         <div v-if="scanError" class="standby__error">{{ scanError }}</div>
+
+        <!-- 摄像头扫码按钮 -->
       </div>
+    </div>
+
+    <!-- 摄像头后台扫码(隐藏 video,仅用于 ZXing 解码) -->
+    <video
+      v-if="cameraSupported"
+      ref="videoRef"
+      autoplay
+      playsinline
+      muted
+      class="standby__camera-hidden"
+    />
+
+    <!-- 摄像头状态指示器(右上角小图标) -->
+    <div v-if="cameraSupported" class="standby__camera-status">
+      <Camera :size="16" />
+      <span class="standby__camera-status-dot" :class="cameraActive ? 'standby__camera-status-dot--on' : ''" />
     </div>
   </main>
 </template>
@@ -268,6 +334,44 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.9);
   color: white;
   font-size: var(--fs-sm);
+}
+
+/* 摄像头后台扫码:隐藏 video 元素(ZXing 解码用,用户不可见) */
+.standby__camera-hidden {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  top: -9999px;
+  left: -9999px;
+}
+
+/* 摄像头状态指示器(右上角小图标) */
+.standby__camera-status {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--fs-xs);
+}
+.standby__camera-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.8);
+}
+.standby__camera-status-dot--on {
+  background: rgba(7, 193, 96, 0.9);
+  box-shadow: 0 0 6px rgba(7, 193, 96, 0.6);
 }
 
 /* 底部设备信息(已移除,管理入口改为右上角 6 次点击) */

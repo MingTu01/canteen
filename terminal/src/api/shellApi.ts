@@ -152,3 +152,45 @@ export async function restartCardReader(): Promise<boolean> {
   }
   return false
 }
+
+/** 读卡器设备状态(Python Shell 环境) */
+export interface CardReaderStatus {
+  /** 读卡线程是否运行 */
+  running: boolean
+  /** DLL 是否加载成功 */
+  dll_loaded: boolean
+  /** 设备是否已连接 */
+  connected: boolean
+  /** 设备描述 */
+  description: string
+  /** 读卡器模式 */
+  mode: string
+  /** 防抖间隔(秒) */
+  interval: number
+}
+
+/** 设备状态检测结果 */
+export interface DeviceStatus {
+  /** 读卡器状态(null = 不支持/未检测) */
+  cardReader: CardReaderStatus | null
+}
+
+/**
+ * 获取设备连接状态(读卡器)。
+ * 摄像头/扫码枪状态由前端 navigator.mediaDevices 直接检测。
+ * 浏览器环境返回 null。
+ */
+export async function getDeviceStatus(): Promise<DeviceStatus | null> {
+  const shell = detectShell()
+  if (shell !== 'python') return null
+  try {
+    const res = await fetch('/__api__/device_status', { method: 'POST' })
+    const data = await res.json()
+    if (data.ok && data.card_reader) {
+      return { cardReader: data.card_reader as CardReaderStatus }
+    }
+    return { cardReader: null }
+  } catch {
+    return { cardReader: null }
+  }
+}

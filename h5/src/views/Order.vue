@@ -919,11 +919,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="order-page">
-    <!-- 顶部头部:订餐 -->
-    <header class="order-page__header">
-      <span class="order-page__header-title">订餐</span>
-    </header>
-
     <!-- 主体:左侧日期竖列 + 右侧内容区 -->
     <div class="order-main">
       <!-- 左侧日期竖列(点击跳转到对应日期 section,平滑滚动) -->
@@ -1328,24 +1323,6 @@ onBeforeUnmount(() => {
   // 视口高度减去 TabBar(64px + 安全区),由 App.vue 的 padding-bottom 保证不被 TabBar 遮挡
   height: calc(100vh - 64px - env(safe-area-inset-bottom));
   background: $brand-card;
-}
-
-/* 顶部头部:订餐 + 订单,居中 */
-.order-page__header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
-  padding: 14px 16px 10px;
-  flex-shrink: 0;
-  background: $brand-card;
-  border-bottom: 1px solid $brand-border;
-}
-
-.order-page__header-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: $brand-foreground;
 }
 
 /* 主体区域:左侧日期竖列 + 右侧内容 */

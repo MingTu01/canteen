@@ -642,9 +642,6 @@ onMounted(() => {
 
 <template>
   <div class="orders-page">
-    <!-- 标题 -->
-    <h1 class="orders-page__title">订单</h1>
-
     <!-- 状态 Tab + 日历按钮 -->
     <nav class="orders-page__tabs">
       <button
@@ -894,28 +891,19 @@ onMounted(() => {
 @use '@/styles/variables' as *;
 
 .orders-page {
-  height: 100vh;
-  height: 100dvh; // 移动端动态视口高度,避免 iOS 地址栏伸缩抖动
+  // 视口高度减去 TabBar(64px + 安全区),与订餐页一致,避免页面溢出出现滚动条
+  height: calc(100vh - 64px - env(safe-area-inset-bottom));
+  height: calc(100dvh - 64px - env(safe-area-inset-bottom)); // 移动端动态视口高度
   background: $brand-card;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 
-  &__title {
-    margin: 0;
-    padding: 16px 16px 12px;
-    font-size: 18px;
-    font-weight: 700;
-    color: $brand-foreground;
-    flex-shrink: 0;
-    text-align: center;
-  }
-
   &__tabs {
     display: flex;
     align-items: center;
     gap: 20px;
-    padding: 0 16px 12px;
+    padding: 12px 16px 12px;
     flex-shrink: 0;
   }
 

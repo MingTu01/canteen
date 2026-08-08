@@ -110,6 +110,11 @@ class ShellBridge(QObject):
             running = self.card_reader.restart()
             return {'ok': True, 'running': running}
 
+        elif method == 'device_status':
+            # 返回读卡器设备状态(供前端设置页设备检查展示)
+            reader_status = self.card_reader.status_info()
+            return {'ok': True, 'card_reader': reader_status}
+
         elif method == 'eval_js':
             # 临时诊断端点:在前端执行 JS 并返回结果
             # 生产环境应通过不设置 CANTEEN_DEBUG 环境变量来禁用此端点
