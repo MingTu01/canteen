@@ -79,9 +79,10 @@ public class EmployeeAuthService {
 
     /**
      * 员工修改自己的密码:需校验原密码,新密码至少 8 位。
-     * 仅员工本人可改;改成功后同步更新 passwordUpdatedAt,使旧 token 在 5 秒宽限期后失效。
+     * 仅员工本人可改;改成功后同步更新 passwordUpdatedAt,使其他设备的旧 token 在 5 秒宽限期后失效,
+     * 同时签发新 token 返回(当前会话用新 token 不中断;Controller 负责写入 Cookie 覆盖旧 token)。
      */
-    public void changePassword(Long employeeId, String oldPassword, String newPassword) {
+    public String changePassword(Long employeeId, String oldPassword, String newPassword) {
         Long currentId = SecurityContext.currentEmployeeId();
         if (currentId == null) {
             throw new com.example.canteen.exception.SecurityException("未登录");
@@ -116,6 +117,9 @@ public class EmployeeAuthService {
         employee.setMustChangePassword(0);
         employeeMapper.updateById(employee);
         rateLimiter.recordSuccess(rateLimitKey);
+        // 签发新 token 返回:iat 与 passwordUpdatedAt 同时刻,满足 PasswordFreshnessValidator 校验,
+        // 当前会话不中断;其他设备仍持有旧 token(iat 早于 passwordUpdatedAt)会被拒,安全不丢。
+        return jwtTokenProvider.generateEmployeeToken(employee);
     }
 
     /**

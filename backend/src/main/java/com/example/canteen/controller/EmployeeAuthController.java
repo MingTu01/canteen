@@ -121,15 +121,23 @@ public class EmployeeAuthController {
 
     /**
      * 员工修改自己的密码:需校验原密码,新密码至少 8 位。
+     * 改密成功后签发新 token 并写入 Cookie 覆盖旧 token,当前会话不中断(其他设备旧 token 仍失效)。
      * 请求体:{ oldPassword, newPassword }
+     * 返回:{ token }
      */
     @PutMapping("/change-password")
-    public ApiResponse<Void> changePassword(@RequestBody Map<String, String> body) {
+    public ApiResponse<Map<String, Object>> changePassword(@RequestBody Map<String, String> body,
+                                                            HttpServletRequest httpRequest,
+                                                            HttpServletResponse httpResponse) {
         Long employeeId = SecurityContext.currentEmployeeId();
         String oldPassword = body.get("oldPassword");
         String newPassword = body.get("newPassword");
-        authService.changePassword(employeeId, oldPassword, newPassword);
-        return ApiResponse.success(null);
+        String newToken = authService.changePassword(employeeId, oldPassword, newPassword);
+        // 用新 token 覆盖 Cookie,前端后续请求自动携带新 token,无需重新登录
+        authCookieUtil.setEmployeeCookie(httpResponse, newToken, httpRequest);
+        Map<String, Object> data = new HashMap<>();
+        data.put("token", newToken);
+        return ApiResponse.success(data);
     }
 
     /**

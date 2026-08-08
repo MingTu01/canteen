@@ -54,6 +54,9 @@ WECHAT_VARS = {
     "WECHAT_TEMPLATE_NOTIFY": "通知/公告/活动 模板ID",
     "WECHAT_TEMPLATE_ORDER": "订单创建 模板ID",
     "WECHAT_H5_BASE_URL": "H5 访问基础URL",
+    "WECHAT_TOKEN": "服务器配置Token(回调签名)",
+    "WECHAT_H5_BANNER_URL": "图文卡片封面图URL",
+    "WECHAT_CANTEEN_NAME": "食堂名称(回复文案)",
 }
 
 
@@ -324,6 +327,13 @@ def validate_url(val):
     return True, ""
 
 
+def validate_http_url(val):
+    """校验图片URL格式(http/https 开头即可,允许带路径)。"""
+    if not re.match(r"^https?://", val):
+        return False, "URL 必须以 http:// 或 https:// 开头"
+    return True, ""
+
+
 # ============================================================
 # 主流程
 # ============================================================
@@ -336,12 +346,14 @@ def show_intro():
   1. H5 微信登录(员工在微信内打开 H5,一键登录)
   2. 通知/公告/活动发布时,推送模板消息给员工
   3. 员工下单成功时,推送订单模板消息(含日期、餐次、取餐码)
+  4. 关注公众号后自动回复图文卡片,引导员工进入H5订餐
 
 所需材料(请提前在公众号后台准备好):
   - 公众号 AppID 和 AppSecret(设置与开发 → 基本配置)
   - 通知模板ID 和 订单模板ID(功能 → 模板消息 → 添加模板)
   - 服务器公网IP 已加入白名单(基本配置 → IP白名单)
   - H5 访问域名 已配置网页授权域名(功能设置 → 网页授权域名)
+  - 服务器配置 Token 和 EncodingAESKey(本脚本会自动生成,填到后台「基本配置→服务器配置」)
 
 注意:必须是「服务号」,订阅号不支持网页授权和模板消息。
 """)
@@ -411,18 +423,65 @@ def collect_config(current_env):
         validator=validate_url,
     )
 
+    # ===== 第 3 步:消息回调配置(关注后自动回复) =====
+    title("第 3 步:配置关注后自动回复(消息回调)")
+
+    import secrets as _secrets
+    # 自动生成 Token 和 EncodingAESKey(用户也可自定义 Token)
+    default_token = current_env.get("WECHAT_TOKEN", "") or _secrets.token_hex(16)
+    aes_key = _secrets.token_urlsafe(32)[:43]
+
+    print("""
+配置后,员工关注公众号会自动收到图文卡片,点击直接进入H5订餐。
+需在公众号后台「基本配置 → 服务器配置」填写以下内容:
+
+  URL(服务器地址):     https://你的H5域名/api/wechat/callback
+  Token(令牌):         与下方输入一致(已自动生成,可直接回车采用)
+  EncodingAESKey:      {aes_key}(已自动生成,复制填入后台;明文模式不参与校验)
+  消息加解密方式:       选「明文模式」
+
+填写后点击「提交」,微信会GET回调地址校验签名,通过后即启用。
+如暂不需要关注后自动回复,Token 留空跳过即可(不影响登录和模板消息)。
+""".format(aes_key=aes_key))
+
+    wechat_token = prompt(
+        "服务器配置 Token(直接回车采用自动生成的值)",
+        default=default_token,
+        required=False,
+    )
+    print(f"\n  → 请将此 Token 填到公众号后台服务器配置: {wechat_token}")
+    print(f"  → 请将此 EncodingAESKey 填到公众号后台: {aes_key}")
+
+    print("\n图文卡片封面图URL(建议 900x500 像素,公网可访问的图片地址)")
+    print("不配置则关注后回退纯文本回复(仍可引导订餐,只是没有图片卡片)")
+    h5_banner_url = prompt(
+        "封面图URL",
+        default=current_env.get("WECHAT_H5_BANNER_URL", ""),
+        required=False,
+        validator=validate_http_url,
+    )
+
+    canteen_name = prompt(
+        "食堂名称(关注回复文案显示,如 XX企业食堂)",
+        default=current_env.get("WECHAT_CANTEEN_NAME", "企业食堂"),
+        required=False,
+    )
+
     return {
         "WECHAT_APP_ID": app_id,
         "WECHAT_APP_SECRET": app_secret,
         "WECHAT_TEMPLATE_NOTIFY": template_notify,
         "WECHAT_TEMPLATE_ORDER": template_order,
         "WECHAT_H5_BASE_URL": h5_base_url,
+        "WECHAT_TOKEN": wechat_token,
+        "WECHAT_H5_BANNER_URL": h5_banner_url,
+        "WECHAT_CANTEEN_NAME": canteen_name,
     }
 
 
 def test_template(config, token):
     """发送测试模板消息。"""
-    title("第 3 步:发送测试模板消息(可选)")
+    title("第 4 步:发送测试模板消息(可选)")
 
     if not token:
         warn("access_token 不可用,跳过测试")
@@ -495,7 +554,7 @@ def test_template(config, token):
 
 def save_and_apply(config):
     """保存配置到 .env 并提示重启。"""
-    title("第 4 步:保存配置")
+    title("第 5 步:保存配置")
 
     print(f"将写入以下配置到 .env 文件:\n")
     for key, label in WECHAT_VARS.items():

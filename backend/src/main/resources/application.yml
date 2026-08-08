@@ -103,6 +103,14 @@ wechat:
   # H5 访问基础URL(用于模板消息点击跳转,如 https://canteen.example.com)
   # 反向代理场景填外网域名;末尾不带斜杠
   h5-base-url: ${WECHAT_H5_BASE_URL:}
+  # 服务器配置Token(用于消息/事件回调签名校验,公众号后台「基本配置→服务器配置」填写)
+  # 配置后启用关注后自动回复图文卡片等功能;不配置则回调接口拒绝请求
+  token: ${WECHAT_TOKEN:}
+  # 图文卡片封面图URL(关注后自动回复用,建议 900x500,公网可访问)
+  # 未配置则关注后回退纯文本回复
+  h5-banner-url: ${WECHAT_H5_BANNER_URL:}
+  # 食堂名称(关注回复文案用,未配置显示"企业食堂")
+  canteen-name: ${WECHAT_CANTEEN_NAME:企业食堂}
 
 logging:
   level:
