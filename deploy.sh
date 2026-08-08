@@ -129,14 +129,32 @@ read_input() {
 }
 
 # 读取密码(隐藏输入,带确认,-r 防止反斜杠被转义消耗)
-# 用法: read_password "提示信息" -> 输出到 stdout
+# 用法: read_password "提示信息" -> 输出到 stdout,失败返回非 0 且不输出
+# 链路说明:部分环境(sudo/SSH/非TTY)下 read -s 会不等输入直接返回空,
+# 若仅静默读取为空回退到可见输入,而可见输入在非交互环境同样会立即返回空,
+# 两个密码都为空且相等,原逻辑会走 len<8 分支死循环。故改为有界重试(3 次),
+# 完全读不到输入时明确失败,把决定权交回调用方(configure_env 会报错并提示用 canteen 重置),
+# 避免把空密码静默写入 .env 导致 AdminInitializer 跳过创建超管。
 read_password() {
     local prompt="$1"
-    local pwd1 pwd2
-    while true; do
+    local pwd1 pwd2 attempt
+    for attempt in 1 2 3; do
+        pwd1=""
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} ${prompt}: ")" pwd1
+        if [[ -z "$pwd1" ]]; then
+            read -r -p "$(echo -e "${CYAN}[?]${NC} ${prompt}(可见输入,因静默读取未生效): ")" pwd1 || pwd1=""
+        fi
         echo ""
+        # 完全读不到输入(非交互环境,stdin 为空):继续下一次尝试,最后由调用方统一失败
+        if [[ -z "$pwd1" ]]; then
+            warn "未捕获到密码输入(第 ${attempt}/3 次)。若在非交互环境运行,请改用 canteen 菜单重置密码。"
+            continue
+        fi
+        pwd2=""
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
+        if [[ -z "$pwd2" ]]; then
+            read -r -p "$(echo -e "${CYAN}[?]${NC} 确认密码(可见输入): ")" pwd2 || pwd2=""
+        fi
         echo ""
         if [[ "$pwd1" != "$pwd2" ]]; then
             warn "两次输入不一致,请重新输入"
@@ -147,8 +165,9 @@ read_password() {
             continue
         fi
         echo "$pwd1"
-        return
+        return 0
     done
+    return 1
 }
 
 # 生成随机十六进制字符串
@@ -276,6 +295,10 @@ cmd_reset_admin() {
     local username password
     username=$(read_input "超管账号名" "admin")
     password=$(read_password "输入新密码(至少 8 位)")
+    if [[ -z "$password" || ${#password} -lt 8 ]]; then
+        error "未能获取有效密码(至少 8 位),重置已取消"
+        return 1
+    fi
 
     # 检查 .env 可写
     local envfile="$PROJECT_DIR/.env"
@@ -338,6 +361,21 @@ escape_env_value() {
     local v="$1"
     v="${v//\'/\'\\\'\'}"
     printf '%s' "$v"
+}
+
+# 安全写入 .env 一行:KEY='value'(单引号包裹,值中的单引号已由 escape_env_value 处理)
+# 关键修复:用 printf %s 写入,绝不做 shell 展开。
+# 原因:不能用未加引号的 heredoc(cat <<EOF)写用户输入的密码——
+# heredoc 会对值做参数/命令展开,密码若含 $xxx 会被展开成空,导致
+# INIT_ADMIN_PASSWORD 被静默写成空值,AdminInitializer 跳过创建超管、无法登录。
+# 这正是 canteen 重置(用 set_env_var 的 awk 方式、不展开)能成功、而 deploy 失败的原因。
+write_env_line() {
+    local key="$1" value="$2"
+    if [[ -n "$value" ]]; then
+        printf "%s='%s'\n" "$key" "$value"
+    else
+        printf "%s=\n" "$key"
+    fi
 }
 
 set_env_var() {
@@ -581,7 +619,21 @@ configure_env() {
     info "配置超级管理员账号"
     local admin_user admin_pwd
     admin_user=$(read_input "超管登录账号" "admin")
-    admin_pwd=$(read_password "超管登录密码(至少 8 位)")
+    # 校验超管密码非空且>=8位:read_password 已做静默读取空值回退,这里再兜底,
+    # 避免因任何原因捕获到空/过短密码而静默写入,导致 AdminInitializer 跳过、超管无法登录。
+    admin_pwd=""
+    for _ in 1 2 3; do
+        admin_pwd=$(read_password "超管登录密码(至少 8 位)")
+        if [[ -n "$admin_pwd" && ${#admin_pwd} -ge 8 ]]; then
+            break
+        fi
+        warn "超管密码为空或不足 8 位,请重新输入"
+    done
+    if [[ -z "$admin_pwd" || ${#admin_pwd} -lt 8 ]]; then
+        error "超管密码多次输入无效,无法配置超管账号。"
+        error "请重新运行 sudo ./deploy.sh;或部署完成后运行 canteen 菜单【重置管理员密码】设置。"
+        return 1
+    fi
 
     # 转义所有用户输入值中的单引号(用于 .env 单引号包裹)
     # 单引号包裹的值中,单引号用 '\'' 转义,避免 $/空格/#/反引号 等在 source 时被 shell 展开
@@ -596,39 +648,43 @@ configure_env() {
     e_admin_pwd=$(escape_env_value "$admin_pwd")
 
     # 写入 .env(所有用户输入值用单引号包裹,固定数字/布尔值无需引号)
-    cat > .env <<EOF
-# MySQL 数据库密码
-MYSQL_ROOT_PASSWORD='${e_mysql_pwd}'
-
-# MySQL 应用专用用户(P1-3:仅 DML 权限,无 DDL/GRANT)
-DB_APP_USERNAME='${e_db_app_user}'
-DB_APP_PASSWORD='${e_db_app_pwd}'
-
-# Redis 密码(P1-4 安全修复:Redis 强制密码 + 禁用危险命令)
-REDIS_PASSWORD='${e_redis_pwd}'
-
-# JWT 密钥(自动生成)
-JWT_SECRET='${e_jwt_secret}'
-
-# Token 过期时间(毫秒)
-JWT_EXPIRATION=86400000
-JWT_EMPLOYEE_EXPIRATION=2592000000
-JWT_TERMINAL_EXPIRATION=31536000000
-
-# 备份加密密钥(P1-1:备份文件 AES-256-CBC 加密)
-BACKUP_ENCRYPTION_KEY='${e_backup_key}'
-
-# P1-5 容器降权:容器以非 root 运行,UID/GID 与宿主机用户对齐
-# 由 deploy.sh 自动检测,无需手动修改
-PUID=${puid}
-PGID=${pgid}
-
-# 初始超管账号(后端首次启动时读取,初始化后可删除)
-# 注意:FORCE=true 确保重新部署时也能更新已存在超管的密码
-INIT_ADMIN_USERNAME='${e_admin_user}'
-INIT_ADMIN_PASSWORD='${e_admin_pwd}'
-INIT_ADMIN_FORCE=true
-EOF
+    # 链路修复:改用 write_env_line/printf 逐行写入,不再用未加引号的 heredoc。
+    # 原因:heredoc 会对值做 shell 展开,用户密码若含 $xxx/反引号/反斜杠会被展开成空或截断,
+    # 导致 INIT_ADMIN_PASSWORD 静默变空、AdminInitializer 跳过建超管、无法登录。
+    # 与 cmd_reset_admin 的 set_env_var(awk 不展开)行为保持一致。
+    {
+        echo "# MySQL 数据库密码"
+        write_env_line "MYSQL_ROOT_PASSWORD" "$e_mysql_pwd"
+        echo ""
+        echo "# MySQL 应用专用用户(P1-3:仅 DML 权限,无 DDL/GRANT)"
+        write_env_line "DB_APP_USERNAME" "$e_db_app_user"
+        write_env_line "DB_APP_PASSWORD" "$e_db_app_pwd"
+        echo ""
+        echo "# Redis 密码(P1-4 安全修复:Redis 强制密码 + 禁用危险命令)"
+        write_env_line "REDIS_PASSWORD" "$e_redis_pwd"
+        echo ""
+        echo "# JWT 密钥(自动生成)"
+        write_env_line "JWT_SECRET" "$e_jwt_secret"
+        echo ""
+        echo "# Token 过期时间(毫秒)"
+        echo "JWT_EXPIRATION=86400000"
+        echo "JWT_EMPLOYEE_EXPIRATION=2592000000"
+        echo "JWT_TERMINAL_EXPIRATION=31536000000"
+        echo ""
+        echo "# 备份加密密钥(P1-1:备份文件 AES-256-CBC 加密)"
+        write_env_line "BACKUP_ENCRYPTION_KEY" "$e_backup_key"
+        echo ""
+        echo "# P1-5 容器降权:容器以非 root 运行,UID/GID 与宿主机用户对齐"
+        echo "# 由 deploy.sh 自动检测,无需手动修改"
+        echo "PUID=${puid}"
+        echo "PGID=${pgid}"
+        echo ""
+        echo "# 初始超管账号(后端首次启动时读取,初始化后可删除)"
+        echo "# 注意:FORCE=true 确保重新部署时也能更新已存在超管的密码"
+        write_env_line "INIT_ADMIN_USERNAME" "$e_admin_user"
+        write_env_line "INIT_ADMIN_PASSWORD" "$e_admin_pwd"
+        echo "INIT_ADMIN_FORCE=true"
+    } > .env
 
     # P2-7 安全修复:.env 包含敏感信息,强制权限 600(仅属主可读写)
     chmod 600 .env
@@ -973,6 +1029,47 @@ verify_and_summary() {
 #==============================================================
 
 #==============================================================
+# 校验超管是否已成功初始化(backend healthy 后查询 admin 表)
+# 返回 0 表示已确认存在指定超管(role=1),1 表示未确认。
+# 链路意义:只有确认超管已落库,才能安全清理 .env 中的 INIT_ADMIN_*。
+# 若未创建成功就清理,后续 docker compose restart(不重读 env)不会再次初始化,
+# 超管将永远无法用部署时设置的密码登录,只能依赖 canteen 重置。
+# 因此 deploy 末尾必须"先校验、后清理"。
+#==============================================================
+verify_admin_initialized() {
+    local username="$1" envfile="$PROJECT_DIR/.env"
+    [[ -n "$username" ]] || return 1
+
+    local root_pwd db_name
+    root_pwd=$(read_env_var "MYSQL_ROOT_PASSWORD" "$envfile" 2>/dev/null) || root_pwd=""
+    db_name=$(read_env_var "MYSQL_DATABASE" "$envfile" 2>/dev/null) || db_name=""
+    [[ -n "$root_pwd" ]] || return 1
+    db_name="${db_name:-canteen}"
+
+    # 等待 backend 容器 healthy(AdminInitializer 在 ApplicationReadyEvent 执行)
+    local i=0 state=""
+    while [[ $i -lt 60 ]]; do
+        state=$(docker inspect -f '{{.State.Health.Status}}' canteen-backend 2>/dev/null || echo "missing")
+        if [[ "$state" == "healthy" ]]; then
+            break
+        fi
+        sleep 3
+        i=$((i + 3))
+    done
+    if [[ "$state" != "healthy" ]]; then
+        warn "backend 未进入 healthy(${state}),无法确认超管初始化"
+        return 1
+    fi
+
+    # 查询 admin 表是否存在该超管(转义用户名中的单引号,防 SQL 注入)
+    local esc_user count
+    esc_user="${username//\'/\'\'}"
+    count=$(docker exec -i canteen-mysql mysql -uroot -p"${root_pwd}" -s -N -e \
+        "SELECT COUNT(*) FROM ${db_name}.admin WHERE username='${esc_user}' AND role=1;" 2>/dev/null || echo "0")
+    [[ "$count" -ge 1 ]] 2>/dev/null
+}
+
+#==============================================================
 # P2-8 部署后清理 .env 中的临时敏感变量
 #==============================================================
 cleanup_sensitive_env() {
@@ -1051,8 +1148,19 @@ cmd_deploy() {
     fi
 
     # P2-8:部署完成后清理 .env 中的临时敏感变量(INIT_ADMIN_PASSWORD / INIT_ADMIN_FORCE)
-    # 密码已在数据库中,无需在 .env 明文保留,避免后续重启后端时被 INIT_ADMIN_FORCE 覆盖
-    cleanup_sensitive_env
+    # 链路修复:必须先确认超管已成功落库才清理,否则后续 restart(不重读 env)无法再初始化超管。
+    # 由 verify_admin_initialized 校验;未确认时保留 INIT_ADMIN_*,避免永久丢失部署密码。
+    local admin_user=""
+    admin_user=$(read_env_var "INIT_ADMIN_USERNAME" "$PROJECT_DIR/.env" 2>/dev/null) || admin_user=""
+    if [[ -n "$admin_user" ]] && verify_admin_initialized "$admin_user"; then
+        cleanup_sensitive_env
+    else
+        warn "未能确认超管 '${admin_user:-?}' 已初始化,保留 .env 中的 INIT_ADMIN_PASSWORD"
+        warn "请先排查后端日志: docker compose logs --tail=100 backend"
+        warn "后端就绪后执行以下命令重建 backend 以完成超管初始化:"
+        warn "  docker compose up -d --no-deps backend"
+        warn "或在服务器上运行 canteen → 重置管理员密码"
+    fi
 
     verify_and_summary
 }
