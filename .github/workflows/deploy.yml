@@ -126,12 +126,20 @@ jobs:
           # 使用带 token 的远程地址,确保有推送权限
           GIT_ORIGIN="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          # 在临时目录创建 orphan deploy 分支(与 publish.sh 同理,无需克隆远程大文件)
+          # 在临时目录准备 deploy 分支。
+          # 关键:必须保留现有 deploy 历史(检出 origin/deploy 后叠加新提交),
+          # 不能每次新建 orphan 分支——否则服务器 git pull 会因"无关历史"失败。
+          # 首次(远程无 deploy 分支)才回退到 orphan。
           TMP=$(mktemp -d)
           cd "$TMP"
           git init --quiet
           git remote add origin "$GIT_ORIGIN"
-          git checkout --orphan deploy 2>/dev/null || git checkout -B deploy
+          git fetch origin deploy 2>/dev/null || true
+          if git rev-parse --verify origin/deploy >/dev/null 2>&1; then
+            git checkout -B deploy origin/deploy
+          else
+            git checkout --orphan deploy
+          fi
           git rm -rf . 2>/dev/null || true
 
           # 根目录运行时文件
@@ -170,5 +178,6 @@ jobs:
           git config http.lowSpeedTime 999999
 
           echo "推送 deploy 分支..."
-          git push origin deploy --force
+          # 基于现有历史叠加提交,普通快进推送即可;若并发导致非快进则带租约强推
+          git push origin deploy || git push origin deploy --force-with-lease
         shell: bash
