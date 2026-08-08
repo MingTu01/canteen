@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   ElButton,
   ElDialog,
@@ -18,7 +18,7 @@ import {
   ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
-import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X, CreditCard, Info } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X, Info } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -106,129 +106,13 @@ const openEdit = (row: Employee) => {
 // ===== 读卡器刷卡(读卡助手模拟键盘) =====
 // 读卡助手(本地 32 位进程加载 OUR_IDR.dll)把卡号模拟成键盘输入+回车,
 // 只要卡号输入框聚焦,刷卡就会自动填入卡号,前端无需任何接线。
-// 本页只负责:轮询读卡助手状态,在输入框末尾显示绿色/红色图标,提供详情与驱动下载。
-const CARD_HELPER_URL = 'http://127.0.0.1:8765'
-// 读卡助手安装包下载地址(指向 GitHub Release 资产,留空则隐藏下载按钮)
-const CARD_HELPER_DOWNLOAD_URL = 'https://api.gitproxy.dev/https://github.com/MingTu01/canteen/releases/download/card-helper-v1.2.0/CanteenCardHelper-Setup-1.2.0.exe'
-
-interface CardReaderStatus {
-  running: boolean
-  dll_loaded: boolean
-  connected: boolean
-  driver_ok: boolean
-  active: boolean
-  mode: string
-  description: string
-  last_ret: number | null
-  last_ret_desc: string
-  version: string
-  send_enter: boolean
-  python_bits: number
-}
+// 本页不再检测读卡助手状态(检测逻辑已移至下载中心),
+// 仅在卡号输入框旁显示静态提示,引导用户到右上角下载中心下载读卡助手。
 
 const cardNoInput = ref()
-const cardReaderStatus = ref<CardReaderStatus | null>(null)
-const cardReaderDetailVisible = ref(false)
-let cardStatusTimer: ReturnType<typeof setInterval> | null = null
 
-/** 读卡器是否正常(绿色):已连接 且 正在读卡(未暂停) */
-const cardReaderOk = computed(() => !!cardReaderStatus.value?.connected && cardReaderStatus.value?.active !== false)
-
-/** 读卡状态机(检测逻辑 v2):按优先级划分 UI 状态 */
-const readerUi = computed(() => {
-  const s = cardReaderStatus.value
-  if (!s) {
-    // S5 读卡助手未运行(未安装或已停止)
-    return {
-      key: 'no_helper',
-      title: '未检测到读卡助手',
-      desc: '读卡助手未安装或未运行。若你的读卡器是 CH375/CH372(OUR_IDR)类型,请下载并安装读卡助手。',
-      showDownload: true,
-    }
-  }
-  if (!s.dll_loaded) {
-    // S4 DLL 缺失
-    return {
-      key: 'dll_missing',
-      title: '读卡助手不完整',
-      desc: '未找到 OUR_IDR.dll,请重新安装读卡助手。',
-      showDownload: true,
-    }
-  }
-  if (!s.connected) {
-    // S3 读卡助手已运行,但未检测到 OUR_IDR 读卡器
-    return {
-      key: 'no_reader',
-      title: '未检测到 OUR_IDR 读卡器',
-      desc: '读卡助手已运行,但未检测到 CH375/CH372 读卡器。请检查读卡器是否插入、驱动是否正常。',
-      showDownload: !s.driver_ok,
-    }
-  }
-  if (!s.active) {
-    // S2 读卡已暂停(托盘「暂停使用」开启)
-    return {
-      key: 'paused',
-      title: '读卡已暂停',
-      desc: '读卡器已暂停使用(让给其他程序)。请右键右下角托盘图标,选择「继续使用」恢复刷卡。',
-      showDownload: false,
-    }
-  }
-  // S1 正常
-  return {
-    key: 'normal',
-    title: '读卡器已就绪',
-    desc: '将光标置于卡号输入框后刷卡即可自动填入。',
-    showDownload: false,
-  }
-})
-
-/** 卡号框图标悬停提示(随状态变化) */
-const cardReaderIconTitle = computed(() => {
-  switch (readerUi.value.key) {
-    case 'normal': return '读卡器正常,点击查看详情'
-    case 'paused': return '读卡已暂停,点击查看详情'
-    case 'no_reader': return '未检测到读卡器,点击查看详情'
-    case 'dll_missing': return '读卡助手不完整,点击查看详情'
-    default: return '未检测到读卡助手,点击查看详情'
-  }
-})
-
-/** 轮询读卡助手状态 */
-const pollCardStatus = async () => {
-  try {
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 1500)
-    const res = await fetch(`${CARD_HELPER_URL}/status`, { signal: ctrl.signal })
-    clearTimeout(timer)
-    if (res.ok) {
-      cardReaderStatus.value = (await res.json()) as CardReaderStatus
-    } else {
-      cardReaderStatus.value = null
-    }
-  } catch {
-    cardReaderStatus.value = null
-  }
-}
-
-/** 点击读卡图标:刷新状态并打开详情弹窗 */
-const openCardReaderDetail = () => {
-  pollCardStatus().then(() => {
-    cardReaderDetailVisible.value = true
-  })
-}
-
-/** 下载读卡助手安装包(安装并注册开机自启) */
-const downloadCardHelper = () => {
-  if (!CARD_HELPER_DOWNLOAD_URL) {
-    ElMessage.warning('暂未配置读卡助手下载地址,请联系管理员')
-    return
-  }
-  window.open(CARD_HELPER_DOWNLOAD_URL, '_blank')
-}
-
-/** 弹窗打开后:刷新读卡状态并聚焦卡号输入框,刷卡即可填入 */
+/** 弹窗打开后:聚焦卡号输入框,刷卡即可填入 */
 const onDialogOpened = async () => {
-  await pollCardStatus()
   nextTick(() => cardNoInput.value?.focus())
 }
 
@@ -586,15 +470,6 @@ const handleExport = async () => {
 onMounted(() => {
   fetchList()
   fetchDepartments()
-  pollCardStatus()
-  cardStatusTimer = setInterval(pollCardStatus, 3000)
-})
-
-onUnmounted(() => {
-  if (cardStatusTimer) {
-    clearInterval(cardStatusTimer)
-    cardStatusTimer = null
-  }
 })
 
 // ===== 批量导入照片 =====
@@ -924,15 +799,12 @@ const onPhotoImportClose = () => {
               clearable
             >
               <template #suffix>
-                <button
-                  type="button"
-                  class="card-status-btn"
-                  :class="cardReaderOk ? 'ok' : 'down'"
-                  :title="cardReaderIconTitle"
-                  @click="openCardReaderDetail"
+                <span
+                  class="card-hint-icon"
+                  title="读卡器需要安装读卡助手。请点击右上角下载按钮获取。通用模拟键盘/HID 读卡器无需读卡助手。"
                 >
-                  <CreditCard :size="16" />
-                </button>
+                  <Info :size="16" />
+                </span>
               </template>
             </ElInput>
           </ElFormItem>
@@ -965,57 +837,6 @@ const onPhotoImportClose = () => {
         <template #footer>
           <ElButton @click="dialogVisible = false">取消</ElButton>
           <ElButton type="primary" :loading="dialogLoading" @click="handleSave">保存</ElButton>
-        </template>
-      </ElDialog>
-
-      <!-- 读卡器详情弹窗 -->
-      <ElDialog
-        v-model="cardReaderDetailVisible"
-        title="读卡器状态"
-        width="440px"
-        :close-on-click-modal="false"
-        append-to-body
-      >
-        <div class="card-reader-detail">
-          <div
-            class="status-row"
-            :class="readerUi.key === 'normal' ? 'ok' : 'down'"
-          >
-            <CreditCard :size="18" />
-            <div>
-              <div class="status-title">{{ readerUi.title }}</div>
-              <div class="status-desc">{{ readerUi.desc }}</div>
-            </div>
-          </div>
-
-          <!-- 仅当读卡器已连接(S1/S2)时才展示 OUR_IDR 设备详情,避免误报 -->
-          <div v-if="cardReaderStatus?.connected" class="detail-grid mt-3">
-            <div class="detail-item"><span>接入方式</span><b>{{ cardReaderStatus.mode }}</b></div>
-            <div class="detail-item"><span>设备</span><b>{{ cardReaderStatus.description }}</b></div>
-            <div class="detail-item"><span>驱动</span>
-              <b :class="cardReaderStatus.driver_ok ? 'text-success' : 'text-danger'">
-                {{ cardReaderStatus.driver_ok ? '正常' : '未安装/异常' }}
-              </b>
-            </div>
-            <div class="detail-item"><span>版本</span><b>v{{ cardReaderStatus.version }}</b></div>
-            <div class="detail-item"><span>追加回车</span><b>{{ cardReaderStatus.send_enter ? '是' : '否' }}</b></div>
-            <div class="detail-item"><span>运行位数</span><b>Python {{ cardReaderStatus.python_bits }} 位</b></div>
-          </div>
-
-          <div v-if="readerUi.showDownload && CARD_HELPER_DOWNLOAD_URL" class="mt-3">
-            <ElButton type="primary" class="w-full" @click="downloadCardHelper">
-              <Download :size="16" class="mr-1" />{{ cardReaderStatus?.connected === false ? '下载/安装读卡器驱动' : '下载读卡助手(含驱动)' }}
-            </ElButton>
-          </div>
-
-          <!-- 恒常提示:通用模拟键盘/HID 读卡器无需读卡助手 -->
-          <div class="hid-hint mt-3">
-            <Info :size="14" />
-            <span>提示:若你的读卡器是通用模拟键盘 / HID 类型,无需读卡助手。将光标置于卡号输入框后直接刷卡,卡号会自动填入。</span>
-          </div>
-        </div>
-        <template #footer>
-          <ElButton @click="cardReaderDetailVisible = false">关闭</ElButton>
         </template>
       </ElDialog>
 
@@ -1363,97 +1184,13 @@ const onPhotoImportClose = () => {
 </template>
 
 <style scoped>
-/* 卡号输入框末尾的读卡状态图标 */
-.card-status-btn {
+/* 卡号输入框末尾的读卡提示图标 */
+.card-hint-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: transparent;
-  cursor: pointer;
   padding: 2px;
-  border-radius: 6px;
-  transition: background 0.2s;
-}
-.card-status-btn:hover {
-  background: var(--el-fill-color-light);
-}
-.card-status-btn.ok {
-  color: #22c55e;
-  animation: card-blink 1.2s ease-in-out infinite;
-}
-.card-status-btn.down {
-  color: #ef4444;
-}
-@keyframes card-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-/* 读卡器详情弹窗 */
-.status-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 10px;
-}
-.status-row.ok {
-  color: #16a34a;
-  background: rgba(34, 197, 94, 0.1);
-}
-.status-row.down {
-  color: #dc2626;
-  background: rgba(239, 68, 68, 0.1);
-}
-.status-title {
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.status-desc {
-  margin-top: 2px;
-  font-size: 13px;
   color: var(--el-text-color-secondary);
-}
-.detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 12px;
-  padding: 4px 0;
-}
-.detail-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-}
-.detail-item span {
-  color: var(--el-text-color-secondary);
-}
-.detail-item b {
-  font-weight: 500;
-  color: var(--el-text-color-primary);
-  text-align: right;
-}
-.text-success {
-  color: #16a34a;
-}
-.text-danger {
-  color: #dc2626;
-}
-.hid-hint {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-}
-.hid-hint svg {
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: #2563eb;
+  cursor: help;
 }
 </style>

@@ -16,11 +16,12 @@ import api from '@/api'
 import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2, Camera } from 'lucide-vue-next'
+import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
 import BrandingBg from '@/components/BrandingBg.vue'
 import Modal from '@/components/Modal.vue'
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
+import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
 import { cardInterval } from '@/store/terminalSettings'
 
 const router = useRouter()
@@ -164,6 +165,7 @@ const cameraActive = ref(false) // 摄像头是否已启动
 const {
   start: startCamera,
   stop: stopCamera,
+  cameraAvailable,
 } = useCameraScanner(
   (code) => {
     // 摄像头扫描到码:关闭弹窗并走统一输入处理(与读卡器共用)
@@ -174,10 +176,28 @@ const {
   { debounceMs: cardInterval.value * 1000 },
 )
 
-/** 主刷卡图标点击:仅显示提示(生产环境需真实读卡器) */
+// ===== 设备在线检测(读卡器 + 摄像头) =====
+// 读卡器:Python Shell 环境 3 秒轮询真实硬件状态;摄像头:由 cameraAvailable 驱动
+const { hasCardReader, hasCamera } = useDevicePresence(cameraAvailable)
+
+/** 待机页提示文字(根据在线设备动态变化) */
+const scanHint = computed(() =>
+  getScanHint(hasCardReader.value, hasCamera.value, true),
+)
+
+/** 待机页图标:只有摄像头/扫码枪(无读卡器)用 ScanLine,其余用 CreditCard */
+const showScanIcon = computed(() => !hasCardReader.value && hasCamera.value)
+
+/** 主刷卡图标点击:根据设备显示对应提示 */
 const onCardClick = () => {
   if (scanning.value) return
-  showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描取餐码')
+  if (hasCardReader.value && hasCamera.value) {
+    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描取餐码')
+  } else if (hasCardReader.value) {
+    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上')
+  } else {
+    showErrorWithAutoClose('提示', '请使用扫码枪扫描取餐码,或将二维码对准摄像头')
+  }
 }
 
 onMounted(() => {
@@ -238,11 +258,12 @@ onUnmounted(() => {
         >
           <Loader2 v-if="scanning" class="spinner" :size="56" />
           <div v-else class="pickup-standby__scan-icon">
-            <CreditCard :size="56" />
+            <ScanLine v-if="showScanIcon" :size="56" />
+            <CreditCard v-else :size="56" />
           </div>
         </button>
         <div class="pickup-standby__scan-hint">
-          {{ scanning ? '识别中...' : '请刷卡或扫码取餐' }}
+          {{ scanning ? '识别中...' : scanHint }}
         </div>
 
         <!-- 摄像头扫码按钮 -->

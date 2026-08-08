@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElDrawer, ElDropdown, ElDropdownMenu, ElDropdownItem, ElMessage, ElPopover, ElTag } from 'element-plus'
+import { ElDrawer, ElDropdown, ElDropdownMenu, ElDropdownItem, ElMessage, ElPopover, ElTag, ElDialog } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { useAppStore } from '@/stores/app'
@@ -29,6 +29,7 @@ import {
   Sun,
   Moon,
   Bell,
+  Download,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -41,8 +42,11 @@ import {
   ShoppingCart,
   Package,
   MessageSquare,
+  CreditCard,
+  Monitor,
 } from 'lucide-vue-next'
 import { normalizeList } from '@/utils/list'
+import { useDownloadCenter } from '@/composables/useDownloadCenter'
 
 interface MenuItem {
   path: string
@@ -58,6 +62,23 @@ const themeStore = useThemeStore()
 const appStore = useAppStore()
 
 const mobileDrawerOpen = ref(false)
+
+// 下载中心
+const downloadCenter = useDownloadCenter()
+const downloadDialogVisible = ref(false)
+
+/** 打开下载弹窗:加载最新资产信息 */
+const openDownloadDialog = async () => {
+  downloadDialogVisible.value = true
+  await downloadCenter.load()
+}
+
+/** 格式化日期 */
+const formatDate = (iso: string) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 const menuItems: MenuItem[] = [
   // 角色定义:1=超管,2=门店管理员,3=终端,4=财务,5=厨师长,6=店长
@@ -334,6 +355,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex items-center gap-1">
+          <!-- Download center -->
+          <button
+            class="rounded-lg p-2 hover:bg-bg-tertiary"
+            aria-label="下载中心"
+            title="下载中心"
+            @click="openDownloadDialog"
+          >
+            <Download class="h-5 w-5 text-text-secondary" />
+          </button>
+
           <!-- Theme toggle -->
           <button
             class="rounded-lg p-2 hover:bg-bg-tertiary"
@@ -448,5 +479,90 @@ onBeforeUnmount(() => {
         <slot />
       </main>
     </div>
+
+    <!-- 下载中心弹窗 -->
+    <ElDialog
+      v-model="downloadDialogVisible"
+      title="下载中心"
+      width="520px"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <div v-loading="downloadCenter.loading.value" class="space-y-4">
+        <!-- 读卡助手 -->
+        <div class="rounded-lg border border-border p-4">
+          <div class="flex items-start gap-3">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
+              <CreditCard class="h-6 w-6" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <h4 class="font-semibold text-text">读卡助手</h4>
+                <span v-if="downloadCenter.cardHelper.value" class="text-xs text-text-muted">
+                  v{{ downloadCenter.cardHelper.value.version }}
+                </span>
+              </div>
+              <p class="mt-1 text-sm text-text-secondary">
+                用于 CH375/CH372 读卡器刷卡识别,管理员录入员工卡号时需要安装。
+              </p>
+              <p v-if="downloadCenter.cardHelper.value" class="mt-1 text-xs text-text-muted">
+                发布日期: {{ formatDate(downloadCenter.cardHelper.value.publishedAt) }}
+              </p>
+              <ElButton
+                type="warning"
+                size="small"
+                class="mt-2"
+                :loading="downloadCenter.downloading.value"
+                :disabled="!downloadCenter.cardHelper.value"
+                @click="downloadCenter.download(downloadCenter.cardHelper.value)"
+              >
+                <Download :size="14" class="mr-1" />下载读卡助手
+              </ElButton>
+            </div>
+          </div>
+        </div>
+
+        <!-- X86 终端 -->
+        <div class="rounded-lg border border-border p-4">
+          <div class="flex items-start gap-3">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Monitor class="h-6 w-6" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <h4 class="font-semibold text-text">X86 终端程序</h4>
+                <span v-if="downloadCenter.terminal.value" class="text-xs text-text-muted">
+                  v{{ downloadCenter.terminal.value.version }}
+                </span>
+              </div>
+              <p class="mt-1 text-sm text-text-secondary">
+                食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。
+              </p>
+              <p v-if="downloadCenter.terminal.value" class="mt-1 text-xs text-text-muted">
+                发布日期: {{ formatDate(downloadCenter.terminal.value.publishedAt) }}
+              </p>
+              <ElButton
+                type="primary"
+                size="small"
+                class="mt-2"
+                :loading="downloadCenter.downloading.value"
+                :disabled="!downloadCenter.terminal.value"
+                @click="downloadCenter.download(downloadCenter.terminal.value)"
+              >
+                <Download :size="14" class="mr-1" />下载 X86 终端
+              </ElButton>
+            </div>
+          </div>
+        </div>
+
+        <!-- 加载失败提示 -->
+        <div v-if="!downloadCenter.loading.value && !downloadCenter.cardHelper.value && !downloadCenter.terminal.value" class="py-4 text-center text-sm text-text-muted">
+          无法获取下载信息,请检查网络连接或稍后重试。
+        </div>
+      </div>
+      <template #footer>
+        <ElButton @click="downloadDialogVisible = false">关闭</ElButton>
+      </template>
+    </ElDialog>
   </div>
 </template>

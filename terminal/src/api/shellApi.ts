@@ -159,14 +159,20 @@ export interface CardReaderStatus {
   running: boolean
   /** DLL 是否加载成功 */
   dll_loaded: boolean
-  /** 设备是否已连接 */
+  /** 设备是否已连接(基于 idr_read 返回码判断,反映真实硬件状态) */
   connected: boolean
+  /** 驱动是否正常 */
+  driver_ok: boolean
   /** 设备描述 */
   description: string
   /** 读卡器模式 */
   mode: string
   /** 防抖间隔(秒) */
   interval: number
+  /** 最近一次 idr_read 返回码(0=成功 8=无卡 22/23/24=设备异常) */
+  last_ret: number | null
+  /** 返回码描述 */
+  last_ret_desc: string
 }
 
 /** 设备状态检测结果 */

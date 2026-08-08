@@ -68,11 +68,18 @@ ISCC_CANDIDATES = [
 def run(cmd, cwd=None, env=None, check=True):
     """运行命令,实时输出。失败抛出 CalledProcessError。"""
     info(f'执行: {" ".join(cmd) if isinstance(cmd, list) else cmd}')
+    # Windows 上 npm/node 等是 .cmd 批处理,list 形式 subprocess 默认 shell=False 找不到
+    # 对 list 参数在 Windows 上也启用 shell,确保能找到 .cmd/.bat
+    use_shell = isinstance(cmd, str) or (os.name == 'nt' and isinstance(cmd, list))
+    if isinstance(cmd, list) and use_shell:
+        # shell=True 时需要把 list 拼成字符串(用 shlex 保证路径含空格正确)
+        import shlex
+        cmd = ' '.join(shlex.quote(str(c)) if os.name != 'nt' else f'"{c}"' if ' ' in str(c) else str(c) for c in cmd)
     result = subprocess.run(
         cmd,
         cwd=cwd,
         env=env,
-        shell=isinstance(cmd, str),
+        shell=use_shell,
         encoding='utf-8',
         errors='replace',
     )

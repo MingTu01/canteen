@@ -18,10 +18,11 @@ import api from '@/api'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey, fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2, Camera } from 'lucide-vue-next'
+import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
 import BrandingBg from '@/components/BrandingBg.vue'
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
+import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
 import { cardInterval } from '@/store/terminalSettings'
 
 const router = useRouter()
@@ -110,6 +111,7 @@ const cameraActive = ref(false) // 摄像头是否已启动
 const {
   start: startCamera,
   stop: stopCamera,
+  cameraAvailable,
 } = useCameraScanner(
   (code) => {
     scan(code)
@@ -117,6 +119,18 @@ const {
   // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
   { debounceMs: cardInterval.value * 1000 },
 )
+
+// ===== 设备在线检测(读卡器 + 摄像头) =====
+// 读卡器:Python Shell 环境 3 秒轮询真实硬件状态;摄像头:由 cameraAvailable 驱动
+const { hasCardReader, hasCamera } = useDevicePresence(cameraAvailable)
+
+/** 待机页提示文字(根据在线设备动态变化) */
+const scanHint = computed(() =>
+  getScanHint(hasCardReader.value, hasCamera.value, false),
+)
+
+/** 待机页图标:只有摄像头/扫码枪(无读卡器)用 ScanLine,其余用 CreditCard */
+const showScanIcon = computed(() => !hasCardReader.value && hasCamera.value)
 
 onMounted(() => {
   resetOrderFlow()
@@ -173,11 +187,12 @@ onUnmounted(() => {
         >
           <Loader2 v-if="scanning" class="spinner" :size="56" />
           <div v-else class="standby__scan-icon card-pulse">
-            <CreditCard :size="56" />
+            <ScanLine v-if="showScanIcon" :size="56" />
+            <CreditCard v-else :size="56" />
           </div>
         </button>
         <div class="standby__scan-hint">
-          {{ scanning ? '识别中...' : '请将员工卡放置在感应区' }}
+          {{ scanning ? '识别中...' : scanHint }}
         </div>
 
         <!-- 错误提示 -->

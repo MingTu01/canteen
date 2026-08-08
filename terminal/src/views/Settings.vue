@@ -15,6 +15,7 @@
  */
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import { version as appVersion } from '../../package.json'
 import {
   Server,
   RotateCcw,
@@ -481,6 +482,11 @@ async function prefillServerUrl() {
   }
 }
 
+/** 设备状态轮询定时器 */
+let devicePollTimer: ReturnType<typeof setInterval> | null = null
+/** devicechange 事件处理函数引用 */
+let deviceChangeHandler: (() => void) | null = null
+
 onMounted(async () => {
   reloadBound()
   await prefillServerUrl()
@@ -489,10 +495,36 @@ onMounted(async () => {
   syncRuntimeForm()
   // 自动检测设备状态
   checkAllDevices()
+
+  // 读卡器状态轮询(每 3 秒,Python Shell 环境)
+  // 确保读卡器拔掉后状态实时更新(card_reader.py 的 connected 基于 idr_read 返回码)
+  if (isPythonShell.value) {
+    devicePollTimer = setInterval(checkCardReader, 3000)
+  }
+
+  // 摄像头热插拔监听(devicechange 事件)
+  // 拔掉/插入摄像头时自动重新枚举,状态实时更新
+  if (cameraSupported && navigator.mediaDevices) {
+    deviceChangeHandler = () => {
+      // 延迟 500ms 等设备枚举稳定
+      setTimeout(checkCameras, 500)
+    }
+    navigator.mediaDevices.addEventListener('devicechange', deviceChangeHandler)
+  }
 })
 onBeforeUnmount(() => {
   if (bindSuccessTimer) clearTimeout(bindSuccessTimer)
   if (runtimeMsgTimer) clearTimeout(runtimeMsgTimer)
+  // 清理设备状态轮询
+  if (devicePollTimer) {
+    clearInterval(devicePollTimer)
+    devicePollTimer = null
+  }
+  // 清理 devicechange 监听
+  if (deviceChangeHandler && navigator.mediaDevices) {
+    navigator.mediaDevices.removeEventListener('devicechange', deviceChangeHandler)
+    deviceChangeHandler = null
+  }
 })
 </script>
 
@@ -898,7 +930,7 @@ onBeforeUnmount(() => {
           <dl class="settings__info-list">
             <div class="settings__info-row">
               <dt>系统版本</dt>
-              <dd>v0.0.4</dd>
+              <dd>v{{ appVersion }}</dd>
             </div>
             <div class="settings__info-row">
               <dt>浏览器</dt>

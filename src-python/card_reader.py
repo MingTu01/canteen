@@ -56,6 +56,9 @@ class CardReader(QObject):
         self._running = False
         self._thread = None
         self._card_interval = max(0.5, float(card_interval))
+        # 最近一次 idr_read 返回码,用于判断真实硬件连接状态
+        # 0=读到卡 8=卡不在感应区(正常) 22/23/24=设备异常(拔掉/驱动错)
+        self._last_ret = None
 
     def set_interval(self, seconds):
         """动态更新防抖间隔(配置页修改后立即生效,无需重启读卡器)。"""
@@ -128,23 +131,39 @@ class CardReader(QObject):
     def status_info(self):
         """返回读卡器状态字典(供前端设备状态页展示)。
 
+        connected 判定基于最近一次 idr_read 返回码:
+            0=读到卡, 8=卡不在感应区(正常轮询) → 已连接
+            22/23/24=设备异常(拔掉/驱动错) → 未连接
+            None=尚未开始读卡 → 未连接
+
         Returns:
             dict: {
                 running: 读卡线程是否运行,
                 dll_loaded: DLL 是否加载成功,
-                connected: 设备是否连接(线程运行 + DLL 加载),
+                connected: 设备是否真实连接(基于返回码,非线程状态),
+                driver_ok: 驱动是否正常,
                 description: 设备描述,
+                mode: 读卡器模式,
                 interval: 防抖间隔,
+                last_ret: 最近一次返回码,
+                last_ret_desc: 返回码描述,
             }
         """
         dll_loaded = self._dll is not None
+        last = self._last_ret
+        # 连接判定:最近一次读卡返回码为 0 或 8(感应区正常轮询)
+        connected = dll_loaded and last is not None and last in (0, 8)
+        driver_ok = dll_loaded and last is not None and last != 23
         return {
             'running': self._running,
             'dll_loaded': dll_loaded,
-            'connected': self._running and dll_loaded,
+            'connected': connected,
+            'driver_ok': driver_ok,
             'description': 'CH375/CH372 USB 读卡器(OUR_IDR.dll)',
             'mode': 'OUR_IDR',
             'interval': self._card_interval,
+            'last_ret': last,
+            'last_ret_desc': ERROR_CODES.get(last, '未知') if last is not None else '未检测',
         }
 
     def _find_dll_dir(self):
@@ -198,6 +217,7 @@ class CardReader(QObject):
         # 1. 蜂鸣确认读卡器连接
         try:
             ret = self._dll.idr_beep(38)  # 38*2ms = 76ms 短响
+            self._last_ret = ret
             if ret == 0:
                 self.status.emit('读卡器连接成功(蜂鸣确认)')
             else:
@@ -230,6 +250,8 @@ class CardReader(QObject):
                 self.status.emit(f'idr_read 异常: {e}')
                 time.sleep(1)
                 continue
+            # 记录最近一次返回码,供 status_info() 判断真实连接状态
+            self._last_ret = ret
 
             if ret == 0:
                 # 读卡成功

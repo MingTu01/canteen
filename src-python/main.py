@@ -127,7 +127,7 @@ if getattr(sys, 'frozen', False) and sys.platform == 'win32':
     #
     #   --disable-gpu-sandbox: 禁用 GPU 沙箱(终端/虚拟机环境下 GPU 沙箱常因
     #   驱动问题导致渲染异常)。
-    os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--no-sandbox --disable-gpu-sandbox --disable-software-rasterizer'
+    os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--no-sandbox --disable-gpu-sandbox --disable-software-rasterizer --enable-media-stream --use-fake-ui-for-media-stream'
     # 用短路径写 qt.conf(避免中文路径被 QtWebEngine 的 ANSI API 截断为 ??)
     # 关键:bin/qt.conf 的 Prefix 必须是 ".."(父目录),因为 QtWebEngineProcess.exe
     # 在 bin/ 下,而 resources/ 和 translations/ 在 bin/ 的父目录(Qt5/)下。
@@ -211,6 +211,19 @@ class FullscreenWebPage(QWebEnginePage):
     def createWindow(self, _type):
         # 阻止 target=_blank 弹出新窗口
         return None
+
+    def featurePermissionRequested(self, url, feature):
+        """自动授予摄像头/媒体权限。
+
+        PyQtWebEngine 默认拒绝 getUserMedia 请求,导致前端
+        navigator.mediaDevices.enumerateDevices() 拿不到摄像头设备。
+        终端是本地应用,自动授予 MediaVideoCapture 权限即可。
+        """
+        if feature == QWebEnginePage.MediaVideoCapture:
+            self.setFeaturePermission(url, QWebEnginePage.MediaVideoCapture, QWebEnginePage.PermissionGrantedByUser)
+            print(f'[WebEngine] 已授予摄像头权限: {url.toString()}')
+        else:
+            super().featurePermissionRequested(url, feature)
 
 
 class TerminalWindow(QWidget):

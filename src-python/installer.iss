@@ -134,11 +134,10 @@ Type: files; Name: "{app}\remove_ch375_driver.cmd"
 
 [Code]
 // =============================================================================
-// 全局变量:卸载向导中的"驱动移除"自定义页面
+// 全局变量:卸载时是否移除驱动(由 InitializeUninstall 中的 MsgBox 询问)
 // =============================================================================
 var
-    RemoveDriverPage: TWizardPage;
-    RemoveDriverCheck: TNewCheckBox;
+    RemoveDriverOnUninstall: Boolean;
 
 // =============================================================================
 // 自定义函数:检测 drivers 目录是否有驱动 INF 文件
@@ -229,14 +228,19 @@ begin
 end;
 
 // =============================================================================
-// 卸载初始化:先关闭正在运行的终端进程
+// 卸载初始化:先关闭正在运行的终端进程,询问是否移除驱动
 // =============================================================================
 // 关键:如果终端还在运行,_internal 目录里的 PyQt5 DLL / QtWebEngineProcess.exe
 // 会被进程占用,Inno Setup 无法删除这些文件,导致整个安装目录残留。
 // 必须在卸载文件之前(taskkill)关闭进程,并等待文件句柄释放。
+//
+// 注意:Inno Setup 不允许在卸载阶段调用 CreateCustomPage(会报
+// "Cannot call CreateCustomPage function during Uninstall" 运行时错误)。
+// 改用 MsgBox 询问用户是否移除 CH375 驱动。
 function InitializeUninstall(): Boolean;
 var
     ResultCode: Integer;
+    Msg: String;
 begin
     // 强制结束终端进程(不存在时 taskkill 返回非零,忽略即可)
     Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im canteen-terminal.exe',
@@ -244,56 +248,29 @@ begin
     // 等待 Windows 释放文件句柄(DLL 卸载有延迟)
     Sleep(1500);
 
-    // =========================================================================
-    // 创建"驱动移除选项"自定义页面(插入在卸载向导欢迎页之后)
-    // 页面内放一个复选框,默认不勾选 => 默认保留 CH375 驱动,避免影响其他读卡设备。
-    // =========================================================================
-    RemoveDriverPage := CreateCustomPage(wpWelcome, '驱动移除选项', '是否需要移除 CH375 读卡器驱动?');
-    RemoveDriverCheck := TNewCheckBox.Create(RemoveDriverPage);
-    RemoveDriverCheck.Left := ScaleX(40);
-    RemoveDriverCheck.Top := ScaleY(60);
-    RemoveDriverCheck.Width := RemoveDriverPage.SurfaceWidth - ScaleX(80);
-    RemoveDriverCheck.Height := ScaleY(20);
-    RemoveDriverCheck.Caption := '同时移除 CH375 读卡器驱动(默认不勾选,建议保留)';
-    RemoveDriverCheck.Checked := False;
-    RemoveDriverCheck.Parent := RemoveDriverPage.Surface;
-
-    Result := True;
-end;
-
-// =============================================================================
-// 卸载向导:在"驱动移除选项"自定义页面点击"下一步"时,若用户勾选了"移除驱动"
-// 则弹出充足警告,让其二次确认
-// =============================================================================
-function NextButtonClick(CurPageID: Integer): Boolean;
-var
-    Msg: String;
-begin
-    Result := True;
-    // 关键修复:RemoveDriverPage 只在卸载向导(InitializeUninstall)中创建。
-    // 安装向导点击"下一步"时也会触发本函数,此时 RemoveDriverPage 为 nil,
-    // 直接访问 RemoveDriverPage.ID 会抛空引用"Runtime Error"。必须判空。
-    if RemoveDriverPage = nil then
-        Exit;
-    if CurPageID = RemoveDriverPage.ID then
+    // 询问是否移除 CH375 驱动(默认不勾选 = 默认保留)
+    RemoveDriverOnUninstall := False;
+    Msg := '是否同时移除 CH375 读卡器驱动?'#13#10#13#10 +
+           '强烈建议保留此驱动,除非您确定不再需要该读卡器设备。'#13#10#13#10 +
+           '【风险提示】'#13#10 +
+           '  · 移除驱动后,本终端及其他依赖 CH375 驱动的读卡设备将无法刷卡!'#13#10 +
+           '  · 若其他软件或设备仍在使用该驱动,其读卡功能会立即失效。'#13#10 +
+           '  · 如需恢复,需重新安装本终端或手动重新安装驱动。'#13#10#13#10 +
+           '点击"是"移除驱动,点击"否"保留驱动(推荐)。';
+    if MsgBox(Msg, mbConfirmation, MB_YESNO) = IDYES then
     begin
-        if RemoveDriverCheck.Checked then
-        begin
-            Msg := '您已勾选"同时移除 CH375 读卡器驱动"。'#13#10#13#10 +
-                   '强烈建议保留此驱动,除非您确定不再需要该读卡器设备。'#13#10#13#10 +
-                   '【风险提示】'#13#10 +
-                   '  · 移除驱动后,本终端及其他依赖 CH375 驱动的读卡设备将无法刷卡!'#13#10 +
-                   '  · 若其他软件或设备仍在使用该驱动,其读卡功能会立即失效。'#13#10 +
-                   '  · 如需恢复,需重新安装本终端或手动重新安装驱动。'#13#10#13#10 +
-                   '确定要继续卸载并移除该驱动吗?';
-            if MsgBox(Msg, mbConfirmation, MB_YESNO) = IDNO then
-            begin
-                // 用户反悔,取消勾选,不执行驱动移除
-                RemoveDriverCheck.Checked := False;
-            end;
-        end;
+        // 二次确认(移除驱动是不可逆操作)
+        if MsgBox('确定要移除 CH375 驱动吗?此操作不可撤销!', mbConfirmation, MB_YESNO) = IDYES then
+            RemoveDriverOnUninstall := True;
     end;
+
+    Result := True;
 end;
+
+// =============================================================================
+// 卸载向导:不再需要 NextButtonClick(自定义页面已移除,改用 InitializeUninstall
+// 中的 MsgBox 询问驱动移除)
+// =============================================================================
 
 // =============================================================================
 // 卸载时清理所有用户数据(配置、缓存、QtWebEngine 持久化数据)
@@ -362,8 +339,8 @@ begin
     // usUninstall:卸载文件之前触发,此时 {app}\remove_ch375_driver.cmd 仍存在
     if CurUninstallStep = usUninstall then
     begin
-        // 用户勾选了"同时移除 CH375 读卡器驱动"
-        if RemoveDriverCheck.Checked then
+        // 用户在 InitializeUninstall 中确认移除驱动
+        if RemoveDriverOnUninstall then
         begin
             // 显示脚本窗口,让用户看到驱动清理过程(充足提示)
             Exec(ExpandConstant('{app}\remove_ch375_driver.cmd'), '',
