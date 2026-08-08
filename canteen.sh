@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================
-# 企业智慧食堂系统 - 服务器管理面板
+# 企业智慧食堂系统 - 服务器管理面板 V2
 #==============================================================
 # 在服务器上输入 `canteen` 即可弹出此菜单,所有操作一键完成。
 #
@@ -13,20 +13,17 @@
 #   ./canteen.sh status            # 直接执行子命令(非交互)
 #==============================================================
 
-# 解析符号链接:通过 /usr/local/bin/canteen 软链接调用时,
-# $0 是 /usr/local/bin/canteen,dirname 得到 /usr/local/bin(错误)。
-# 用 readlink -f 解析真实路径;不支持时回退到遍历 symlink。
+#==============================================================
+# 项目目录解析
+#==============================================================
 resolve_project_dir() {
     local src="$1"
-    # readlink -f 能解析多级符号链接(GNU coreutils, CentOS/Ubuntu 自带)
     if command -v readlink &>/dev/null; then
         local resolved
         resolved=$(readlink -f "$src" 2>/dev/null) && [[ -n "$resolved" ]] && { echo "$(cd "$(dirname "$resolved")" && pwd)"; return; }
     fi
-    # 回退:手动遍历 symlink(BSD/老旧系统)
     while [[ -L "$src" ]]; do
-        local dir
-        dir=$(cd "$(dirname "$src")" && pwd)
+        local dir; dir=$(cd "$(dirname "$src")" && pwd)
         src=$(readlink "$src")
         [[ "$src" != /* ]] && src="$dir/$src"
     done
@@ -35,29 +32,9 @@ resolve_project_dir() {
 PROJECT_DIR="$(resolve_project_dir "$0")"
 cd "$PROJECT_DIR" || { echo "无法进入项目目录 $PROJECT_DIR"; exit 1; }
 
-# 确保运行时目录存在且可写(普通用户运行 canteen upgrade 时,backup/snapshots 创建不被拒绝)
-# 问题场景:sudo ./deploy.sh 部署后,backup/ uploads/ logs/ 属主是 root,
-# 后续普通用户运行 canteen upgrade 时,snapshot.sh 在 backup/ 下创建子目录会被 Permission denied。
-# 解决:启动时检查并创建(若已存在属主不对,提示用户 sudo chown)。
-ensure_runtime_dirs() {
-    for d in backup uploads logs; do
-        if [[ ! -d "$PROJECT_DIR/$d" ]]; then
-            mkdir -p "$PROJECT_DIR/$d" 2>/dev/null || {
-                echo -e "${RED}[ERROR]${NC} 无法创建 $PROJECT_DIR/$d (权限不足)"
-                echo "  请执行: sudo chown -R \$(whoami):\$(whoami) $PROJECT_DIR"
-                exit 1
-            }
-        fi
-        # 检查可写性
-        if [[ ! -w "$PROJECT_DIR/$d" ]]; then
-            echo -e "${YELLOW}[WARN]${NC} $PROJECT_DIR/$d 不可写(属主可能是 root)"
-            echo "  修复: sudo chown -R \$(whoami):\$(whoami) $PROJECT_DIR/$d"
-        fi
-    done
-}
-ensure_runtime_dirs
-
+#==============================================================
 # 颜色
+#==============================================================
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -71,13 +48,152 @@ warn()  { echo -e "${YELLOW}[警告]${NC} $1"; }
 error() { echo -e "${RED}[错误]${NC} $1"; }
 
 #==============================================================
-# 工具函数
+# 权限自愈 —— 检测并自动修复常见权限问题
+#==============================================================
+# 比原版 ensure_runtime_dirs 更强:不仅检测,还尝试自动修复
+self_heal_permissions() {
+    local fixed=false
+
+    # 1. 运行时目录检测和创建
+    for d in backup uploads logs; do
+        if [[ ! -d "$PROJECT_DIR/$d" ]]; then
+            mkdir -p "$PROJECT_DIR/$d" 2>/dev/null || {
+                # 目录创建失败,尝试 sudo
+                sudo mkdir -p "$PROJECT_DIR/$d" 2>/dev/null && \
+                    sudo chown "$(whoami):$(whoami)" "$PROJECT_DIR/$d" 2>/dev/null
+            }
+        fi
+        # 检查可写性
+        if [[ -d "$PROJECT_DIR/$d" ]] && [[ ! -w "$PROJECT_DIR/$d" ]]; then
+            # 尝试自动修复
+            if sudo chown -R "$(whoami):$(whoami)" "$PROJECT_DIR/$d" 2>/dev/null; then
+                warn "已自动修复 $d/ 目录权限"
+                fixed=true
+            else
+                echo -e "${RED}[错误]${NC} $PROJECT_DIR/$d 不可写且无法自动修复"
+                echo "  请执行: sudo chown -R \$(whoami):\$(whoami) $PROJECT_DIR"
+                return 1
+            fi
+        fi
+    done
+
+    # 2. .env 文件权限检测
+    if [[ -f "$PROJECT_DIR/.env" ]] && [[ ! -w "$PROJECT_DIR/.env" ]]; then
+        if sudo chown "$(whoami):$(whoami)" "$PROJECT_DIR/.env" 2>/dev/null; then
+            warn "已自动修复 .env 文件权限"
+            chmod 600 "$PROJECT_DIR/.env" 2>/dev/null
+            fixed=true
+        else
+            echo -e "${YELLOW}[警告]${NC} .env 不可写,部分操作(重置密码等)可能失败"
+            echo "  修复: sudo chown \$(whoami):\$(whoami) $PROJECT_DIR/.env"
+        fi
+    fi
+
+    # 3. 脚本可执行权限
+    local need_chmod=false
+    for f in "$PROJECT_DIR"/*.sh "$PROJECT_DIR"/scripts/*.sh; do
+        [[ -f "$f" ]] || continue
+        [[ -x "$f" ]] || { need_chmod=true; break; }
+    done
+    if [[ "$need_chmod" == "true" ]]; then
+        chmod +x "$PROJECT_DIR"/*.sh "$PROJECT_DIR"/scripts/*.sh 2>/dev/null || true
+        fixed=true
+    fi
+
+    # 4. git safe.directory
+    if [[ -d "$PROJECT_DIR/.git" ]]; then
+        git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
+    fi
+
+    # 5. Docker 组检查
+    if command -v docker &>/dev/null; then
+        if [[ "$(whoami)" != "root" ]] && ! id -nG "$(whoami)" 2>/dev/null | grep -qw "docker"; then
+            echo -e "${YELLOW}[提示]${NC} 当前用户不在 docker 组中"
+            echo "  修复: sudo usermod -aG docker \$(whoami) && newgrp docker"
+            echo "  或使用 sudo 运行: sudo canteen"
+        fi
+    fi
+
+    [[ "$fixed" == "true" ]] && info "权限自愈完成"
+    return 0
+}
+self_heal_permissions
+
+#==============================================================
+# 共享工具函数
 #==============================================================
 
-# 获取当前系统版本号(从 VERSIONS.json 读取)
+# 转义 .env 值(双引号包裹,Docker Compose 兼容)
+escape_env_value() {
+    local v="$1"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    v="${v//\$/\\\$}"
+    v="${v//\`/\\\`}"
+    printf '%s' "$v"
+}
+
+# 安全读取 .env 变量
+read_env_var() {
+    local key="$1" envfile="${2:-$PROJECT_DIR/.env}"
+    [[ -f "$envfile" ]] || return 1
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^${key}= ]]; then
+            value="${line#*=}"
+            local quoted=""
+            if [[ "$value" =~ ^\'.*\'$ ]]; then
+                value="${value:1:-1}"
+            elif [[ "$value" =~ ^\".*\"$ ]]; then
+                value="${value:1:-1}"
+                quoted="double"
+            fi
+            if [[ "$quoted" == "double" ]]; then
+                value="${value//\\\\/\\}"
+                value="${value//\\\"/\"}"
+                value="${value//\\\$/\$}"
+                value="${value//\\\`/\`}"
+            fi
+            value="${value//$'\r'/}"
+            printf '%s' "$value"
+            return 0
+        fi
+    done < "$envfile"
+    return 1
+}
+
+# 安全写入 .env 变量
+set_env_var() {
+    local key="$1" value="$2"
+    local envfile="$PROJECT_DIR/.env"
+    touch "$envfile" 2>/dev/null || return 1
+
+    local escaped_value
+    escaped_value=$(escape_env_value "$value")
+    local new_line="${key}=\"${escaped_value}\""
+
+    if grep -q "^${key}=" "$envfile" 2>/dev/null; then
+        local tmp; tmp=$(mktemp)
+        KEY="$key" LINE="$new_line" awk '
+            BEGIN { k = ENVIRON["KEY"]; line = ENVIRON["LINE"] }
+            index($0, k "=") == 1 { print line; next }
+            { print }
+        ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
+    else
+        echo "$new_line" >> "$envfile"
+    fi
+
+    chmod 600 "$envfile" 2>/dev/null || true
+    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
+    fi
+}
+
+# 获取系统版本号
 get_version() {
     if [ -f "$PROJECT_DIR/VERSIONS.json" ]; then
-        # 读取 system.version 字段
         python3 -c "import json; print(json.load(open('$PROJECT_DIR/VERSIONS.json'))['system']['version'])" 2>/dev/null || \
         grep -A1 '"system"' "$PROJECT_DIR/VERSIONS.json" 2>/dev/null | grep '"version"' \
             | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "unknown"
@@ -86,7 +202,7 @@ get_version() {
     fi
 }
 
-# 获取指定模块版本号(参数: 模块名 backend/admin-web/h5/terminal)
+# 获取指定模块版本号
 get_module_version() {
     local module="$1"
     local versions_file="$PROJECT_DIR/VERSIONS.json"
@@ -98,40 +214,24 @@ get_module_version() {
     echo "unknown"
 }
 
-# 显示所有模块版本号(多行)
-show_all_versions() {
-    local versions_file="$PROJECT_DIR/VERSIONS.json"
-    if [ ! -f "$versions_file" ]; then
-        echo "  (VERSIONS.json 不存在,版本未知)"
-        return
-    fi
-    echo "  后端服务:    v$(get_module_version backend)"
-    echo "  管理后台:    v$(get_module_version admin-web)"
-    echo "  H5订餐端:    v$(get_module_version h5)"
-    echo "  X86终端:     v$(get_module_version terminal)"
-    echo "  系统版本:    v$(get_module_version system)"
-}
-
 # 获取服务状态摘要(一行)
 get_status_line() {
     if ! command -v docker &>/dev/null; then
-        echo -e "${RED}● Docker 未安装${NC}"
+        echo -e "${RED}Docker 未安装${NC}"
         return
     fi
-    # 用 docker ps 直接查 canteen- 开头的容器,不依赖 docker-compose.yml 和 .env
-    # 避免 .env 权限不足时 docker compose 命令失败导致误报"未运行"
-    local running total=5  # backend, admin-web, h5, mysql, redis
+    local running total=5
     running=$(docker ps --filter "name=canteen-" --format '{{.Names}}' 2>/dev/null | wc -l)
     if [ "$running" -ge 5 ] 2>/dev/null; then
-        echo -e "${GREEN}● 全部运行中 (${running}/${total})${NC}"
+        echo -e "${GREEN}全部运行中 (${running}/${total})${NC}"
     elif [ "$running" -gt 0 ] 2>/dev/null; then
-        echo -e "${YELLOW}● 部分运行 (${running}/${total})${NC}"
+        echo -e "${YELLOW}部分运行 (${running}/${total})${NC}"
     else
-        echo -e "${RED}● 未运行${NC}"
+        echo -e "${RED}未运行${NC}"
     fi
 }
 
-# 获取当前 git 分支名(用于菜单显示)
+# 获取当前 git 分支名
 get_current_branch() {
     if [ ! -d "$PROJECT_DIR/.git" ]; then
         echo "非Git"
@@ -140,7 +240,6 @@ get_current_branch() {
     local branch
     branch=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")
     if [ -z "$branch" ]; then
-        # detached HEAD 状态
         local commit
         commit=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
         echo "detached(${commit})"
@@ -162,17 +261,42 @@ confirm() {
     [ "$ans" = "y" ] || [ "$ans" = "Y" ]
 }
 
+# 获取容器运行时间(格式化)
+get_container_uptime() {
+    local container="$1"
+    local started
+    started=$(docker inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null || echo "")
+    [[ -z "$started" ]] && echo "-" && return
+
+    # 计算运行时间
+    local now_epoch started_epoch
+    now_epoch=$(date +%s)
+    started_epoch=$(date -d "$started" +%s 2>/dev/null || echo "$now_epoch")
+    local diff=$((now_epoch - started_epoch))
+
+    if [ "$diff" -lt 60 ]; then
+        echo "${diff}秒"
+    elif [ "$diff" -lt 3600 ]; then
+        echo "$((diff / 60))分钟"
+    elif [ "$diff" -lt 86400 ]; then
+        echo "$((diff / 3600))小时$(((diff % 3600) / 60))分"
+    else
+        echo "$((diff / 86400))天$(((diff % 86400) / 3600))小时"
+    fi
+}
+
 #==============================================================
 # 菜单功能函数
 #==============================================================
 
-# 1. 查看服务状态
+# 1. 查看服务状态(增强:含容器资源使用和运行时间)
 menu_status() {
     echo ""
     echo -e "${BLUE}========== 服务状态 ==========${NC}"
     echo ""
     docker compose ps 2>/dev/null || {
         error "Docker Compose 未运行"
+        pause
         return
     }
     echo ""
@@ -193,16 +317,48 @@ menu_status() {
             warn "${name} (${port}): ${code}"
         fi
     done
+
+    # 容器运行时间和资源使用
+    echo ""
+    echo -e "${BLUE}---------- 容器详情 ----------${NC}"
+    local containers=("canteen-backend" "canteen-admin" "canteen-h5" "canteen-mysql" "canteen-redis")
+    printf "  %-20s %-12s %-10s %-10s\n" "容器" "运行时间" "CPU" "内存"
+    printf "  %-20s %-12s %-10s %-10s\n" "----" "--------" "---" "----"
+    for c in "${containers[@]}"; do
+        local status uptime cpu mem
+        status=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo "missing")
+        if [ "$status" = "running" ]; then
+            uptime=$(get_container_uptime "$c")
+            # docker stats --no-stream 获取资源使用
+            local stats
+            stats=$(docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}" "$c" 2>/dev/null || echo "-|-")
+            cpu=$(echo "$stats" | cut -d'|' -f1)
+            mem=$(echo "$stats" | cut -d'|' -f2 | cut -d'/' -f1 | xargs)
+            printf "  %-20s %-12s %-10s %-10s\n" "$c" "$uptime" "$cpu" "$mem"
+        else
+            printf "  %-20s %-12s %-10s %-10s\n" "$c" "未运行" "-" "-"
+        fi
+    done
+
     # 磁盘
     echo ""
-    local disk_usage
+    local disk_usage disk_total disk_avail
     disk_usage=$(df -h "$PROJECT_DIR" | awk 'NR==2{print $5}')
-    info "磁盘使用: ${disk_usage}"
+    disk_total=$(df -h "$PROJECT_DIR" | awk 'NR==2{print $2}')
+    disk_avail=$(df -h "$PROJECT_DIR" | awk 'NR==2{print $4}')
+    info "磁盘: 总计 ${disk_total}, 已用 ${disk_usage}, 可用 ${disk_avail}"
+
+    # Docker 数据大小
+    if command -v docker &>/dev/null; then
+        local docker_size
+        docker_size=$(docker system df --format "{{.Size}}" 2>/dev/null | head -1 || echo "?")
+        info "Docker 镜像占用: ${docker_size}"
+    fi
+
     pause
 }
 
-# 显示升级步骤说明(根据当前分支自动适配)
-# 参数: $1 = 升级范围描述(如 "全部" / "后端" / "前端")
+# 显示升级步骤说明
 show_upgrade_steps() {
     local scope_desc="$1"
     local cur_branch
@@ -227,7 +383,7 @@ show_upgrade_steps() {
     fi
 }
 
-# 2. 升级全部(后端+前端)
+# 2. 升级全部
 menu_upgrade_all() {
     echo ""
     echo -e "${BLUE}========== 升级全部 ==========${NC}"
@@ -272,7 +428,7 @@ menu_upgrade_frontend() {
     fi
 }
 
-# 5. 手动备份(创建快照)
+# 5. 手动备份
 menu_backup() {
     echo ""
     echo -e "${BLUE}========== 手动备份 ==========${NC}"
@@ -285,17 +441,15 @@ menu_backup() {
     pause
 }
 
-# 6. 恢复备份(从快照恢复)
+# 6. 恢复备份
 menu_restore() {
     echo ""
     echo -e "${BLUE}========== 恢复备份 ==========${NC}"
     echo ""
     chmod +x "$PROJECT_DIR/scripts/snapshot.sh"
 
-    # 先列出快照
     "$PROJECT_DIR/scripts/snapshot.sh" list
 
-    # 检查是否有快照
     local latest
     latest=$("$PROJECT_DIR/scripts/snapshot.sh" latest 2>/dev/null)
     if [ -z "$latest" ]; then
@@ -336,12 +490,18 @@ menu_reset_admin() {
     read -p "$(echo -e "${CYAN}[?]${NC} 超管账号名 [admin]: ")" username
     username="${username:-admin}"
 
-    # 读取密码(隐藏输入,带确认,-r 防止反斜杠被转义消耗)
+    # 读取密码(隐藏输入,带确认)
     local pwd1 pwd2
     while true; do
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} 新密码(至少 8 位): ")" pwd1
+        if [[ -z "$pwd1" ]]; then
+            read -r -p "$(echo -e "${CYAN}[?]${NC} 新密码(可见输入): ")" pwd1 || pwd1=""
+        fi
         echo ""
         read -r -s -p "$(echo -e "${CYAN}[?]${NC} 确认密码: ")" pwd2
+        if [[ -z "$pwd2" ]]; then
+            read -r -p "$(echo -e "${CYAN}[?]${NC} 确认密码(可见输入): ")" pwd2 || pwd2=""
+        fi
         echo ""
         if [ "$pwd1" != "$pwd2" ]; then
             warn "两次输入不一致,请重新输入"
@@ -363,10 +523,8 @@ menu_reset_admin() {
 
     local envfile="$PROJECT_DIR/.env"
 
-    # 检查 .env 可写(常见失败:符号链接解析错误或权限不足)
+    # 检查 .env 可写(自动修复权限)
     if ! touch "$envfile" 2>/dev/null; then
-        # .env 不可写,尝试自动修复权限
-        # 常见原因:deploy.sh 用 sudo 运行,.env 被 root 所有
         if [[ -f "$envfile" ]] && [[ "$(id -u)" != "0" ]]; then
             local env_owner
             env_owner=$(stat -c '%U' "$envfile" 2>/dev/null || echo "")
@@ -374,67 +532,33 @@ menu_reset_admin() {
                 info "检测到 .env 属于 root,尝试修复权限..."
                 if sudo chown "$(whoami):$(whoami)" "$envfile" 2>/dev/null; then
                     info "权限已修复"
+                    chmod 600 "$envfile" 2>/dev/null
                 else
-                    error "无法修改 .env 权限(sudo 失败)"
-                    warn "请手动执行: sudo chown $(whoami):$(whoami) $envfile"
+                    error "无法修改 .env 权限"
+                    warn "请手动执行: sudo chown \$(whoami):\$(whoami) $envfile"
                     pause
                     return
                 fi
             else
-                error "无法写入 .env 文件: $envfile"
+                error "无法写入 .env: $envfile"
                 warn "所有者: ${env_owner:-unknown}, 当前用户: $(whoami)"
-                warn "请手动执行: sudo chown $(whoami):$(whoami) $envfile"
                 pause
                 return
             fi
         else
-            error "无法写入 .env 文件: $envfile"
-            warn "可能原因:权限不足或项目目录不正确"
-            warn "请尝试: sudo canteen  或  cd $(dirname "$PROJECT_DIR") && sudo ./canteen.sh"
+            error "无法写入 .env: $envfile"
             pause
             return
         fi
     fi
 
-    # 写入 INIT_ADMIN_* 环境变量(用双引号包裹值,兼容 Docker Compose dotenv 解析)
+    # 写入 INIT_ADMIN_* 环境变量(使用共享的 set_env_var)
     info "写入配置..."
-    # 转义值,使其在 .env 的双引号包裹下能被 Docker Compose 正确解析。
-    # 不能用单引号包裹 + shell 的 '\'' 转义——那是 shell 规则,Docker Compose dotenv 不认,
-    # 密码含单引号(如 qweasd2864..')会报 "unexpected character",导致整个 .env 无法被 Compose 读取。
-    # 双引号值支持转义,`\` 转义 `\`、`"`、`$`、反引号;单引号在双引号内字面保留。
-    _escape_val() {
-        local v="$1"
-        v="${v//\\/\\\\}"
-        v="${v//\"/\\\"}"
-        v="${v//\$/\\\$}"
-        v="${v//\`/\\\`}"
-        printf '%s' "$v"
-    }
-    for kv in "INIT_ADMIN_USERNAME=$username" "INIT_ADMIN_PASSWORD=$pwd1" "INIT_ADMIN_FORCE=true"; do
-        local key="${kv%%=*}"
-        local val="${kv#*=}"
-        local escaped_val new_line
-        escaped_val=$(_escape_val "$val")
-        new_line="${key}=\"${escaped_val}\""
-        if grep -q "^${key}=" "$envfile" 2>/dev/null; then
-            local tmp
-            tmp=$(mktemp)
-            KEY="$key" LINE="$new_line" awk '
-                BEGIN { k = ENVIRON["KEY"]; line = ENVIRON["LINE"] }
-                index($0, k "=") == 1 { print line; next }
-                { print }
-            ' "$envfile" > "$tmp" && mv "$tmp" "$envfile"
-        else
-            echo "$new_line" >> "$envfile"
-        fi
-    done
-    # 写入后强制权限 600 + chown(避免 sudo 运行时 .env 变 root 所有)
-    chmod 600 "$envfile" 2>/dev/null || true
-    if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
-        chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
-    fi
+    set_env_var "INIT_ADMIN_USERNAME" "$username"
+    set_env_var "INIT_ADMIN_PASSWORD" "$pwd1"
+    set_env_var "INIT_ADMIN_FORCE" "true"
 
-    # 用 up -d 而非 restart:restart 不重读 .env,只有 up -d 才会用新环境变量重建容器
+    # 重建后端(up -d 而非 restart:restart 不重读 .env)
     info "正在重建后端服务(读取新配置 + 清除登录锁定)..."
     if ! docker compose up -d --no-deps backend 2>/dev/null; then
         error "后端重建失败,请检查 Docker 服务状态"
@@ -462,9 +586,7 @@ menu_reset_admin() {
         return
     fi
 
-    # 自动清理 .env 中的敏感变量(密码已在数据库中,无需保留)
-    # 删除 INIT_ADMIN_FORCE 和 INIT_ADMIN_PASSWORD,保留 INIT_ADMIN_USERNAME 供参考
-    # 安全清理:先校验过滤结果非空,避免 grep 失败导致空文件覆盖 .env
+    # 清理 .env 中的敏感变量
     info "清理临时配置..."
     local tmp
     tmp=$(mktemp)
@@ -472,14 +594,13 @@ menu_reset_admin() {
         cp "$envfile" "${envfile}.bak" 2>/dev/null
         chmod 600 "${envfile}.bak" 2>/dev/null || true
         mv "$tmp" "$envfile"
-        # 清理后重新设置权限 600 + chown
         chmod 600 "$envfile" 2>/dev/null || true
         if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
             chown "$SUDO_USER:$SUDO_USER" "$envfile" 2>/dev/null || true
         fi
     else
         rm -f "$tmp"
-        warn "清理 .env 失败,原文件未修改(敏感变量仍保留,建议手动删除 INIT_ADMIN_FORCE/INIT_ADMIN_PASSWORD)"
+        warn "清理 .env 失败,原文件未修改"
     fi
 
     echo ""
@@ -515,7 +636,7 @@ menu_logs() {
     esac
 
     echo ""
-    info "查看 ${svc} 日志(最近 200 行,Ctrl+C 退出跟踪)..."
+    info "查看 ${svc} 日志(最近 200 行)..."
     echo ""
     docker compose logs --tail=200 "$svc" 2>&1
     echo ""
@@ -535,10 +656,10 @@ menu_restart() {
     echo "  3) 仅重启前端(admin-web + h5)"
     echo "  0) 返回"
     echo ""
-    read -p "$(echo -e "${CYAN}[?]${NC} 选择 [0-3]: ")"
+    read -p "$(echo -e "${CYAN}[?]${NC} 选择 [0-3]: ")" choice
 
     local svc=""
-    case "$REPLY" in
+    case "$choice" in
         1) svc="all" ;;
         2) svc="backend" ;;
         3) svc="frontend" ;;
@@ -548,10 +669,7 @@ menu_restart() {
 
     echo ""
     if confirm "确认重启?"; then
-        # 用 up -d 而非 restart:restart 在容器被 down 删除后会失败,up -d 会重建
-        # 不吞错误,失败时显示真实原因
-        local ok=true
-        local err_out
+        local ok=true err_out
         case "$svc" in
             all)
                 err_out=$(docker compose up -d 2>&1) || { ok=false; echo "$err_out"; } ;;
@@ -588,7 +706,7 @@ menu_stop() {
     pause
 }
 
-# 12. 修复/重装 canteen 系统命令
+# 12. 修复 canteen 系统命令
 menu_install() {
     echo ""
     echo -e "${BLUE}========== 修复 canteen 系统命令 ==========${NC}"
@@ -636,9 +754,7 @@ menu_uninstall() {
     fi
 }
 
-#==============================================================
 # 13. 查看版本详情与更新日志
-#==============================================================
 menu_versions() {
     echo ""
     echo -e "${BLUE}========== 版本详情 ==========${NC}"
@@ -650,7 +766,6 @@ menu_versions() {
         return
     fi
 
-    # 用 python3 解析 JSON,显示各模块版本和更新日志
     python3 -c "
 import json
 with open('$versions_file', encoding='utf-8') as f:
@@ -664,20 +779,20 @@ for k in order:
         print(f\"    来源: {v.get('source', '-')}\")
         cl = v.get('changelog', '')
         if cl:
-            print(f\"    更新: {cl}\")
+            # 只显示最新一条更新日志(第一个 / 分隔)
+            latest = cl.split('/')[0].strip()
+            print(f\"    更新: {latest}\")
         print()
 " 2>/dev/null || {
-        # python3 不可用时降级显示
         echo "  后端服务:    v$(get_module_version backend)"
         echo "  管理后台:    v$(get_module_version admin-web)"
         echo "  H5订餐端:    v$(get_module_version h5)"
         echo "  X86终端:     v$(get_module_version terminal)"
         echo "  系统版本:    v$(get_module_version system)"
         echo ""
-        warn "(python3 不可用,仅显示版本号,不显示更新日志)"
+        warn "(python3 不可用,仅显示版本号)"
     }
 
-    # 显示最近 git 提交历史(最近 10 条)
     if [ -d "$PROJECT_DIR/.git" ]; then
         echo -e "${BLUE}---------- 最近代码更新 ----------${NC}"
         git -C "$PROJECT_DIR" log --oneline -10 --pretty=format:"  %h %s (%ci)" 2>/dev/null || echo "  (无法读取 git 日志)"
@@ -688,26 +803,246 @@ for k in order:
 }
 
 #==============================================================
+# 14. 系统诊断(新增)
+#==============================================================
+menu_diagnostics() {
+    echo ""
+    echo -e "${BLUE}========== 系统诊断 ==========${NC}"
+    echo ""
+
+    # 操作系统信息
+    echo -e "${BOLD}【系统信息】${NC}"
+    if [ -f /etc/os-release ]; then
+        local os_name os_version
+        os_name=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+        info "操作系统: ${os_name}"
+    fi
+    local kernel arch
+    kernel=$(uname -r 2>/dev/null || echo "?")
+    arch=$(uname -m 2>/dev/null || echo "?")
+    info "内核: ${kernel} (${arch})"
+
+    # CPU 和内存
+    local cpu_cores mem_total mem_avail
+    cpu_cores=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "?")
+    mem_total=$(free -h 2>/dev/null | awk '/^Mem:/{print $2}' || echo "?")
+    mem_avail=$(free -h 2>/dev/null | awk '/^Mem:/{print $7}' || echo "?")
+    info "CPU 核心: ${cpu_cores}"
+    info "内存: 总计 ${mem_total}, 可用 ${mem_avail}"
+
+    # 磁盘
+    echo ""
+    echo -e "${BOLD}【磁盘】${NC}"
+    df -h "$PROJECT_DIR" 2>/dev/null | awk 'NR==1{printf "  %-30s %-10s %-10s %-10s %s\n","挂载点","总计","已用","可用","使用率"} NR==2{printf "  %-30s %-10s %-10s %-10s %s\n",$6,$2,$3,$4,$5}'
+
+    # Docker 信息
+    echo ""
+    echo -e "${BOLD}【Docker】${NC}"
+    if command -v docker &>/dev/null; then
+        info "Docker 版本: $(docker --version 2>/dev/null)"
+        info "Compose 版本: $(docker compose version 2>/dev/null | head -1 || echo '未知')"
+        echo ""
+        docker system df 2>/dev/null | awk 'NR>0{printf "  %s\n",$0}'
+    else
+        warn "Docker 未安装"
+    fi
+
+    # 服务状态快速检查
+    echo ""
+    echo -e "${BOLD}【服务快速检查】${NC}"
+    if command -v docker &>/dev/null; then
+        local containers=("canteen-backend:18082" "canteen-admin:18080" "canteen-h5:18081" "canteen-mysql:13306" "canteen-redis:16379")
+        for item in "${containers[@]}"; do
+            local name="${item%%:*}" port="${item##*:}"
+            local status
+            status=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo "missing")
+            if [ "$status" = "running" ]; then
+                local health
+                health=$(docker inspect -f '{{.State.Health.Status}}' "$name" 2>/dev/null || echo "n/a")
+                if [[ "$health" == "healthy" ]] || [[ "$health" == "n/a" ]]; then
+                    echo -e "  ${GREEN}OK${NC}  ${name} (${status}/${health})"
+                else
+                    echo -e "  ${YELLOW}WARN${NC}  ${name} (${status}/${health})"
+                fi
+            else
+                echo -e "  ${RED}FAIL${NC}  ${name} (${status})"
+            fi
+        done
+    fi
+
+    # 网络端口检查
+    echo ""
+    echo -e "${BOLD}【端口监听】${NC}"
+    if command -v ss &>/dev/null; then
+        ss -tlnp 2>/dev/null | grep -E '18080|18081|18082|13306|16379' | awk '{
+            split($4, a, ":")
+            port=a[length(a)]
+            printf "  %-6s %s\n", port, $6
+        }' || info "无相关端口监听"
+    fi
+
+    # 权限检查
+    echo ""
+    echo -e "${BOLD}【权限检查】${NC}"
+    local perm_ok=true
+    for d in backup uploads logs; do
+        if [[ -d "$PROJECT_DIR/$d" ]] && [[ ! -w "$PROJECT_DIR/$d" ]]; then
+            warn "${d}/ 不可写"
+            perm_ok=false
+        fi
+    done
+    if [[ -f "$PROJECT_DIR/.env" ]] && [[ ! -w "$PROJECT_DIR/.env" ]]; then
+        warn ".env 不可写"
+        perm_ok=false
+    fi
+    if [[ "$(whoami)" != "root" ]] && command -v docker &>/dev/null; then
+        if ! id -nG "$(whoami)" 2>/dev/null | grep -qw "docker"; then
+            warn "当前用户不在 docker 组"
+            perm_ok=false
+        fi
+    fi
+    [[ "$perm_ok" == "true" ]] && info "权限检查通过"
+
+    echo ""
+    pause
+}
+
+#==============================================================
+# 15. 清理 Docker 镜像(新增)
+#==============================================================
+menu_clean_images() {
+    echo ""
+    echo -e "${BLUE}========== 清理 Docker 镜像 ==========${NC}"
+    echo "  清理未使用的镜像、容器、网络和缓存,释放磁盘空间"
+    echo ""
+
+    # 显示当前占用
+    info "当前 Docker 磁盘占用:"
+    docker system df 2>/dev/null
+    echo ""
+
+    if ! confirm "确认清理?"; then
+        info "已取消"
+        pause
+        return
+    fi
+
+    info "正在清理..."
+    docker system prune -f 2>/dev/null
+    echo ""
+    info "清理后 Docker 磁盘占用:"
+    docker system df 2>/dev/null
+    echo ""
+    info "清理完成"
+    pause
+}
+
+#==============================================================
+# 16. 查看配置信息(新增,密码脱敏)
+#==============================================================
+menu_config() {
+    echo ""
+    echo -e "${BLUE}========== 配置信息 ==========${NC}"
+    echo ""
+
+    local envfile="$PROJECT_DIR/.env"
+    if [[ ! -f "$envfile" ]]; then
+        warn ".env 文件不存在"
+        pause
+        return
+    fi
+
+    # 检查 .env 可读
+    if [[ ! -r "$envfile" ]]; then
+        warn ".env 文件不可读(权限不足)"
+        echo "  修复: sudo chmod 644 $envfile && sudo cat $envfile"
+        pause
+        return
+    fi
+
+    echo -e "${BOLD}【.env 配置(敏感信息已脱敏)】${NC}"
+    echo ""
+
+    # 读取并脱敏显示
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && { echo "  $line"; continue; }
+        [[ -z "${line// }" ]] && { echo ""; continue; }
+
+        key="${line%%=*}"
+        value="${line#*=}"
+
+        # 去除外层引号
+        if [[ "$value" =~ ^\".*\"$ ]] || [[ "$value" =~ ^\'.*\'$ ]]; then
+            value="${value:1:-1}"
+        fi
+
+        # 敏感字段脱敏:只显示前 4 位 + ****
+        case "$key" in
+            MYSQL_ROOT_PASSWORD|DB_APP_PASSWORD|REDIS_PASSWORD|JWT_SECRET|BACKUP_ENCRYPTION_KEY|INIT_ADMIN_PASSWORD)
+                if [[ -n "$value" ]]; then
+                    local masked
+                    if [[ ${#value} -le 4 ]]; then
+                        masked="****"
+                    else
+                        masked="${value:0:4}****"
+                    fi
+                    printf "  %-30s %s\n" "$key" "$masked"
+                else
+                    printf "  %-30s (空)\n" "$key"
+                fi
+                ;;
+            INIT_ADMIN_PASSWORD)
+                # INIT_ADMIN_PASSWORD 应该已被清理
+                printf "  %-30s (应已清理)\n" "$key"
+                ;;
+            *)
+                printf "  %-30s %s\n" "$key" "$value"
+                ;;
+        esac
+    done < "$envfile"
+
+    echo ""
+    echo -e "${BOLD}【访问地址】${NC}"
+    local ip
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "服务器IP")
+    echo "  管理后台:   http://${ip}:18080"
+    echo "  H5 订餐端:  http://${ip}:18081"
+    echo "  后端 API:   http://${ip}:18082"
+    echo "  MySQL:      127.0.0.1:13306"
+    echo "  Redis:      127.0.0.1:16379"
+
+    echo ""
+    echo -e "${BOLD}【超管账号】${NC}"
+    local admin_user
+    admin_user=$(read_env_var "INIT_ADMIN_USERNAME" "$envfile" 2>/dev/null) || admin_user=""
+    if [[ -n "$admin_user" ]]; then
+        echo "  超管账号: ${admin_user}"
+    else
+        echo "  超管账号: (未配置,使用 canteen 重置密码)"
+    fi
+
+    echo ""
+    pause
+}
+
+#==============================================================
 # 主菜单
 #==============================================================
 show_menu() {
-    # 清屏
     clear 2>/dev/null || true
 
-    local version
+    local version status_line be_ver hw_ver h5_ver term_ver cur_branch
     version=$(get_version)
-    local status_line
     status_line=$(get_status_line)
-    local be_ver hw_ver h5_ver term_ver
     be_ver=$(get_module_version backend)
     hw_ver=$(get_module_version admin-web)
     h5_ver=$(get_module_version h5)
     term_ver=$(get_module_version terminal)
-    local cur_branch
     cur_branch=$(get_current_branch)
 
     echo -e "${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}   ${BOLD}企业智慧食堂系统 - 管理面板${NC}                      ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   ${BOLD}企业智慧食堂系统 - 管理面板 V2${NC}                    ${BLUE}║${NC}"
     echo -e "${BLUE}╠══════════════════════════════════════════════════════╣${NC}"
     echo -e "${BLUE}║${NC}  系统版本: v${version}    状态: ${status_line}          ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  后端: v${be_ver}  管理后台: v${hw_ver}  H5: v${h5_ver}      ${BLUE}║${NC}"
@@ -715,27 +1050,30 @@ show_menu() {
     echo -e "${BLUE}╠══════════════════════════════════════════════════════╣${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${BOLD}【升级】${NC}                                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   1) 升级全部 (后端+前端) ${YELLOW}含备份+自动回退+版本对比${NC}  ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   2) 仅升级后端                                     ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   3) 仅升级前端 (admin-web + h5)                    ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   1) 升级全部 (后端+前端) ${YELLOW}含备份+自动回退${NC}         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   2) 仅升级后端                                         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   3) 仅升级前端 (admin-web + h5)                       ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${BOLD}【备份与恢复】${NC}                                      ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   4) 手动备份 (创建快照)                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   5) 恢复备份 (从快照恢复)                           ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   6) 查看快照列表                                     ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   4) 手动备份 (创建快照)                                ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   5) 恢复备份 (从快照恢复)                              ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   6) 查看快照列表                                        ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${BOLD}【管理】${NC}                                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   7) 查看服务状态                                     ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   8) 重置管理员密码                                   ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   9) 查看日志                                         ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  10) 重启服务                                         ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  11) 停止服务                                         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   7) 查看服务状态 ${YELLOW}(含资源监控)${NC}                     ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   8) 重置管理员密码                                     ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   9) 查看日志                                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  10) 重启服务                                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  11) 停止服务                                           ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${BOLD}【系统】${NC}                                             ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  12) 修复 canteen 系统命令(重新安装)                   ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  13) 查看版本详情与更新日志                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  12) 修复 canteen 系统命令                              ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  13) 查看版本详情与更新日志                             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  14) 系统诊断 ${YELLOW}(OS/CPU/内存/端口/权限)${NC}              ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  15) 清理 Docker 镜像 ${YELLOW}(释放磁盘空间)${NC}               ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  16) 查看配置信息 ${YELLOW}(.env脱敏+访问地址)${NC}              ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}   0) 退出                                             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}   0) 退出                                               ${BLUE}║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -743,7 +1081,7 @@ show_menu() {
 main_loop() {
     while true; do
         show_menu
-        read -p "$(echo -e "${CYAN}请选择 [0-13]: ${NC}")" choice
+        read -p "$(echo -e "${CYAN}请选择 [0-16]: ${NC}")" choice
 
         case "$choice" in
             1) menu_upgrade_all ;;
@@ -759,6 +1097,9 @@ main_loop() {
             11) menu_stop ;;
             12) menu_install ;;
             13) menu_versions ;;
+            14) menu_diagnostics ;;
+            15) menu_clean_images ;;
+            16) menu_config ;;
             0|q|quit|exit)
                 echo ""
                 info "再见!"
@@ -819,18 +1160,23 @@ if [ $# -gt 0 ]; then
             docker compose logs --tail=200 "${1:-}" 2>/dev/null
             exit $?
             ;;
+        diagnose|diag)
+            menu_diagnostics
+            exit $?
+            ;;
         help|-h|--help)
-            echo "企业智慧食堂系统管理面板"
+            echo "企业智慧食堂系统管理面板 V2"
             echo ""
             echo "用法:"
             echo "  canteen                 # 打开交互式菜单"
             echo "  canteen install         # 重新安装/修复 canteen 命令"
             echo "  canteen uninstall       # 卸载 canteen 命令"
-            echo "  canteen status          # 查看服务状态"
+            echo "  canteen status          # 查看服务状态(含资源监控)"
             echo "  canteen upgrade [all|backend|frontend]  # 升级"
             echo "  canteen backup [说明]   # 创建快照"
             echo "  canteen restore <ID>    # 恢复快照"
             echo "  canteen logs [服务]     # 查看日志"
+            echo "  canteen diagnose        # 系统诊断"
             echo ""
             exit 0
             ;;
