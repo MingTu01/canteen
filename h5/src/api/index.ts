@@ -26,6 +26,9 @@ declare module 'axios' {
   interface AxiosRequestConfig {
     /** 是否返回完整 AxiosResponse(默认 false,返回业务数据) */
     _raw?: boolean
+    /** 是否静默失败(不弹 toast,不影响 401 跳转)。用于 SSE ticket 等辅助请求,
+     *  失败不应干扰用户(如后端未部署新版本时 404 不应反复弹提示) */
+    _silent?: boolean
   }
 }
 
@@ -137,14 +140,17 @@ api.interceptors.response.use(
       return Promise.reject(body)
     }
 
-    // 其他业务错误:toast 提示
-    const msg = body.message || '请求失败'
-    showToast(msg)
+    // 其他业务错误:toast 提示(_silent 请求静默失败不弹 toast)
+    if (!res.config._silent) {
+      const msg = body.message || '请求失败'
+      showToast(msg)
+    }
     return Promise.reject(body)
   },
   (err) => {
     const status = err.response?.status
     const msg = err.response?.data?.message || err.message || '网络错误'
+    const silent = err.config?._silent
 
     if (status === 401) {
       if (!isLoginRequest(err.config?.url)) {
@@ -154,8 +160,8 @@ api.interceptors.response.use(
         showToast(msg || '登录失败')
       }
     } else if (status === 403) {
-      showToast('无权限访问')
-    } else {
+      if (!silent) showToast('无权限访问')
+    } else if (!silent) {
       showToast(msg)
     }
     return Promise.reject(err)

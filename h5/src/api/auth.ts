@@ -59,9 +59,10 @@ export interface SseTicketResult {
 /**
  * 获取一次性 SSE ticket(员工维度,30 秒有效)。
  * 用 ticket 建立 EventSource,避免 token 出现在 URL query 中。
+ * 静默失败(_silent):后端未部署新版本或网络抖动时不弹 toast 干扰用户。
  */
 export function getEmployeeTicket(): Promise<SseTicketResult> {
-  return get<SseTicketResult>('/sse/employee-ticket')
+  return get<SseTicketResult>('/sse/employee-ticket', { _silent: true })
 }
 
 /* ============================================================

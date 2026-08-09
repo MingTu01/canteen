@@ -248,6 +248,122 @@ get_current_branch() {
     fi
 }
 
+#==============================================================
+# GitHub 加速器(国内服务器直连 GitHub 会超时)
+# 与 upgrade.sh 保持一致,用于升级前版本检查
+#==============================================================
+GITHUB_PROXIES=(
+    "https://api.gitproxy.dev/https://github.com/"
+    "https://gh-proxy.com/https://github.com/"
+    "https://ghfast.top/https://github.com/"
+)
+
+# 为项目配置 GitHub 加速器(逐个探测可用性,成功后固定使用)
+setup_git_proxy() {
+    local dir="${1:-$PROJECT_DIR}"
+    [[ -d "$dir/.git" ]] || return 1
+    for p in "${GITHUB_PROXIES[@]}"; do
+        git -C "$dir" config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
+    done
+    for proxy in "${GITHUB_PROXIES[@]}"; do
+        git -C "$dir" config "url.${proxy}.insteadOf" "https://github.com/" 2>/dev/null
+        if git -C "$dir" ls-remote origin HEAD 2>/dev/null | head -1 | grep -q '.'; then
+            return 0
+        fi
+        git -C "$dir" config --unset-all "url.${proxy}.insteadOf" 2>/dev/null || true
+    done
+    return 1
+}
+
+#==============================================================
+# 升级前版本检查:对比本地与远程 commit,显示版本差异
+# 返回值: 0 = 有新版本可升级, 1 = 已是最新或无法检查(应中止升级)
+#==============================================================
+check_remote_update() {
+    echo ""
+    echo -e "${CYAN}---------- 版本检查 ----------${NC}"
+
+    # 非 Git 项目无法检查
+    if [ ! -d "$PROJECT_DIR/.git" ]; then
+        warn "非 Git 项目,无法检查远程版本"
+        return 1
+    fi
+
+    local cur_branch
+    cur_branch=$(get_current_branch)
+
+    # 本地当前版本号
+    local be_local hw_local h5_local
+    be_local=$(get_module_version backend)
+    hw_local=$(get_module_version admin-web)
+    h5_local=$(get_module_version h5)
+    echo "  [本地当前版本]"
+    echo "    后端: v${be_local}    管理后台: v${hw_local}    H5: v${h5_local}"
+
+    # 获取本地 commit
+    local local_commit
+    local_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null | cut -c1-12)
+
+    # 配置加速器并获取远程 commit
+    info "检查远程仓库最新版本(分支: ${cur_branch})..."
+    setup_git_proxy "$PROJECT_DIR" 2>/dev/null
+    local remote_commit
+    remote_commit=$(git -C "$PROJECT_DIR" ls-remote origin "$cur_branch" 2>/dev/null | awk '{print $1}' | cut -c1-12)
+
+    # 无法获取远程版本(网络不通)
+    if [ -z "$remote_commit" ]; then
+        warn "无法连接远程仓库(加速器/网络可能不可用)"
+        echo -e "${CYAN}------------------------------${NC}"
+        echo ""
+        warn "跳过版本检查,允许继续升级(将直接拉取远程)"
+        return 0
+    fi
+
+    # 本地与远程 commit 一致 → 已是最新
+    if [ "$remote_commit" = "$local_commit" ]; then
+        echo "  本地已是最新版本 (commit: ${local_commit})"
+        echo -e "${CYAN}------------------------------${NC}"
+        echo ""
+        info "已是最新版本,无需升级"
+        return 1
+    fi
+
+    # 有新版本:显示待更新提交和版本变化
+    echo "  [待更新提交] (本地 ${local_commit} → 远程 ${remote_commit})"
+    git -C "$PROJECT_DIR" fetch origin "$cur_branch" 2>/dev/null
+    local new_commits
+    new_commits=$(git -C "$PROJECT_DIR" log --oneline "HEAD..origin/${cur_branch}" 2>/dev/null)
+    if [ -n "$new_commits" ]; then
+        echo "$new_commits" | head -10 | while read -r line; do
+            echo "    $line"
+        done
+        local total
+        total=$(echo "$new_commits" | wc -l)
+        [ "$total" -gt 10 ] && echo "    ...(共 $total 条提交,仅显示前 10 条)"
+    fi
+
+    # 远程版本号
+    local remote_be remote_hw remote_h5
+    remote_be=$(git -C "$PROJECT_DIR" show "origin/${cur_branch}:VERSIONS.json" 2>/dev/null | \
+        python3 -c "import json,sys; print(json.load(sys.stdin).get('backend',{}).get('version','?'))" 2>/dev/null || echo "?")
+    remote_hw=$(git -C "$PROJECT_DIR" show "origin/${cur_branch}:VERSIONS.json" 2>/dev/null | \
+        python3 -c "import json,sys; print(json.load(sys.stdin).get('admin-web',{}).get('version','?'))" 2>/dev/null || echo "?")
+    remote_h5=$(git -C "$PROJECT_DIR" show "origin/${cur_branch}:VERSIONS.json" 2>/dev/null | \
+        python3 -c "import json,sys; print(json.load(sys.stdin).get('h5',{}).get('version','?'))" 2>/dev/null || echo "?")
+    echo ""
+    echo "  [版本变化]"
+    [ "$be_local" != "$remote_be" ] && [ "$remote_be" != "?" ] && \
+        echo "    后端: v${be_local} → v${remote_be}" || echo "    后端: 无变化"
+    [ "$hw_local" != "$remote_hw" ] && [ "$remote_hw" != "?" ] && \
+        echo "    管理后台: v${hw_local} → v${remote_hw}" || echo "    管理后台: 无变化"
+    [ "$h5_local" != "$remote_h5" ] && [ "$remote_h5" != "?" ] && \
+        echo "    H5: v${h5_local} → v${remote_h5}" || echo "    H5: 无变化"
+
+    echo -e "${CYAN}------------------------------${NC}"
+    echo ""
+    return 0
+}
+
 # 等待用户按回车继续
 pause() {
     echo ""
@@ -387,8 +503,12 @@ show_upgrade_steps() {
 menu_upgrade_all() {
     echo ""
     echo -e "${BLUE}========== 升级全部 ==========${NC}"
+    # 先检查远程是否有新版本,没有则直接返回
+    if ! check_remote_update; then
+        pause
+        return
+    fi
     show_upgrade_steps "全部"
-    echo ""
     if confirm "确认升级全部?"; then
         chmod +x "$PROJECT_DIR/scripts/upgrade.sh"
         "$PROJECT_DIR/scripts/upgrade.sh" all
@@ -402,8 +522,12 @@ menu_upgrade_all() {
 menu_upgrade_backend() {
     echo ""
     echo -e "${BLUE}========== 升级后端 ==========${NC}"
+    # 先检查远程是否有新版本,没有则直接返回
+    if ! check_remote_update; then
+        pause
+        return
+    fi
     show_upgrade_steps "后端"
-    echo ""
     if confirm "确认升级后端?"; then
         chmod +x "$PROJECT_DIR/scripts/upgrade.sh"
         "$PROJECT_DIR/scripts/upgrade.sh" backend
@@ -417,8 +541,12 @@ menu_upgrade_backend() {
 menu_upgrade_frontend() {
     echo ""
     echo -e "${BLUE}========== 升级前端 ==========${NC}"
+    # 先检查远程是否有新版本,没有则直接返回
+    if ! check_remote_update; then
+        pause
+        return
+    fi
     show_upgrade_steps "前端(admin-web + h5)"
-    echo ""
     if confirm "确认升级前端?"; then
         chmod +x "$PROJECT_DIR/scripts/upgrade.sh"
         "$PROJECT_DIR/scripts/upgrade.sh" frontend
