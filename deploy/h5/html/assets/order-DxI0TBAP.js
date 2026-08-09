@@ -1,0 +1,1 @@
+import{y as e,W as t,a3 as n}from"./index-Berx37pg.js";function o(r){return t("/order",r)}function c(r){return e(`/order/employee/${r}`)}function s(r){return e(`/order/${r}`)}function u(r){return n(`/order/${r}/cancel`)}export{s as a,u as b,o as c,c as g};
