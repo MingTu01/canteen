@@ -56,6 +56,12 @@ api.interceptors.response.use(
       return res.data
     }
     const data = res.data
+    // 自动给响应中的 /uploads/ 图片 URL 加签名(sig + exp)
+    if (data?.data) {
+      import('@/utils/imageSign')
+        .then(({ signImageUrls }) => signImageUrls(data.data))
+        .catch(() => {})
+    }
     if (data.code === 200) return data
     // 401/403 不弹重复消息(下面会跳转登录页)
     if (data.code !== 401 && data.code !== 403) {

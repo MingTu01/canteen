@@ -37,6 +37,7 @@ import {
 import { loadConfig, bindTerminal, clearConfig, saveConfig, type TerminalConfig } from '@/api'
 import { clearBranding } from '@/store/branding'
 import { destroyLocalCache } from '@/utils/cache'
+import { destroyEmployeeCache } from '@/utils/employeeCache'
 import { getServerUrl, setRuntimeConfig, getDeviceStatus, restartCardReader, type CardReaderStatus } from '@/api/shellApi'
 import {
   loadRuntimeConfig,
@@ -410,6 +411,7 @@ const doUnbind = async () => {
     clearBranding()
     // 销毁缓存管理器:停止 SSE/轮询定时器,避免解绑后继续发请求(P1-6)
     destroyLocalCache()
+    destroyEmployeeCache().catch(() => {})
     reloadBound()
     unbindConfirmVisible.value = false
     // 清空表单

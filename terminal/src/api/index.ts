@@ -130,7 +130,15 @@ export function getApi(): AxiosInstance {
     // 401/403 响应:token 失效或门店权限变更,清除本地绑定与缓存,回到配置页重新绑定
     // 使用防重入标志位(5 秒冷却),避免并发请求时多次触发
     currentApi.interceptors.response.use(
-      (res) => res,
+      (res) => {
+        // 自动给响应中的 /uploads/ 图片 URL 加签名(sig + exp)
+        if (res.data?.data) {
+          import('@/utils/imageSign')
+            .then(({ signImageUrls }) => signImageUrls(res.data.data))
+            .catch(() => {})
+        }
+        return res
+      },
       (err) => {
         const status = err.response?.status
         if ((status === 401 || status === 403) && !isHandling401) {

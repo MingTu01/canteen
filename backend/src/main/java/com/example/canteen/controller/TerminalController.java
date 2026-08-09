@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -184,6 +185,48 @@ public class TerminalController {
             }
         }
         return ApiResponse.success(vo);
+    }
+
+    /**
+     * 批量获取本食堂所有启用员工(终端启动时全量缓存用)。
+     *
+     * 返回精简版员工列表(仅刷卡识别所需字段):
+     * id / cardNo / name / avatar / departmentId / departmentName / balance / status
+     * 不含手机号、密码等敏感字段。
+     *
+     * 终端启动时调用此接口缓存全量员工到 IndexedDB,
+     * 刷卡时优先查本地缓存(毫秒级),未命中再走 /employee/{cardNo} 网络查询。
+     * 员工头像也同步预加载到 IndexedDB,避免刷卡时下载头像。
+     */
+    @GetMapping("/employees")
+    public ApiResponse<java.util.List<EmployeeVO>> listStoreEmployees() {
+        Integer role = SecurityContext.currentRole();
+        if (role == null || role != 3) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "仅终端设备可批量获取员工");
+        }
+        Long storeId = SecurityContext.currentStoreId();
+        if (storeId == null) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
+        }
+        List<Employee> employees = employeeService.getEmployeesByStore(storeId);
+        // 预加载部门映射
+        Map<Long, String> deptMap = new HashMap<>();
+        List<Department> depts = departmentMapper.selectByStoreId(storeId);
+        if (depts != null) {
+            for (Department d : depts) {
+                deptMap.put(d.getId(), d.getName());
+            }
+        }
+        List<EmployeeVO> voList = employees.stream()
+                .map(e -> {
+                    EmployeeVO vo = EmployeeVO.from(e);
+                    if (e.getDepartmentId() != null) {
+                        vo.setDepartmentName(deptMap.get(e.getDepartmentId()));
+                    }
+                    return vo;
+                })
+                .toList();
+        return ApiResponse.success(voList);
     }
 
     /**

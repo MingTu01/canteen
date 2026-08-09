@@ -3,6 +3,8 @@ package com.example.canteen.controller;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.security.SecurityContext;
+import com.example.canteen.service.ImageSignService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -12,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -38,6 +41,9 @@ public class FileController {
 
     /** 最大文件大小 5MB(前端已压缩到 300k,此为防御性上限) */
     private static final long MAX_SIZE = 5 * 1024 * 1024;
+
+    @Autowired
+    private ImageSignService imageSignService;
 
     @PostMapping("/upload-image")
     public ApiResponse<Map<String, Object>> uploadImage(@RequestParam("file") MultipartFile file) {
@@ -103,6 +109,32 @@ public class FileController {
         } catch (IOException e) {
             return ApiResponse.error(500, "文件保存失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 批量签名图片 URL。
+     *
+     * 前端在拿到包含 /uploads/ 路径的数据后(如菜品列表、员工列表),
+     * 调用此接口批量获取带签名参数的 URL,用于 <img src> 展示。
+     * 签名有效期 7 天,前端应缓存签名结果避免频繁请求。
+     *
+     * 请求体:{ "paths": ["/uploads/xxx.jpg?v=123", "/uploads/yyy.png"] }
+     * 响应:  { "urls":  ["/uploads/xxx.jpg?v=123&sig=...&exp=...", ...] }
+     */
+    @PostMapping("/sign")
+    public ApiResponse<Map<String, Object>> signUrls(@RequestBody Map<String, List<String>> body) {
+        List<String> paths = body.get("paths");
+        if (paths == null || paths.isEmpty()) {
+            Map<String, Object> empty = new HashMap<>();
+            empty.put("urls", List.of());
+            return ApiResponse.success(empty);
+        }
+        List<String> urls = paths.stream()
+                .map(imageSignService::sign)
+                .toList();
+        Map<String, Object> result = new HashMap<>();
+        result.put("urls", urls);
+        return ApiResponse.success(result);
     }
 
     /**

@@ -15,6 +15,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
+import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey, fullDateLabel, pad2 } from '@/utils'
@@ -68,16 +69,16 @@ const scan = async (input: string) => {
       }
     }
 
-    // 2. 作为卡号识别员工
-    const resp = await api.get(`/terminal/employee/${encodeURIComponent(trimmed)}`)
-    if (resp.data.code === 200 && resp.data.data) {
+    // 2. 作为卡号识别员工(优先查本地缓存,毫秒级)
+    const emp = await getEmployeeByCardNo(trimmed)
+    if (emp) {
       resetOrderFlow()
-      orderStore.employee = resp.data.data
+      orderStore.employee = emp
       orderStore.selectedDate = toDateKey(new Date())
       router.push('/order/menu')
       return
     }
-    scanError.value = resp.data.message ?? '刷卡失败,请重试'
+    scanError.value = '刷卡失败,请重试'
   } catch (e: any) {
     scanError.value = e?.response?.data?.message ?? '刷卡失败,请重试'
   } finally {

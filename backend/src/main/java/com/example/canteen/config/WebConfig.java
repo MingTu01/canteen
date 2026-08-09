@@ -1,5 +1,6 @@
 package com.example.canteen.config;
 
+import com.example.canteen.security.ImageAuthInterceptor;
 import com.example.canteen.security.StoreAccessInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,9 +27,11 @@ public class WebConfig implements WebMvcConfigurer {
     @Autowired
     private StoreAccessInterceptor storeAccessInterceptor;
 
+    @Autowired
+    private ImageAuthInterceptor imageAuthInterceptor;
+
     /**
-     * 注册门店访问拦截器:自动校验路径中带 storeId 的接口。
-     * 排除登录/健康检查/系统版本/注销等公共端点。
+     * 注册拦截器:门店访问拦截器 + 图片签名校验拦截器。
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -49,6 +52,10 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/store/*/branding",
                         "/actuator/**"
                 );
+
+        // 图片签名校验:所有 /uploads/** 请求必须带有效签名(sig + exp)
+        registry.addInterceptor(imageAuthInterceptor)
+                .addPathPatterns("/uploads/**");
     }
 
     /**

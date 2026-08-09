@@ -37,12 +37,11 @@ public class WhitelistMatcher {
     public static final String[] WHITELIST_PREFIX = {
             "/actuator",
             "/h2-console",
-            // 上传的静态图片资源:/uploads/xxx.jpg
-            "/uploads/",
             // 微信登录三步接口(auth-url / login / bind),未登录态调用
             "/api/employee/wechat/",
             // 微信公众号消息/事件回调(微信服务器推送,不带JWT),GET接入校验+POST事件
             "/api/wechat/callback",
+            // 注意:/uploads/ 已移出白名单,改由 ImageAuthInterceptor 校验签名(sig+exp)
     };
 
     /** 公开接口正则:GET /api/store/{id}/branding */

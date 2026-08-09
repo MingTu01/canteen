@@ -4,21 +4,25 @@ import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { loadConfig } from '@/api'
 import { initLocalCache, destroyLocalCache } from '@/utils/cache'
+import { initEmployeeCache, destroyEmployeeCache } from '@/utils/employeeCache'
 import AdminEntryZone from '@/components/AdminEntryZone.vue'
 import { purgeOldBrandingCache } from '@/store/branding'
 import { loadRuntimeConfig } from '@/store/terminalSettings'
 
 const route = useRoute()
 
-/** 根据终端绑定状态初始化本地缓存(SSE + IndexedDB) */
+/** 根据终端绑定状态初始化本地缓存(SSE + IndexedDB + 员工/头像预加载) */
 function syncCache() {
   const config = loadConfig()
   if (config?.storeId && config?.token) {
     initLocalCache(config.storeId).catch(() => {
       /* 静默失败,不影响主流程 */
     })
+    // 后台预加载员工列表 + 头像(不阻塞启动,店铺隔离)
+    initEmployeeCache(config.storeId).catch(() => {})
   } else {
     destroyLocalCache()
+    destroyEmployeeCache().catch(() => {})
   }
 }
 

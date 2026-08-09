@@ -30,6 +30,8 @@ import {
   dbClearImages,
   dbClearUnusedImages,
   dbClearMenus,
+  dbClearEmployees,
+  dbGetAllEmployees,
   getDishImageBlob,
   clearObjectUrlCache,
   type CachedDish,
@@ -75,9 +77,15 @@ let sseDebounceTimer: ReturnType<typeof setTimeout> | null = null
 /** 启动时拉取菜品 + 图片缓存 */
 export async function initLocalCache(storeId: number): Promise<void> {
   if (initialized && currentStoreId === storeId) return
-  // 如果 storeId 变化(切换门店),先销毁旧缓存
-  if (initialized && currentStoreId !== storeId) {
+  // 如果 storeId 变化(切换门店),先销毁旧缓存并清理旧店铺 IndexedDB 数据
+  if (initialized && currentStoreId !== null && currentStoreId !== storeId) {
+    console.log(`[cache] 店铺切换 ${currentStoreId} → ${storeId},清理旧店铺缓存`)
+    const oldStoreId = currentStoreId
     destroyLocalCache()
+    // 立即清理旧店铺的菜品/菜单/员工数据,避免短暂展示上一家的数据
+    await dbClearDishesByStore(oldStoreId).catch(() => {})
+    await dbClearMenus().catch(() => {})
+    await dbClearEmployees().catch(() => {})
   }
   currentStoreId = storeId
   initialized = true
@@ -105,12 +113,18 @@ export async function initLocalCache(storeId: number): Promise<void> {
  *
  * 并发互斥:同时多个调用(如 SSE 连续事件)复用同一个 in-flight Promise,
  * 避免 clear+put 交错导致空窗或数据回退。
+ *
+ * 竞态保护:.finally 中检查是否仍是自己的 Promise,
+ * 避免店铺切换后旧请求错误地把新请求的 refreshInFlight 重置为 null。
  */
 export async function refreshDishes(storeId: number): Promise<void> {
   if (refreshInFlight) return refreshInFlight
-  refreshInFlight = doRefreshDishes(storeId).finally(() => {
-    refreshInFlight = null
+  const p = doRefreshDishes(storeId).finally(() => {
+    // 只有当 refreshInFlight 仍指向自己时才重置,
+    // 避免店铺切换后旧请求把新请求的 Promise 错误置 null
+    if (refreshInFlight === p) refreshInFlight = null
   })
+  refreshInFlight = p
   return refreshInFlight
 }
 
@@ -173,44 +187,67 @@ async function doRefreshDishes(storeId: number): Promise<void> {
   await downloadImages(imageUrls)
 
   // 清理不再使用的图片 Blob(菜品下架或图片 URL 变更后,旧 Blob 残留)
+  // 注意:images store 与员工头像共用,必须合并员工头像 URL,否则会误删头像
   const usedUrls = new Set(cached.map((d) => d.image).filter(Boolean) as string[])
+  try {
+    const employees = await dbGetAllEmployees()
+    for (const e of employees) {
+      if (e.avatar) usedUrls.add(e.avatar)
+    }
+  } catch { /* 静默 */ }
   await dbClearUnusedImages(usedUrls).catch(() => {})
 }
 
-/** 批量下载图片到 IndexedDB,限并发 5 */
+/** 批量下载图片到 IndexedDB,限并发 5,带重试和日志 */
 async function downloadImageUrls(urls: string[], baseUrl: string): Promise<void> {
   const CONCURRENCY = 5
+  const MAX_RETRIES = 3
   const queue = [...new Set(urls)]
   let completed = 0
+  let failed = 0
   const total = queue.length
+
+  async function downloadOne(url: string): Promise<boolean> {
+    // 已缓存则跳过
+    const existing = await dbGetImage(url)
+    if (existing) return true
+
+    const fullUrl = url.startsWith('http') ? url : baseUrl + url
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // 用 axios 下载(带 token + 签名 URL),responseType=blob
+        const resp = await api.get(fullUrl, { responseType: 'blob', timeout: 15000 })
+        const blob = resp.data as Blob
+        // 校验:blob 太小可能是错误页面
+        if (!blob || blob.size < 100) {
+          console.warn(`[cache] 图片下载异常(大小 ${blob?.size || 0}B),尝试 ${attempt}/${MAX_RETRIES}: ${url}`)
+          continue
+        }
+        await dbPutImage(url, blob)
+        return true
+      } catch (e) {
+        if (attempt === MAX_RETRIES) {
+          console.error(`[cache] 图片下载失败(重试 ${MAX_RETRIES} 次): ${url}`, e)
+        }
+      }
+    }
+    return false
+  }
 
   async function worker() {
     while (queue.length > 0) {
       const url = queue.shift()!
-      try {
-        // 已缓存则跳过
-        const existing = await dbGetImage(url)
-        if (existing) {
-          completed++
-          continue
-        }
-        // 下载
-        const fullUrl = url.startsWith('http') ? url : baseUrl + url
-        const resp = await fetch(fullUrl)
-        if (!resp.ok) continue
-        const blob = await resp.blob()
-        await dbPutImage(url, blob)
-        completed++
-      } catch {
-        /* 单张图片失败不影响整体 */
-      }
+      const ok = await downloadOne(url)
+      if (ok) completed++
+      else failed++
     }
   }
 
   await Promise.all(
     Array.from({ length: CONCURRENCY }, () => worker()),
   )
-  console.log(`[cache] 图片下载完成:${completed}/${total}`)
+  console.log(`[cache] 图片下载完成:成功 ${completed}/${total},失败 ${failed}`)
 }
 
 /** 兼容方法:从终端配置中拿 serverUrl 拼接绝对路径 */
@@ -413,6 +450,7 @@ export async function purgeLocalCache(): Promise<void> {
   await dbClearDishesByStore(0).catch(() => {})
   await dbClearImages().catch(() => {})
   await dbClearMenus().catch(() => {})
+  await dbClearEmployees().catch(() => {})
   currentStoreId = null
   initialized = false
 }

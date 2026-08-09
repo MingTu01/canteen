@@ -114,6 +114,13 @@ api.interceptors.response.use(
       return body
     }
 
+    // 自动给响应中的 /uploads/ 图片 URL 加签名(sig + exp)
+    if (body.data) {
+      import('@/utils/imageSign')
+        .then(({ signImageUrls }) => signImageUrls(body.data))
+        .catch(() => {})
+    }
+
     // 业务成功:返回 data 字段
     if (body.code === 200) {
       return body.data

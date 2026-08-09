@@ -9,10 +9,11 @@
  * - 所有事务绑定 onabort,避免事务中止时 Promise 永久挂起
  */
 const DB_NAME = 'canteen_terminal'
-const DB_VERSION = 1
-const STORE_DISHES = 'dishes'   // key: dishId(number), value: Dish 对象
-const STORE_IMAGES = 'images'   // key: imageUrl(string), value: Blob
-const STORE_MENUS = 'menus'     // key: `${storeId}_${date}`, value: 菜单数组
+const DB_VERSION = 2
+const STORE_DISHES = 'dishes'     // key: dishId(number), value: Dish 对象
+const STORE_IMAGES = 'images'     // key: imageUrl(string), value: Blob
+const STORE_MENUS = 'menus'       // key: `${storeId}_${date}`, value: 菜单数组
+const STORE_EMPLOYEES = 'employees' // key: cardNo(string), value: Employee 对象
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -35,6 +36,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_MENUS)) {
         db.createObjectStore(STORE_MENUS)
+      }
+      if (!db.objectStoreNames.contains(STORE_EMPLOYEES)) {
+        db.createObjectStore(STORE_EMPLOYEES, { keyPath: 'cardNo' })
       }
     }
     req.onsuccess = () => resolve(req.result)
@@ -254,4 +258,70 @@ export async function getDishImageBlob(url: string): Promise<Blob | null> {
 /** 兼容旧调用:清空 ObjectURL 缓存(现为空操作,ObjectURL 由组件独占管理) */
 export function clearObjectUrlCache(): void {
   /* 空操作:ObjectURL 由组件独占管理,db.ts 不再缓存 */
+}
+
+/* ============ 员工数据缓存 ============ */
+
+/** 缓存的员工信息(精简版,仅刷卡识别所需) */
+export interface CachedEmployee {
+  id: number
+  cardNo: string
+  name: string
+  /** 头像 URL(可选,与 store Employee.avatar 兼容) */
+  avatar?: string
+  departmentId: number | null
+  /** 部门名称(无部门时为空字符串,与 store Employee.departmentName 兼容) */
+  departmentName: string
+  balance: number
+  status: number
+  storeId: number
+}
+
+/** 批量写入员工(全量覆盖) */
+export async function dbPutEmployees(employees: CachedEmployee[]): Promise<void> {
+  if (employees.length === 0) return
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(STORE_EMPLOYEES, 'readwrite')
+    const s = t.objectStore(STORE_EMPLOYEES)
+    s.clear() // 全量覆盖:先清空再写入
+    for (const e of employees) s.put(e)
+    t.oncomplete = () => resolve()
+    t.onerror = () => reject(t.error)
+    t.onabort = () => reject(t.error)
+  })
+}
+
+/** 按 cardNo 查员工(刷卡时用,毫秒级) */
+export async function dbGetEmployeeByCardNo(cardNo: string): Promise<CachedEmployee | null> {
+  try {
+    return (await tx(STORE_EMPLOYEES, 'readonly', (s) => s.get(cardNo))) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** 获取所有缓存员工(头像预加载用) */
+export async function dbGetAllEmployees(): Promise<CachedEmployee[]> {
+  try {
+    return (await tx(STORE_EMPLOYEES, 'readonly', (s) => s.getAll())) ?? []
+  } catch {
+    return []
+  }
+}
+
+/** 清空员工缓存(切换门店/解绑时调用) */
+export async function dbClearEmployees(): Promise<void> {
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const t = db.transaction(STORE_EMPLOYEES, 'readwrite')
+      t.objectStore(STORE_EMPLOYEES).clear()
+      t.oncomplete = () => resolve()
+      t.onerror = () => reject(t.error)
+      t.onabort = () => reject(t.error)
+    })
+  } catch {
+    /* 静默 */
+  }
 }

@@ -231,17 +231,15 @@ def start_server(directory, bridge, port=0):
         allow_reuse_address = True
         daemon_threads = True
 
-    # 固定端口优先:保证 origin(http://127.0.0.1:port)稳定,
-    # 否则 localStorage/IndexedDB 会因端口变化而丢失(绑定配置、菜品缓存全部失效)。
-    # 注意:不能用 80/443 等默认端口!浏览器对默认端口会省略端口号,
-    # 导致 origin 变成 http://127.0.0.1(不带端口),而非 http://127.0.0.1:80,
-    # 这会与后端 CORS 配置 http://127.0.0.1:* 不匹配(后者要求带 :port),
-    # 引发 CORS 跨域错误。必须使用非默认端口,让 origin 始终带端口号。
+    # 固定端口 1287:保证 origin(http://127.0.0.1:1287)绝对稳定,
+    # 否则 localStorage/IndexedDB 会因端口变化而丢失(绑定配置、菜品/头像缓存全部失效)。
+    # 单实例 Mutex 已保证不会有两个终端进程,1287 不应该被占;
+    # 若被占(异常残留),直接报错让用户处理,不换端口(换端口会导致缓存全丢)。
     if port != 0:
         # 调用方显式指定端口,直接用
         candidates = [port]
     else:
-        candidates = [1287, 1288, 1289, 1290, 1291, 8888, 9090, 3000]
+        candidates = [1287]
 
     server = None
     actual_port = None
@@ -256,7 +254,10 @@ def start_server(directory, bridge, port=0):
             continue
 
     if server is None:
-        raise RuntimeError(f'无法绑定本地端口(尝试过 {candidates}):{last_error}')
+        raise RuntimeError(
+            f'无法绑定本地端口 {candidates}(可能已有终端实例在运行,'
+            f'请通过任务管理器结束 canteen-terminal.exe 后重试):{last_error}'
+        )
 
     url = f'http://127.0.0.1:{actual_port}'
 

@@ -13,6 +13,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
+import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
@@ -108,12 +109,12 @@ const handleInput = async (code: string) => {
       }
     }
 
-    // 2. 作为卡号识别员工
+    // 2. 作为卡号识别员工(优先查本地缓存,毫秒级)
     try {
-      const empResp = await api.get(`/terminal/employee/${encodeURIComponent(trimmed)}`)
-      if (empResp.data.code === 200 && empResp.data.data) {
+      const emp = await getEmployeeByCardNo(trimmed)
+      if (emp) {
         resetPickupFlow()
-        pickupStore.employee = empResp.data.data
+        pickupStore.employee = emp
         router.push('/pickup/verify')
         return
       }
