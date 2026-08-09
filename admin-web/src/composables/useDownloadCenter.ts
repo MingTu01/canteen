@@ -61,9 +61,9 @@ const FALLBACK_CARD_HELPER: DownloadItem = {
 }
 
 const FALLBACK_TERMINAL: DownloadItem = {
-  name: 'CanteenTerminal-Setup-1.0.5.exe',
-  version: '1.0.5',
-  url: 'https://github.com/MingTu01/canteen/releases/download/v1.0.5/CanteenTerminal-Setup-1.0.5.exe',
+  name: 'CanteenTerminal-Setup-1.0.15.exe',
+  version: '1.0.15',
+  url: 'https://github.com/MingTu01/canteen/releases/download/v1.0.15/CanteenTerminal-Setup-1.0.15.exe',
   notes: '食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。',
   publishedAt: '',
   fromApi: false,
