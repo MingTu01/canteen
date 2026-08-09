@@ -55,7 +55,7 @@ const routes: RouteRecordRaw[] = [
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/Profile.vue'),
-    meta: { requiresAuth: true, title: '我的' },
+    meta: { requiresAuth: true, keepAlive: true, title: '我的' },
   },
   {
     path: '/feedback/create',

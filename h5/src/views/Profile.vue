@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, type Component } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   showConfirmDialog,
@@ -106,6 +106,31 @@ onMounted(async () => {
   // 启动轮询:每 5 秒检查支付码是否被核销
   // (SSE 在微信浏览器中可能不稳定,轮询是最可靠的兜底方案)
   startPayCodePoll()
+})
+
+/**
+ * keep-alive 组件激活时(从其他页面切回"我的"):
+ * - 立即检查一次支付码(可能在离开期间被核销)
+ * - 恢复轮询
+ */
+onActivated(() => {
+  // 首次挂载时 onMounted 已启动轮询,onActivated 也会触发,避免重复启动
+  // 仅当轮询未运行时(从其他页面切回)才检查并恢复
+  if (!payCodePollTimer) {
+    checkPayCodeOnce()
+    startPayCodePoll()
+  }
+})
+
+/**
+ * keep-alive 组件停用时(切到其他页面):
+ * - 暂停轮询(省资源,组件仍在内存但不在前台)
+ */
+onDeactivated(() => {
+  if (payCodePollTimer) {
+    clearInterval(payCodePollTimer)
+    payCodePollTimer = null
+  }
 })
 
 /**
