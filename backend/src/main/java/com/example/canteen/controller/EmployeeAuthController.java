@@ -8,6 +8,7 @@ import com.example.canteen.security.AuthCookieUtil;
 import com.example.canteen.security.LoginRateLimiter;
 import com.example.canteen.security.SecurityContext;
 import com.example.canteen.service.EmployeeAuthService;
+import com.example.canteen.service.PayCodeService;
 import com.example.canteen.service.WechatAuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,18 +29,21 @@ public class EmployeeAuthController {
     private final EmployeeMapper employeeMapper;
     private final LoginRateLimiter rateLimiter;
     private final AuthCookieUtil authCookieUtil;
+    private final PayCodeService payCodeService;
     private final WechatAuthService wechatAuthService;
 
     public EmployeeAuthController(EmployeeAuthService authService,
                                   EmployeeMapper employeeMapper,
                                   LoginRateLimiter rateLimiter,
                                   AuthCookieUtil authCookieUtil,
-                                  WechatAuthService wechatAuthService) {
+                                  WechatAuthService wechatAuthService,
+                                  PayCodeService payCodeService) {
         this.authService = authService;
         this.employeeMapper = employeeMapper;
         this.rateLimiter = rateLimiter;
         this.authCookieUtil = authCookieUtil;
         this.wechatAuthService = wechatAuthService;
+        this.payCodeService = payCodeService;
     }
 
     /**
@@ -156,6 +160,27 @@ public class EmployeeAuthController {
             return ApiResponse.error(404, "员工不存在");
         }
         return ApiResponse.success(qrcode);
+    }
+
+    /**
+     * 生成一次性支付码(供取餐终端扫码,等同刷卡)。
+     *
+     * 支付码方案:32 位随机 hex 码,5 分钟有效,核销即失效(防截图重放)。
+     * 二维码内容仅含随机码,不含个人信息,安全等级与微信/支付宝动态码相当。
+     *
+     * @return { code: "32位hex", expire: 毫秒时间戳 }
+     */
+    @PostMapping("/paycode")
+    public ApiResponse<Map<String, Object>> generatePayCode() {
+        Long employeeId = SecurityContext.currentEmployeeId();
+        if (employeeId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+        Map<String, Object> result = payCodeService.generatePayCode(employeeId);
+        if (result == null) {
+            return ApiResponse.error(404, "员工不存在");
+        }
+        return ApiResponse.success(result);
     }
 
     /**

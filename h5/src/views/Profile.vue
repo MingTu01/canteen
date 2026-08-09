@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, type Component } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   showConfirmDialog,
@@ -26,7 +26,7 @@ import { getMyRecharges } from '@/api/recharge'
 import * as authApi from '@/api/auth'
 import { formatMoney, formatDateTime } from '@/composables/useFormat'
 import { getCachedImage } from '@/utils/imageCache'
-import type { RechargeRecord, EmployeeQrcode } from '@/api/types'
+import type { RechargeRecord, PayCode } from '@/api/types'
 
 defineOptions({ name: 'Profile' })
 
@@ -47,10 +47,14 @@ const showPasswordPopup = ref(false)
 const showRechargePopup = ref(false)
 const showAboutPopup = ref(false)
 
-// ============ 取餐码弹层数据 ============
-const qrcodeData = ref<EmployeeQrcode | null>(null)
+// ============ 取餐码(一次性支付码)弹层数据 ============
+const qrcodeData = ref<PayCode | null>(null)
 const qrcodeImg = ref<string>('')
 const qrcodeLoading = ref(false)
+/** 支付码定时刷新定时器(4 分钟自动刷新,5 分钟有效期前刷新) */
+let payCodeRefreshTimer: ReturnType<typeof setTimeout> | null = null
+/** 支付码刷新间隔(4 分钟,留 1 分钟余量避免过期) */
+const PAY_CODE_REFRESH_INTERVAL = 4 * 60 * 1000
 
 // ============ 修改密码表单 ============
 const passwordForm = ref({
@@ -90,6 +94,14 @@ onMounted(async () => {
   loadQrcode()
 })
 
+onUnmounted(() => {
+  // 清理支付码定时刷新定时器
+  if (payCodeRefreshTimer) {
+    clearTimeout(payCodeRefreshTimer)
+    payCodeRefreshTimer = null
+  }
+})
+
 // ============ 跳转 ============
 const goOrders = (): void => {
   router.push('/orders')
@@ -107,11 +119,31 @@ const goUnsolicitedOrder = (): void => {
   router.push('/unsolicited-order')
 }
 
-// ============ 取餐码 ============
-/** 二维码是否已过期(expire 为秒级时间戳) */
+// ============ 取餐码(一次性支付码) ============
+/** 支付码是否已过期(expire 为毫秒时间戳) */
 const isQrcodeExpired = (): boolean => {
   if (!qrcodeData.value) return true
-  return Date.now() > qrcodeData.value.expire * 1000
+  return Date.now() > qrcodeData.value.expire
+}
+
+/** 启动支付码定时刷新(4 分钟后自动刷新,避免 5 分钟过期) */
+const startPayCodeRefreshTimer = (): void => {
+  if (payCodeRefreshTimer) clearTimeout(payCodeRefreshTimer)
+  payCodeRefreshTimer = setTimeout(async () => {
+    // 刷新支付码(不显示 loading,静默刷新)
+    try {
+      qrcodeData.value = await authApi.generatePayCode()
+      qrcodeImg.value = await QRCode.toDataURL(qrcodeData.value.code, {
+        width: 240,
+        margin: 1,
+        color: { dark: '#1a1a1a', light: '#ffffff' },
+      })
+    } catch {
+      /* 刷新失败,下次打开会重新加载 */
+    }
+    // 递归启动下一次刷新
+    startPayCodeRefreshTimer()
+  }, PAY_CODE_REFRESH_INTERVAL)
 }
 
 /** 仅加载取餐码数据(不弹层),供内嵌卡片与放大弹层共用 */
@@ -120,14 +152,15 @@ const loadQrcode = async (): Promise<void> => {
   if (!qrcodeData.value || isQrcodeExpired()) {
     qrcodeLoading.value = true
     try {
-      qrcodeData.value = await authApi.getMyQrcode()
-      // 生成二维码:将完整 qrcode 数据 JSON 序列化,供终端解析
-      const content = JSON.stringify(qrcodeData.value)
-      qrcodeImg.value = await QRCode.toDataURL(content, {
+      qrcodeData.value = await authApi.generatePayCode()
+      // 生成二维码:内容仅含 32 位 hex 支付码(不含个人信息)
+      qrcodeImg.value = await QRCode.toDataURL(qrcodeData.value.code, {
         width: 240,
         margin: 1,
         color: { dark: '#1a1a1a', light: '#ffffff' },
       })
+      // 启动定时刷新(4 分钟后自动刷新)
+      startPayCodeRefreshTimer()
     } catch {
       /* 拦截器已提示 */
     } finally {
@@ -229,7 +262,11 @@ const onLogout = (): void => {
       brandingStore.clearBranding()
       // 清空购物车,避免跨用户泄漏
       cartStore.clearAll()
-      // 清空取餐码缓存,避免下一用户看到上一用户的二维码
+      // 清空取餐码缓存和定时器,避免下一用户看到上一用户的支付码
+      if (payCodeRefreshTimer) {
+        clearTimeout(payCodeRefreshTimer)
+        payCodeRefreshTimer = null
+      }
       qrcodeData.value = null
       qrcodeImg.value = ''
       showSuccessToast('已退出登录')
@@ -354,9 +391,8 @@ const menuItems: MenuItem[] = [
               class="qrcode-center-popup__img"
             />
           </div>
-          <div class="qrcode-center-popup__name">{{ qrcodeData.name }}</div>
-          <div class="qrcode-center-popup__code">卡号:{{ qrcodeData.cardNo }}</div>
-          <div class="qrcode-center-popup__tip">有效期7天,可在取餐终端扫码使用</div>
+          <div class="qrcode-center-popup__name">{{ employee?.name }}</div>
+          <div class="qrcode-center-popup__tip">5分钟内有效,核销后自动失效,可在取餐终端扫码使用</div>
         </template>
         <div class="qrcode-center-popup__close" @click="showQrcodePopup = false">
           关闭

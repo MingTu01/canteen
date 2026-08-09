@@ -1,5 +1,5 @@
 import { post, put, get } from './index'
-import type { Employee, EmployeeLoginResult, EmployeeQrcode } from './types'
+import type { Employee, EmployeeLoginResult, EmployeeQrcode, PayCode } from './types'
 
 /**
  * 认证相关 API
@@ -32,6 +32,11 @@ export function changePassword(oldPassword: string, newPassword: string): Promis
 /** 获取当前登录员工的身份二维码内容(供取餐终端扫码) */
 export function getMyQrcode(): Promise<EmployeeQrcode> {
   return get<EmployeeQrcode>('/employee/my-qrcode')
+}
+
+/** 生成一次性支付码(5 分钟有效,核销即失效,防截图重放) */
+export function generatePayCode(): Promise<PayCode> {
+  return post<PayCode>('/employee/paycode')
 }
 
 /** 获取当前登录员工的完整信息(基于 token,无需传 ID) */

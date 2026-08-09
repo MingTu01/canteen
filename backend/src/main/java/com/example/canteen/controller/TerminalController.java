@@ -18,6 +18,7 @@ import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.LoginRateLimiter;
 import com.example.canteen.security.SecurityContext;
 import com.example.canteen.service.EmployeeService;
+import com.example.canteen.service.PayCodeService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -49,12 +50,14 @@ public class TerminalController {
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordEncoder passwordEncoder;
     private final LoginRateLimiter rateLimiter;
+    private final PayCodeService payCodeService;
 
     public TerminalController(AdminMapper adminMapper, StoreMapper storeMapper,
                               EmployeeMapper employeeMapper, DepartmentMapper departmentMapper,
                               EmployeeService employeeService,
                               JwtTokenProvider jwtTokenProvider, PasswordEncoder passwordEncoder,
-                              JwtAuthenticationFilter jwtFilter) {
+                              JwtAuthenticationFilter jwtFilter,
+                              PayCodeService payCodeService) {
         this.adminMapper = adminMapper;
         this.storeMapper = storeMapper;
         this.employeeMapper = employeeMapper;
@@ -63,6 +66,7 @@ public class TerminalController {
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordEncoder = passwordEncoder;
         this.rateLimiter = jwtFilter.getRateLimiter();
+        this.payCodeService = payCodeService;
     }
 
     /**
@@ -291,6 +295,25 @@ public class TerminalController {
                 vo.setDepartmentName(dept.getName());
             }
         }
+        return ApiResponse.success(vo);
+    }
+
+    /**
+     * 终端扫码验证一次性支付码(H5「我的」页生成)。
+     *
+     * 支付码方案:32 位随机 hex 码,5 分钟有效,Redis GETDEL 原子操作核销即失效。
+     * 防截图重放:核销后 Redis key 已删除,同一码无法二次使用。
+     *
+     * 请求体:{ "code": "32位hex支付码" }
+     * 返回:EmployeeVO(与刷卡识别/身份二维码验签返回结构一致,前端可无缝复用)
+     */
+    @PostMapping("/verify-paycode")
+    public ApiResponse<EmployeeVO> verifyPayCode(@RequestBody Map<String, Object> body) {
+        String code = strVal(body.get("code"));
+        if (code == null || code.isBlank()) {
+            throw new BusinessException("支付码不能为空");
+        }
+        EmployeeVO vo = payCodeService.verifyPayCode(code);
         return ApiResponse.success(vo);
     }
 

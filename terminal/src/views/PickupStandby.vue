@@ -85,21 +85,22 @@ const dismissError = () => {
  * @param fromCamera 是否来自摄像头扫码(默认 false,即来自读卡器/扫码枪)
  *
  * 安全策略:
- * - 读卡器/扫码枪:接受身份二维码(JSON验签)+ 物理卡号识别 + 取餐码核销
- * - 摄像头扫码:接受身份二维码(JSON验签)+ 取餐码核销,但不接受纯卡号识别员工
- *   攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工查看其订单,必须拒绝
+ * - 读卡器(DLL/USB HID):接受纯数字卡号识别(物理持有,安全)
+ * - 扫码枪/摄像头:接受一次性支付码(32位hex)+ 取餐码核销,不接受纯卡号(防远程冒充)
  *
  * 依次尝试:
- *   1. 员工身份二维码(H5「我的」页生成,内容为 JSON,以 { 开头)→ /terminal/verify-qrcode 验签识别员工
- *   2. 刷卡(员工接口)→ /terminal/employee/{cardNo}(仅读卡器/扫码枪,摄像头跳过)
- *   3. 取餐码核销 → /order/pickup
+ *   1. 旧版身份二维码(以 { 开头,兼容)→ /terminal/verify-qrcode
+ *   2. 一次性支付码(32位hex)→ /terminal/verify-paycode(扫码枪/摄像头都接受)
+ *   3. 刷卡识别(仅读卡器/扫码枪,摄像头拒绝)→ 本地缓存
+ *   4. 取餐码核销 → /order/pickup
  */
 const handleInput = async (code: string, fromCamera = false) => {
   if (scanning.value || !code) return
   scanning.value = true
   try {
-    // 1. 员工身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名),走验签接口
     const trimmed = code.trim()
+
+    // 1. 旧版身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名)→ 兼容
     if (trimmed.startsWith('{')) {
       try {
         const qr = JSON.parse(trimmed)
@@ -113,11 +114,27 @@ const handleInput = async (code: string, fromCamera = false) => {
           }
         }
       } catch {
-        /* 非合法二维码 JSON,继续按卡号处理 */
+        /* 非合法二维码 JSON,继续按其他方式处理 */
       }
     }
 
-    // 2. 作为卡号识别员工(仅读卡器/扫码枪,摄像头不接受纯卡号防远程冒充)
+    // 2. 一次性支付码:32 位 hex(小写)→ /terminal/verify-paycode
+    //    扫码枪和摄像头都接受,核销即失效,防截图重放
+    if (/^[0-9a-f]{32}$/.test(trimmed)) {
+      try {
+        const resp = await api.post('/terminal/verify-paycode', { code: trimmed })
+        if (resp.data.code === 200 && resp.data.data) {
+          resetPickupFlow()
+          pickupStore.employee = resp.data.data
+          router.push('/pickup/verify')
+          return
+        }
+      } catch {
+        /* 支付码无效或已使用,继续尝试取餐码 */
+      }
+    }
+
+    // 3. 作为卡号识别员工(仅读卡器/扫码枪,摄像头不接受纯卡号防远程冒充)
     if (!fromCamera) {
       try {
         const emp = await getEmployeeByCardNo(trimmed)
@@ -130,7 +147,7 @@ const handleInput = async (code: string, fromCamera = false) => {
       } catch { /* 非员工卡,继续尝试取餐码 */ }
     }
 
-    // 3. 作为取餐码核销(读卡器/扫码枪/摄像头都可尝试)
+    // 4. 作为取餐码核销(读卡器/扫码枪/摄像头都可尝试)
     try {
       const resp = await api.post('/order/pickup', { pickupCode: trimmed })
       if (resp.data.code === 200) {
@@ -147,7 +164,7 @@ const handleInput = async (code: string, fromCamera = false) => {
     } catch (e: any) {
       // 取餐码请求异常:输入既非员工卡也非有效取餐码
       if (fromCamera) {
-        showErrorWithAutoClose('取餐失败', '请扫描取餐码或H5身份二维码')
+        showErrorWithAutoClose('取餐失败', '请扫描取餐码或H5取餐码')
       } else {
         showErrorWithAutoClose('取餐失败', '卡号不存在')
       }
@@ -201,18 +218,23 @@ const scanHint = computed(() =>
   getScanHint(hasCardReader.value, hasCamera.value, true),
 )
 
-/** 待机页图标:只有摄像头/扫码枪(无读卡器)用 ScanLine,其余用 CreditCard */
-const showScanIcon = computed(() => !hasCardReader.value && hasCamera.value)
+/** 待机页图标:确定只有读卡器(无摄像头)用 CreditCard,其余用 CreditCard(默认)
+ *  不再使用 ScanLine:USB HID 读卡器无法检测,默认显示 CreditCard 更通用 */
+const showScanIcon = computed(() => false)
 
-/** 主刷卡图标点击:根据设备显示对应提示 */
+/** 主刷卡图标点击:根据设备显示对应提示
+ *  USB HID 读卡器无法检测,提示需兼顾刷卡和扫码 */
 const onCardClick = () => {
   if (scanning.value) return
-  if (hasCardReader.value && hasCamera.value) {
-    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描取餐码')
-  } else if (hasCardReader.value) {
+  if (hasCardReader.value && !hasCamera.value) {
+    // 确定只有 DLL 读卡器(无摄像头):只提示刷卡
     showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上')
+  } else if (hasCamera.value) {
+    // 有摄像头(可能还有 USB HID 读卡器):都提示
+    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或扫描取餐码/身份二维码')
   } else {
-    showErrorWithAutoClose('提示', '请使用扫码枪扫描取餐码,或将二维码对准摄像头')
+    // 无摄像头无读卡器:USB HID 读卡器/扫码枪可能存在,都提示
+    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描取餐码')
   }
 }
 

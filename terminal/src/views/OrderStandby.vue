@@ -49,9 +49,14 @@ const updateClock = () => {
  * @param fromCamera 是否来自摄像头扫码(默认 false,即来自读卡器/扫码枪)
  *
  * 安全策略:
- * - 读卡器/扫码枪:接受身份二维码(JSON验签)+ 物理卡号识别(依赖物理持有)
- * - 摄像头扫码:只接受身份二维码(JSON验签),不接受纯卡号(防远程冒充)
- *   攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工,必须拒绝
+ * - 读卡器(DLL/USB HID):接受纯数字卡号识别(物理持有,安全)
+ * - 扫码枪/摄像头:接受一次性支付码(32位hex,核销即失效)+ 旧版JSON身份二维码(兼容)
+ *   不接受纯卡号(防远程冒充:攻击者知道卡号即可生成二维码)
+ *
+ * 识别顺序:
+ *   1. JSON 身份二维码(以 { 开头,兼容旧版)→ /terminal/verify-qrcode
+ *   2. 32 位 hex 支付码 → /terminal/verify-paycode(一次性,防重放)
+ *   3. 纯数字卡号(仅读卡器/扫码枪,摄像头拒绝)→ 本地缓存识别
  */
 const scan = async (input: string, fromCamera = false) => {
   if (scanning.value || !input.trim()) return
@@ -60,7 +65,7 @@ const scan = async (input: string, fromCamera = false) => {
   try {
     const trimmed = input.trim()
 
-    // 1. 员工身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名)
+    // 1. 旧版身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名)→ 兼容
     if (trimmed.startsWith('{')) {
       try {
         const qr = JSON.parse(trimmed)
@@ -75,18 +80,35 @@ const scan = async (input: string, fromCamera = false) => {
           }
         }
       } catch {
-        /* 非合法二维码 JSON,继续按卡号处理 */
+        /* 非合法二维码 JSON,继续按其他方式处理 */
       }
     }
 
-    // 2. 摄像头扫码不接受纯卡号识别员工(安全:防远程冒充)
+    // 2. 一次性支付码:32 位 hex(小写)→ /terminal/verify-paycode
+    //    扫码枪和摄像头都接受,核销即失效,防截图重放
+    if (/^[0-9a-f]{32}$/.test(trimmed)) {
+      try {
+        const resp = await api.post('/terminal/verify-paycode', { code: trimmed })
+        if (resp.data.code === 200 && resp.data.data) {
+          resetOrderFlow()
+          orderStore.employee = resp.data.data
+          orderStore.selectedDate = toDateKey(new Date())
+          router.push('/order/menu')
+          return
+        }
+      } catch {
+        /* 支付码无效或已使用,继续尝试其他方式 */
+      }
+    }
+
+    // 3. 摄像头扫码不接受纯卡号识别员工(安全:防远程冒充)
     //    攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工
     if (fromCamera) {
-      scanError.value = '请扫描H5「我的」页生成的身份二维码'
+      scanError.value = '请扫描H5「我的」页生成的取餐码'
       return
     }
 
-    // 3. 读卡器/扫码枪:作为卡号识别员工(优先查本地缓存,毫秒级)
+    // 4. 读卡器/扫码枪:作为卡号识别员工(优先查本地缓存,毫秒级)
     const emp = await getEmployeeByCardNo(trimmed)
     if (emp) {
       resetOrderFlow()
@@ -147,8 +169,9 @@ const scanHint = computed(() =>
   getScanHint(hasCardReader.value, hasCamera.value, false),
 )
 
-/** 待机页图标:只有摄像头/扫码枪(无读卡器)用 ScanLine,其余用 CreditCard */
-const showScanIcon = computed(() => !hasCardReader.value && hasCamera.value)
+/** 待机页图标:统一用 CreditCard
+ *  不再使用 ScanLine:USB HID 读卡器无法检测,默认显示 CreditCard 更通用 */
+const showScanIcon = computed(() => false)
 
 onMounted(() => {
   resetOrderFlow()

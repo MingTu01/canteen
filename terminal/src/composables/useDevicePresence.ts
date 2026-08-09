@@ -105,7 +105,17 @@ export function useDevicePresence(
 
 /**
  * 根据设备在线状态生成待机页提示文字。
- * @param hasCardReader 读卡器是否在线
+ *
+ * 设备检测能力说明:
+ *   - DLL 读卡器(Python Shell):可真实检测
+ *   - USB HID 读卡器/扫码枪:浏览器无法区分于普通键盘,**无法检测**
+ *   - 摄像头:可检测(支持热插拔)
+ *
+ * 提示策略:
+ *   - 确定只有 DLL 读卡器(无摄像头):只提示"请刷卡"(此时无扫码枪/摄像头)
+ *   - 其他情况:都提示"请刷卡或扫码"(USB HID 读卡器/扫码枪可能存在但无法检测)
+ *
+ * @param hasCardReader 读卡器是否在线(仅 DLL 读卡器可检测)
  * @param hasCamera 摄像头是否可用
  * @param isPickup 是否取餐页(取餐页和订餐页文案略有不同)
  * @returns 提示文字
@@ -115,18 +125,13 @@ export function getScanHint(
   hasCamera: boolean,
   isPickup: boolean = true,
 ): string {
-  if (hasCardReader && hasCamera) {
-    // 都有:都提示
-    return isPickup ? '请刷卡或扫码取餐' : '请刷卡或扫码'
-  }
+  // 确定只有 DLL 读卡器(无摄像头):只提示刷卡
+  // 此时无摄像头也无扫码枪(扫码枪无法检测,但有摄像头时才认为可能有扫码需求)
   if (hasCardReader && !hasCamera) {
-    // 只有读卡器
     return isPickup ? '请刷卡取餐' : '请刷卡'
   }
-  if (!hasCardReader && hasCamera) {
-    // 只有摄像头/扫码枪
-    return isPickup ? '请扫码取餐' : '请扫码'
-  }
-  // 都没有:默认提示(扫码枪可能存在但无法检测)
+  // 其余情况都提示"刷卡或扫码":
+  // - 有摄像头:USB HID 读卡器可能存在但无法检测,需保留刷卡提示
+  // - 无读卡器无摄像头:USB HID 读卡器/扫码枪可能存在但无法检测,默认全提示
   return isPickup ? '请刷卡或扫码取餐' : '请刷卡或扫码'
 }
