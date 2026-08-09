@@ -37,7 +37,9 @@ public class JacksonConfig {
         return builder -> {
             SimpleModule module = new SimpleModule();
             module.addSerializer(String.class, new ImageSignStringSerializer(imageSignService));
-            builder.modules(module);
+            // 用 modulesToInstall 追加模块,而非 modules(后者会覆盖默认模块列表,
+            // 导致 JavaTimeModule 等默认模块被移除,LocalDateTime 序列化失败)
+            builder.modulesToInstall(module);
         };
     }
 
