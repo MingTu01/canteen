@@ -16,6 +16,7 @@ import { useCardReader } from '@/composables/useCardReader'
 import { User } from 'lucide-vue-next'
 
 import Modal from '@/components/Modal.vue'
+import BrandingHeader from '@/components/BrandingHeader.vue'
 
 const router = useRouter()
 const employee = computed(() => pickupStore.employee)
@@ -203,6 +204,7 @@ onUnmounted(() => {
 
 <template>
   <main class="verify">
+    <BrandingHeader />
     <div class="verify__inner">
       <!-- Spinner -->
       <div class="verify__spinner spinner"></div>
@@ -249,6 +251,8 @@ onUnmounted(() => {
   position: relative;
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   /* 背景由 App.vue 全局提供(深色底色 + 品牌图),此处透明避免遮挡 */
   background: transparent;
 }
@@ -259,7 +263,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  flex: 1;
   gap: 32px;
   padding: 40px 24px;
 }

@@ -20,6 +20,7 @@ import { getDishImgUrl } from '@/utils/cache'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { Pause, Play } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
+import BrandingHeader from '@/components/BrandingHeader.vue'
 import Modal from '@/components/Modal.vue'
 
 import { fetchBranding } from '@/store/branding'
@@ -276,6 +277,7 @@ onUnmounted(() => {
 
 <template>
   <main v-if="employee" class="pickup-info">
+    <BrandingHeader />
     <TopBar title="取餐窗口" :show-back="false">
       <template #right>
         <div class="pickup-info__countdown">

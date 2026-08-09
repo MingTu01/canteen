@@ -15,6 +15,7 @@ import { useIdleTimer } from '@/composables/useIdleTimer'
 import { fullDateLabel, pad2 } from '@/utils'
 import { Utensils, Search, Home } from 'lucide-vue-next'
 import UserInfoBar from '@/components/UserInfoBar.vue'
+import BrandingHeader from '@/components/BrandingHeader.vue'
 
 import { fetchBranding } from '@/store/branding'
 
@@ -65,6 +66,7 @@ onUnmounted(() => {
 
 <template>
   <main class="menu">
+    <BrandingHeader />
     <UserInfoBar :employee="emp" />
 
     <div class="menu__content">

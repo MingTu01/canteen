@@ -151,7 +151,7 @@ export async function initBrandingFromCache(): Promise<void> {
 
 /**
  * 将 branding 数据中的网络图片 URL 替换为本地 blob URL(异步预加载)。
- * 已缓存时秒返回,未缓存时 fetch 下载并缓存。
+ * 已缓存时秒返回(复用同一 blob URL),未缓存时 fetch 下载并缓存。
  */
 async function applyLocalImageCache(data: StoreBranding): Promise<StoreBranding> {
   const result = { ...data }
@@ -170,10 +170,31 @@ async function applyLocalImageCache(data: StoreBranding): Promise<StoreBranding>
 }
 
 /**
+ * 判断新旧 branding 数据的图片是否相同(仅比较 path,忽略 ?v= 版本号)。
+ * 用于决定是否需要重新加载图片:图片没变就保留已有 blob URL,避免闪烁。
+ */
+function isImageSame(
+  oldData: StoreBranding | null,
+  newData: StoreBranding,
+): boolean {
+  if (!oldData) return false
+  const getPath = (url: string) => {
+    try { return new URL(url, window.location.origin).pathname } catch { return url }
+  }
+  const oldBg = oldData.terminalBackgroundUrl ? getPath(oldData.terminalBackgroundUrl) : ''
+  const newBg = newData.terminalBackgroundUrl ? getPath(newData.terminalBackgroundUrl) : ''
+  const oldLogo = oldData.logoUrl ? getPath(oldData.logoUrl) : ''
+  const newLogo = newData.logoUrl ? getPath(newData.logoUrl) : ''
+  return oldBg === newBg && oldLogo === newLogo
+}
+
+/**
  * 拉取当前绑定食堂的品牌信息(带 ETag 304 缓存)。
  * - 缓存命中时先秒开缓存,后台异步校验
  * - 数据有更新时自动刷新
  * - 图片优先用本地 IndexedDB 缓存的 blob URL,避免网络加载闪烁
+ * - 关键:图片没变(仅 ?v= 版本号变化或数据相同)时不覆盖 brandingState.data,
+ *   避免 blob URL 变化触发 BrandingBg 重新加载闪烁
  *
  * @param options.background true=后台静默校验(不显示 loading)
  */
@@ -193,15 +214,16 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
   const isBackground = options.background || sameStore
 
   const cache = readCache(storeId)
-  // 有缓存则先秒开(无论前台还是后台模式,确保图片立即显示)
-  // 注意:initBrandingFromCache 已在启动时从 IndexedDB 恢复了 blob URL,
-  // 这里仅在 brandingState.data 为空时才从 localStorage 恢复(避免覆盖已有的 blob URL)
+  // 有缓存则先秒开(仅在 brandingState.data 为空时,避免覆盖已有的 blob URL)
   if (cache?.data && !brandingState.data) {
     const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
-    // 异步替换为本地 blob URL(不阻塞,先用网络 URL 秒开)
     brandingState.data = absolutized
+    // 异步替换为本地 blob URL(不阻塞,先用网络 URL 秒开)
     applyLocalImageCache(absolutized).then((local) => {
-      brandingState.data = local
+      // 仅当图片URL变化时才更新,避免无谓覆盖触发闪烁
+      if (!brandingState.data || !isImageSame(brandingState.data, local)) {
+        brandingState.data = local
+      }
     })
   }
 
@@ -217,13 +239,7 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
     })
 
     if (res.status === 304) {
-      if (!brandingState.data && cache?.data) {
-        const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
-        brandingState.data = absolutized
-        applyLocalImageCache(absolutized).then((local) => {
-          brandingState.data = local
-        })
-      }
+      // 304:数据未变化,保留当前 brandingState.data(可能已是 blob URL),不覆盖
       loadedStoreId.value = storeId
       currentEtag.value = cache?.etag || null
       return
@@ -233,13 +249,24 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
     const etag = res.headers['etag'] as string | undefined
     if (data) {
       const absolutized = serverUrl ? absolutizeBranding(data, serverUrl) : data
-      // 先用网络 URL 立即展示,异步替换为本地 blob URL
-      brandingState.data = absolutized
       loadedStoreId.value = storeId
       currentEtag.value = etag || cache?.etag || null
       // 持久化元数据(存原始网络 URL,启动时再从 IndexedDB 恢复 blob URL)
       writeCache(storeId, etag || cache?.etag || null, absolutized)
-      // 异步预加载图片到 IndexedDB 并替换为 blob URL
+
+      // 关键:图片没变(仅非图片字段变化或?v版本号变化)时保留已有 blob URL,不覆盖
+      if (brandingState.data && isImageSame(brandingState.data, absolutized)) {
+        // 图片相同:仅更新非图片字段,保留已有的 blob URL,避免触发重新加载
+        brandingState.data = {
+          ...absolutized,
+          terminalBackgroundUrl: brandingState.data.terminalBackgroundUrl,
+          logoUrl: brandingState.data.logoUrl,
+        }
+        return
+      }
+
+      // 图片有变化:先用网络 URL 立即展示,异步替换为本地 blob URL
+      brandingState.data = absolutized
       applyLocalImageCache(absolutized).then((local) => {
         brandingState.data = local
       })
@@ -249,7 +276,9 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
       const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
       brandingState.data = absolutized
       applyLocalImageCache(absolutized).then((local) => {
-        brandingState.data = local
+        if (!brandingState.data || !isImageSame(brandingState.data, local)) {
+          brandingState.data = local
+        }
       })
       loadedStoreId.value = storeId
       currentEtag.value = cache?.etag || null
