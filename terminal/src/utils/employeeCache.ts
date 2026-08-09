@@ -160,14 +160,26 @@ async function preloadAvatars(employees: CachedEmployee[], myGen: number): Promi
  * 按 cardNo 查员工(刷卡时调用)。
  * 优先查本地缓存(毫秒级),未命中走网络。
  *
- * @returns 员工信息;null=卡号不存在
+ * 安全校验:缓存中 status !== 1(已停用)的员工不返回,避免停用员工
+ * 在 24 小时轮询间隔内仍可刷卡。缓存初始化时后端已过滤 status=1,
+ * 但员工可能在缓存建立后被停用,此处兜底校验。
+ *
+ * @returns 员工信息;null=卡号不存在或已停用
  */
 export async function getEmployeeByCardNo(cardNo: string): Promise<CachedEmployee | null> {
   // 1. 优先查本地缓存
   const cached = await dbGetEmployeeByCardNo(cardNo)
-  if (cached) return cached
+  if (cached) {
+    // 兜底校验:缓存可能过期(员工被停用后24小时内缓存仍存在)
+    if (cached.status !== 1) {
+      console.warn(`[employeeCache] 员工 ${cardNo} 已停用(status=${cached.status}),拒绝刷卡`)
+      return null
+    }
+    return cached
+  }
 
   // 2. 未命中:走网络(可能卡号是新员工,本地缓存还没更新)
+  //    后端 selectByCardNoAndStore 已过滤 status=1 AND is_deleted=0
   try {
     const resp = await api.get(`/terminal/employee/${encodeURIComponent(cardNo)}`)
     if (resp.data?.code === 200 && resp.data.data) {

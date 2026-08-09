@@ -80,13 +80,21 @@ const dismissError = () => {
 
 /**
  * 统一输入处理:USB 读卡器、扫码枪和摄像头扫码都作为键盘设备,Enter 结束输入。
+ *
+ * @param code 扫码/刷卡内容
+ * @param fromCamera 是否来自摄像头扫码(默认 false,即来自读卡器/扫码枪)
+ *
+ * 安全策略:
+ * - 读卡器/扫码枪:接受身份二维码(JSON验签)+ 物理卡号识别 + 取餐码核销
+ * - 摄像头扫码:接受身份二维码(JSON验签)+ 取餐码核销,但不接受纯卡号识别员工
+ *   攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工查看其订单,必须拒绝
+ *
  * 依次尝试:
  *   1. 员工身份二维码(H5「我的」页生成,内容为 JSON,以 { 开头)→ /terminal/verify-qrcode 验签识别员工
- *   2. 刷卡(员工接口)→ /terminal/employee/{cardNo}
+ *   2. 刷卡(员工接口)→ /terminal/employee/{cardNo}(仅读卡器/扫码枪,摄像头跳过)
  *   3. 取餐码核销 → /order/pickup
- * 这样无需用户区分设备与场景,直接刷卡/扫码即可。
  */
-const handleInput = async (code: string) => {
+const handleInput = async (code: string, fromCamera = false) => {
   if (scanning.value || !code) return
   scanning.value = true
   try {
@@ -109,18 +117,20 @@ const handleInput = async (code: string) => {
       }
     }
 
-    // 2. 作为卡号识别员工(优先查本地缓存,毫秒级)
-    try {
-      const emp = await getEmployeeByCardNo(trimmed)
-      if (emp) {
-        resetPickupFlow()
-        pickupStore.employee = emp
-        router.push('/pickup/verify')
-        return
-      }
-    } catch { /* 非员工卡,继续尝试取餐码 */ }
+    // 2. 作为卡号识别员工(仅读卡器/扫码枪,摄像头不接受纯卡号防远程冒充)
+    if (!fromCamera) {
+      try {
+        const emp = await getEmployeeByCardNo(trimmed)
+        if (emp) {
+          resetPickupFlow()
+          pickupStore.employee = emp
+          router.push('/pickup/verify')
+          return
+        }
+      } catch { /* 非员工卡,继续尝试取餐码 */ }
+    }
 
-    // 3. 作为取餐码核销
+    // 3. 作为取餐码核销(读卡器/扫码枪/摄像头都可尝试)
     try {
       const resp = await api.post('/order/pickup', { pickupCode: trimmed })
       if (resp.data.code === 200) {
@@ -135,8 +145,12 @@ const handleInput = async (code: string) => {
       // 取餐码核销失败:后端返回业务错误(如"取餐码无效")
       showErrorWithAutoClose('取餐失败', resp.data.message ?? '取餐码无效')
     } catch (e: any) {
-      // 取餐码请求异常:输入既非员工卡也非有效取餐码 → 提示卡号不存在
-      showErrorWithAutoClose('取餐失败', '卡号不存在')
+      // 取餐码请求异常:输入既非员工卡也非有效取餐码
+      if (fromCamera) {
+        showErrorWithAutoClose('取餐失败', '请扫描取餐码或H5身份二维码')
+      } else {
+        showErrorWithAutoClose('取餐失败', '卡号不存在')
+      }
     }
   } catch (e: any) {
     showErrorWithAutoClose('取餐失败', '卡号不存在')
@@ -169,9 +183,10 @@ const {
   cameraAvailable,
 } = useCameraScanner(
   (code) => {
-    // 摄像头扫描到码:关闭弹窗并走统一输入处理(与读卡器共用)
+    // 摄像头扫描到码:关闭弹窗并走统一输入处理
+    // fromCamera=true:摄像头不接受纯卡号识别员工(防远程冒充)
     if (showError.value) dismissError()
-    handleInput(code)
+    handleInput(code, true)
   },
   // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
   { debounceMs: cardInterval.value * 1000 },

@@ -43,7 +43,17 @@ const updateClock = () => {
   dateLabel.value = fullDateLabel(now)
 }
 
-const scan = async (input: string) => {
+/**
+ * 统一输入处理。
+ * @param input 扫码/刷卡内容
+ * @param fromCamera 是否来自摄像头扫码(默认 false,即来自读卡器/扫码枪)
+ *
+ * 安全策略:
+ * - 读卡器/扫码枪:接受身份二维码(JSON验签)+ 物理卡号识别(依赖物理持有)
+ * - 摄像头扫码:只接受身份二维码(JSON验签),不接受纯卡号(防远程冒充)
+ *   攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工,必须拒绝
+ */
+const scan = async (input: string, fromCamera = false) => {
   if (scanning.value || !input.trim()) return
   scanning.value = true
   scanError.value = ''
@@ -69,7 +79,14 @@ const scan = async (input: string) => {
       }
     }
 
-    // 2. 作为卡号识别员工(优先查本地缓存,毫秒级)
+    // 2. 摄像头扫码不接受纯卡号识别员工(安全:防远程冒充)
+    //    攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工
+    if (fromCamera) {
+      scanError.value = '请扫描H5「我的」页生成的身份二维码'
+      return
+    }
+
+    // 3. 读卡器/扫码枪:作为卡号识别员工(优先查本地缓存,毫秒级)
     const emp = await getEmployeeByCardNo(trimmed)
     if (emp) {
       resetOrderFlow()
@@ -115,7 +132,7 @@ const {
   cameraAvailable,
 } = useCameraScanner(
   (code) => {
-    scan(code)
+    scan(code, true)  // fromCamera=true:摄像头扫码不接受纯卡号(防远程冒充)
   },
   // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
   { debounceMs: cardInterval.value * 1000 },
