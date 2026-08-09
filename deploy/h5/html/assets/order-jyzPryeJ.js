@@ -1,0 +1,1 @@
+import{y as e,V as t,a2 as n}from"./index-Bnk5Cmbv.js";function o(r){return t("/order",r)}function c(r){return e(`/order/employee/${r}`)}function s(r){return e(`/order/${r}`)}function u(r){return n(`/order/${r}/cancel`)}export{s as a,u as b,o as c,c as g};
