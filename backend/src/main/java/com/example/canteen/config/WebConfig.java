@@ -143,7 +143,7 @@ class CorsConfig implements WebMvcConfigurer {
         }
 
         // 静态资源(头像/菜品图片)CORS
-        // 终端前端运行在 http://127.0.0.1:1287,fetch 后端 /uploads/xxx.jpg 需要 CORS 头
+        // 终端前端运行在 http://127.0.0.1:15118,fetch 后端 /uploads/xxx.jpg 需要 CORS 头
         // 否则 imageCache.ts 中 fetch 头像图片会被浏览器拦截,无法缓存到 IndexedDB
         registry.addMapping("/uploads/**")
                 .allowedOriginPatterns("*")

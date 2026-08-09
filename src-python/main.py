@@ -155,7 +155,7 @@ if getattr(sys, 'frozen', False) and sys.platform == 'win32':
 
 # ===== 单实例限制(Windows 命名 Mutex)=====
 # 防止多开 EXE 导致:
-# 1. 本地 HTTP 端口(1287)被占用,第二个实例 fallback 到其他端口,
+# 1. 本地 HTTP 端口(15118)被占用,第二个实例 fallback 到其他端口,
 #    origin 变化导致 localStorage/IndexedDB 数据"丢失"
 # 2. QtWebEngine 持久化目录(data/)的 SQLite/LevelDB 文件锁冲突,
 #    导致 "database is locked" 错误,IndexedDB 写入失败

@@ -5,7 +5,7 @@
 1. serve Vue 前端的 dist 目录(静态文件)
 2. 处理 /__api__/xxx 端点(前端 → Python 的 API 调用)
 
-绑定到 127.0.0.1 的固定端口(1287~1291),保证 origin 稳定。
+绑定到 127.0.0.1 的固定端口(15118),保证 origin 稳定。
 """
 import http.server
 import socketserver
@@ -231,15 +231,17 @@ def start_server(directory, bridge, port=0):
         allow_reuse_address = True
         daemon_threads = True
 
-    # 固定端口 1287:保证 origin(http://127.0.0.1:1287)绝对稳定,
+    # 固定端口 15118:保证 origin(http://127.0.0.1:15118)绝对稳定,
     # 否则 localStorage/IndexedDB 会因端口变化而丢失(绑定配置、菜品/头像缓存全部失效)。
-    # 单实例 Mutex 已保证不会有两个终端进程,1287 不应该被占;
+    # 15118 选址依据:避开 Windows 动态端口保留段(常见 1024-50000 内随机段,
+    # Docker Desktop/WSL2/Hyper-V 会动态保留大段端口),选择 49152+ 高位冷门端口;
+    # 单实例 Mutex 已保证不会有两个终端进程,15118 不应该被占;
     # 若被占(异常残留),直接报错让用户处理,不换端口(换端口会导致缓存全丢)。
     if port != 0:
         # 调用方显式指定端口,直接用
         candidates = [port]
     else:
-        candidates = [1287]
+        candidates = [15118]
 
     server = None
     actual_port = None

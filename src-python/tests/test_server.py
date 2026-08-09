@@ -21,7 +21,7 @@ from server import start_server
 
 
 def _find_free_port():
-    """找一个可用的随机端口(避免 Windows 保留端口范围 1287-1291)。"""
+    """找一个可用的随机端口(避免 Windows 保留端口范围)。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
@@ -151,7 +151,7 @@ class TestOriginValidation:
     def test_api_with_same_origin(self, server):
         """同源(127.0.0.1)Origin 的 API 请求应正常通过。"""
         status, body = _get(server, '/__api__/config',
-                            headers={'Origin': 'http://127.0.0.1:1287'})
+                            headers={'Origin': 'http://127.0.0.1:15118'})
         assert status == 200
 
     def test_api_without_origin(self, server):

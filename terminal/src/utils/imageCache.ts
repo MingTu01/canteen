@@ -133,7 +133,7 @@ export async function getCachedAvatar(url: string, baseUrl = ''): Promise<string
   } catch {
     // fetch 失败(CORS/网络):返回 fullUrl 让 <img> 标签直查后端
     // img 标签不受 CORS 限制,仍能正常显示
-    // 注意:不能返回原始相对 url,否则终端会请求 http://127.0.0.1:1287/uploads/... 导致 404
+    // 注意:不能返回原始相对 url,否则终端会请求 http://127.0.0.1:15118/uploads/... 导致 404
     return fullUrl
   }
 }
