@@ -332,8 +332,6 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-    AppDataDir: String;
-    LocalAppDataDir: String;
     ResultCode: Integer;
 begin
     // usUninstall:卸载文件之前触发,此时 {app}\remove_ch375_driver.cmd 仍存在
@@ -349,15 +347,9 @@ begin
     end
     else if CurUninstallStep = usPostUninstall then
     begin
-        // 1. 清理当前用户(显式,兼容非标准用户目录映射)
-        AppDataDir := ExpandConstant('{userappdata}\CanteenTerminal');
-        LocalAppDataDir := ExpandConstant('{userlocalappdata}\CanteenTerminal');
-        if DirExists(AppDataDir) then
-            DelTree(AppDataDir, True, True, True);
-        if DirExists(LocalAppDataDir) then
-            DelTree(LocalAppDataDir, True, True, True);
-
-        // 2. 清理系统上所有用户目录下的残留数据(真正彻底)
+        // 清理系统上所有用户目录下的残留数据(含当前用户,真正彻底)
+        // 注:卸载阶段 {userlocalappdata} 常量不可用(Inno Setup 限制),
+        // CleanAllUsersData 已遍历 C:\Users\* 所有用户(含当前用户),无需单独清理当前用户
         CleanAllUsersData();
     end;
 end;
