@@ -92,6 +92,9 @@ onMounted(async () => {
   await authStore.refreshEmployee()
   // 自动加载取餐码(不弹层,供内嵌卡片展示)
   loadQrcode()
+  // 监听页面可见性:用户从终端扫码核销后切回 H5,自动刷新支付码
+  // (支付码是一次性的,核销后前端无法感知,必须重新生成才能继续使用)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
@@ -100,7 +103,38 @@ onUnmounted(() => {
     clearTimeout(payCodeRefreshTimer)
     payCodeRefreshTimer = null
   }
+  // 移除可见性监听
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
+
+/** 页面重新可见时刷新支付码:用户离开 H5 去终端扫码,回来时大概率已核销,重新生成保证可用 */
+let lastPayCodeTime = 0
+const onVisibilityChange = (): void => {
+  if (document.visibilityState !== 'visible') return
+  // 限流:距离上次生成不足 3 秒不重复刷新(避免极端频繁切换)
+  const now = Date.now()
+  if (now - lastPayCodeTime < 3000) return
+  lastPayCodeTime = now
+  // 重新生成支付码(旧的已核销或快过期,重新生成成本极低)
+  refreshPayCode()
+}
+
+/** 重新生成支付码(静默,不显示 loading) */
+const refreshPayCode = async (): Promise<void> => {
+  try {
+    qrcodeData.value = await authApi.generatePayCode()
+    qrcodeImg.value = await QRCode.toDataURL(qrcodeData.value.code, {
+      width: 240,
+      margin: 1,
+      color: { dark: '#1a1a1a', light: '#ffffff' },
+    })
+    lastPayCodeTime = Date.now()
+    // 重启定时刷新(4 分钟后再刷新)
+    startPayCodeRefreshTimer()
+  } catch {
+    /* 刷新失败,保留旧码,下次可见时再试 */
+  }
+}
 
 // ============ 跳转 ============
 const goOrders = (): void => {
@@ -159,6 +193,7 @@ const loadQrcode = async (): Promise<void> => {
         margin: 1,
         color: { dark: '#1a1a1a', light: '#ffffff' },
       })
+      lastPayCodeTime = Date.now()
       // 启动定时刷新(4 分钟后自动刷新)
       startPayCodeRefreshTimer()
     } catch {

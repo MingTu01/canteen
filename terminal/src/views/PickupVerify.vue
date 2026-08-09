@@ -14,7 +14,7 @@ import { toDateKey } from '@/utils'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { useCardReader } from '@/composables/useCardReader'
 import { User } from 'lucide-vue-next'
-import BrandingBg from '@/components/BrandingBg.vue'
+
 import Modal from '@/components/Modal.vue'
 
 const router = useRouter()
@@ -204,8 +204,6 @@ onUnmounted(() => {
 
 <template>
   <main class="verify">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.5" />
-
     <div class="verify__inner">
       <!-- Spinner -->
       <div class="verify__spinner spinner"></div>
@@ -252,8 +250,8 @@ onUnmounted(() => {
   position: relative;
   height: 100vh;
   overflow: hidden;
-  /* 取餐端统一深色背景 + 白色文字 */
-  background: var(--doubao-foreground);
+  /* 背景由 App.vue 全局提供(深色底色 + 品牌图),此处透明避免遮挡 */
+  background: transparent;
 }
 .verify__inner {
   position: relative;

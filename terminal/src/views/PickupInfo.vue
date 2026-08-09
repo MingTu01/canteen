@@ -21,7 +21,7 @@ import { getCachedAvatar } from '@/utils/imageCache'
 import { Pause, Play } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import Modal from '@/components/Modal.vue'
-import BrandingBg from '@/components/BrandingBg.vue'
+
 import { brandingState, fetchBranding } from '@/store/branding'
 
 const router = useRouter()
@@ -277,7 +277,6 @@ onUnmounted(() => {
 
 <template>
   <main v-if="employee" class="pickup-info">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.15" />
     <TopBar title="取餐窗口" :show-back="false">
       <template #right>
         <div class="pickup-info__countdown">
@@ -394,8 +393,8 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  /* 取餐端统一深色背景 + 白色文字 */
-  background: var(--doubao-foreground);
+  /* 背景由 App.vue 全局提供(深色底色 + 品牌图),此处透明避免遮挡 */
+  background: transparent;
 }
 .pickup-info__countdown {
   display: flex;

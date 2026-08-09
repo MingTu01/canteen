@@ -18,7 +18,7 @@ import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
 import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
-import BrandingBg from '@/components/BrandingBg.vue'
+
 import Modal from '@/components/Modal.vue'
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
@@ -262,8 +262,6 @@ onUnmounted(() => {
 
 <template>
   <main class="pickup-standby" :class="{ 'pickup-standby--branded': !!branding?.terminalBackgroundUrl }">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.15" />
-
     <!-- 顶栏:Logo + 食堂名称(左上) -->
     <header class="pickup-standby__header">
       <div class="pickup-standby__brand">
@@ -354,8 +352,8 @@ onUnmounted(() => {
   height: 100vh;
   width: 100%;
   overflow: hidden;
-  /* 取餐端统一使用深色背景 + 白色文字(与订餐端一致) */
-  background: var(--doubao-foreground);
+  /* 背景由 App.vue 全局提供(深色底色 + 品牌图),此处透明避免遮挡 */
+  background: transparent;
   --ps-text: #ffffff;
   --ps-text-muted: rgba(255, 255, 255, 0.7);
 }

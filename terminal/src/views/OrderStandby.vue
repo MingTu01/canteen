@@ -20,7 +20,7 @@ import { orderStore, resetOrderFlow } from '@/store/order'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey, fullDateLabel, pad2 } from '@/utils'
 import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
-import BrandingBg from '@/components/BrandingBg.vue'
+
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
 import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
@@ -194,8 +194,6 @@ onUnmounted(() => {
 
 <template>
   <main class="standby" :class="{ 'standby--branded': !!branding?.terminalBackgroundUrl }">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.15" />
-
     <!-- 顶栏:Logo + 食堂名称 -->
     <header class="standby__header">
       <div class="standby__brand">
@@ -269,8 +267,8 @@ onUnmounted(() => {
   height: 100vh;
   width: 100%;
   overflow: hidden;
-  /* 订餐端统一使用深色背景 + 白色文字(与取餐端一致) */
-  background: var(--doubao-foreground);
+  /* 背景由 App.vue 全局提供(深色底色 + 品牌图),此处透明避免遮挡 */
+  background: transparent;
   --sb-text: #ffffff;
   --sb-text-muted: rgba(255, 255, 255, 0.7);
   --sb-glass-bg: rgba(255, 255, 255, 0.1);

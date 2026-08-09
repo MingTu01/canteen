@@ -15,7 +15,7 @@ import { useIdleTimer } from '@/composables/useIdleTimer'
 import { fullDateLabel, pad2 } from '@/utils'
 import { Utensils, Search, Home } from 'lucide-vue-next'
 import UserInfoBar from '@/components/UserInfoBar.vue'
-import BrandingBg from '@/components/BrandingBg.vue'
+
 import { brandingState, fetchBranding } from '@/store/branding'
 
 const router = useRouter()
@@ -66,7 +66,6 @@ onUnmounted(() => {
 
 <template>
   <main class="menu">
-    <BrandingBg :bg-url="branding?.terminalBackgroundUrl" :overlay-opacity="0.15" />
     <UserInfoBar :employee="emp" />
 
     <div class="menu__content">
@@ -110,12 +109,8 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  /* 深色背景 + 白色文字(与待机页统一) */
-  background: var(--doubao-foreground);
-}
-.menu > *:not(.branding-bg) {
-  position: relative;
-  z-index: 1;
+  /* 背景由 App.vue 全局提供(深色底色 + 品牌图),此处透明避免遮挡 */
+  background: transparent;
 }
 .menu__content {
   flex: 1;
