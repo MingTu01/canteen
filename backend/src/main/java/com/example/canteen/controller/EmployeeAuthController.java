@@ -184,6 +184,27 @@ public class EmployeeAuthController {
     }
 
     /**
+     * 检查支付码是否已被核销(供 H5 轮询实时刷新二维码)。
+     *
+     * H5 每 3 秒轮询此接口,发现支付码已核销(终端扫码后 Redis 中不存在)
+     * 时立即重新生成支付码,无需依赖 SSE 长连接或页面可见性事件。
+     *
+     * @param code 32 位 hex 支付码
+     * @return { used: true=已核销/无效, false=仍有效 }
+     */
+    @GetMapping("/paycode/used")
+    public ApiResponse<Map<String, Object>> checkPayCodeUsed(@RequestParam String code) {
+        Long employeeId = SecurityContext.currentEmployeeId();
+        if (employeeId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+        boolean used = payCodeService.isPayCodeUsed(code);
+        Map<String, Object> result = new HashMap<>();
+        result.put("used", used);
+        return ApiResponse.success(result);
+    }
+
+    /**
      * 获取当前登录员工的完整信息(基于 token,无需前端传 ID)。
      * 用于 H5 刷新页面/进入"我的"页时获取最新余额等,避免依赖 localStorage 缓存的 ID。
      * 返回 EmployeeVO(不含密码等敏感字段)。

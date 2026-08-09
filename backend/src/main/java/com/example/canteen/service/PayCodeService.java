@@ -253,4 +253,26 @@ public class PayCodeService {
             return null;
         }
     }
+
+    /**
+     * 检查支付码是否已被核销(供 H5 轮询)。
+     *
+     * 支付码核销使用原子 GETDEL,核销后 Redis 中立即不存在。
+     * H5 每 3 秒轮询此接口,发现支付码不存在(已核销)时重新生成。
+     *
+     * @param code 32 位 hex 支付码
+     * @return true=已核销/不存在/格式无效, false=仍有效
+     */
+    public boolean isPayCodeUsed(String code) {
+        // 格式无效视为已使用(防止恶意探测)
+        if (code == null || code.length() != CODE_LENGTH || !code.matches("^[0-9a-fA-F]{32}$")) {
+            return true;
+        }
+        StringRedisTemplate tpl = redis();
+        if (tpl == null) {
+            return true;
+        }
+        Boolean exists = tpl.hasKey(PAY_CODE_PREFIX + code);
+        return exists == null || !exists;
+    }
 }

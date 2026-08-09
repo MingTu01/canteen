@@ -57,6 +57,10 @@ let payCodeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const PAY_CODE_REFRESH_INTERVAL = 4 * 60 * 1000
 /** 刷新限流:正在刷新时不再重复触发,避免短时间多次核销导致重复请求 */
 let isRefreshingFromSse = false
+/** 轮询定时器:每 3 秒检查支付码是否被核销(不依赖 SSE/visibilitychange) */
+let payCodePollTimer: ReturnType<typeof setInterval> | null = null
+/** 轮询间隔(3 秒) */
+const PAY_CODE_POLL_INTERVAL = 3000
 
 // ============ 修改密码表单 ============
 const passwordForm = ref({
@@ -100,6 +104,9 @@ onMounted(async () => {
   // 确保全局 SSE 连接运行(SSE 在 auth store 全局管理,登录时已启动,
   // 此处为页面刷新后的双保险)
   authStore.ensureSseRunning()
+  // 启动轮询:每 3 秒检查支付码是否被核销
+  // (SSE 在微信浏览器中可能不稳定,轮询是最可靠的兜底方案)
+  startPayCodePoll()
 })
 
 /**
@@ -126,6 +133,11 @@ onUnmounted(() => {
   if (payCodeRefreshTimer) {
     clearTimeout(payCodeRefreshTimer)
     payCodeRefreshTimer = null
+  }
+  // 清理轮询定时器
+  if (payCodePollTimer) {
+    clearInterval(payCodePollTimer)
+    payCodePollTimer = null
   }
   // 移除可见性监听
   document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -159,6 +171,34 @@ const refreshPayCode = async (): Promise<void> => {
   } catch {
     /* 刷新失败,保留旧码,下次可见时再试 */
   }
+}
+
+/**
+ * 启动支付码核销轮询:每 3 秒检查当前支付码是否被终端核销。
+ *
+ * 轮询是最可靠的刷新方案(SSE 在微信浏览器中可能不稳定,visibilitychange
+ * 在 iOS 微信中也可能不触发)。终端核销后 Redis 中支付码立即删除,
+ * 轮询检测到 used=true 时立即重新生成支付码。
+ *
+ * 限流:正在刷新时跳过,避免重复请求。
+ */
+const startPayCodePoll = (): void => {
+  if (payCodePollTimer) clearInterval(payCodePollTimer)
+  payCodePollTimer = setInterval(async () => {
+    // 没有支付码或正在刷新,跳过
+    if (!qrcodeData.value || isRefreshingFromSse) return
+    try {
+      const res = await authApi.checkPayCodeUsed(qrcodeData.value.code)
+      if (res.used) {
+        // 支付码已被核销,重新生成
+        isRefreshingFromSse = true
+        await refreshPayCode()
+        isRefreshingFromSse = false
+      }
+    } catch {
+      /* 轮询失败静默忽略,下次重试 */
+    }
+  }, PAY_CODE_POLL_INTERVAL)
 }
 
 // ============ 跳转 ============

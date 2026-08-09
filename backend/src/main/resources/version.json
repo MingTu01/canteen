@@ -1,8 +1,9 @@
 {
-  "version": "0.0.21",
+  "version": "0.0.22",
   "buildTime": "2026-08-09",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.22 新增支付码核销轮询接口(H5实时刷新兜底):PayCodeService.isPayCodeUsed检查Redis中支付码是否存在(核销后GETDEL立即删除);EmployeeAuthController新增GET/api/employee/paycode/used?code=xxx返回{used:bool};H5 Profile.vue每3秒轮询,发现used=true立即重新生成支付码;解决SSE在微信浏览器中不稳定、visibilitychange在iOS微信中不触发导致二维码不刷新的问题",
     "V0.0.21 支付码核销实时刷新(H5 SSE):新增员工维度SSE推送(SseService.employeeEmitters/subscribeByEmployee/sendToEmployee),PayCodeService.verifyPayCode核销成功后推送paycode_used事件;SseController新增/api/sse/employee-ticket(凭Cookie获取一次性ticket)与/api/sse/subscribe-employee(ticket建连)接口;WhitelistMatcher放行subscribe-employee;心跳机制覆盖员工连接;H5 Profile.vue订阅员工SSE,监听paycode_used事件实时刷新二维码(指数退避重连,断线自动恢复),解决核销后需切换页面才刷新的问题",
     "V0.0.19 微信通知推送适配订阅消息:旧版模板消息接口(message/template/send)已于2021-04-30下线,改用订阅消息接口(message/subscribe/bizsend);更新部署文档适配微信开发者平台(developers.weixin.qq.com)新配置路径;更新配置脚本前置条件说明",
     "V0.0.18 新增微信公众号关注后自动回复图文卡片:消息/事件回调接口(WechatMessageController GET签名校验+POST事件处理),关注后被动回复带H5订餐入口的图文卡片,明文模式无需加解密SDK,POST回调校验签名防伪造,DOM解析XML防御XXE",
