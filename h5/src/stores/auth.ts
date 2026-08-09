@@ -17,6 +17,16 @@ import type { Employee } from '@/api/types'
 const EMPLOYEE_STORAGE_KEY = 'canteen_h5_employee'
 const LOGGED_IN_STORAGE_KEY = 'canteen_h5_logged_in'
 
+// ============ SSE 员工维度长连接(全局,不随页面切换断开) ============
+// 模块级变量(不放入 store 响应式系统,避免 EventSource 被 Vue 代理)
+// 生命周期:登录成功 → 启动;登出 → 关闭;页面刷新 → App.vue 恢复
+let sseSource: EventSource | null = null
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let sseRetryCount = 0
+/** SSE 是否应停止(true=未启动/已登出,false=应运行) */
+let sseStopped = true
+const SSE_MAX_RETRY = 10
+
 /** 从 localStorage 读取 employee */
 const readEmployee = (): Employee | null => {
   try {
@@ -40,6 +50,13 @@ export const useAuthStore = defineStore('auth', () => {
   // 初始化时从存储恢复
   const employee = ref<Employee | null>(readEmployee())
   const isLoggedIn = ref<boolean>(readLoggedIn())
+
+  /**
+   * 支付码核销时间戳:终端核销支付码后,SSE 推送 paycode_used 事件,
+   * 更新此时间戳。Profile.vue watch 此值,变化时刷新二维码。
+   * (SSE 在 store 全局管理,不随页面切换断开)
+   */
+  const payCodeUsedAt = ref<number>(0)
 
   // ============ getters ============
   const balance = computed<number>(() => employee.value?.balance ?? 0)
@@ -82,6 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoggedIn.value = true
     persistEmployee(res.employee)
     persistLoggedIn(true)
+    startSseOnLogin()
     return res.employee
   }
 
@@ -92,6 +110,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoggedIn.value = true
     persistEmployee(res.employee)
     persistLoggedIn(true)
+    startSseOnLogin()
     return res.employee
   }
 
@@ -106,6 +125,7 @@ export const useAuthStore = defineStore('auth', () => {
       isLoggedIn.value = true
       persistEmployee(res.employee)
       persistLoggedIn(true)
+      startSseOnLogin()
       return res.employee
     }
     if (res.status === 'need_bind' && res.bindToken) {
@@ -124,11 +144,14 @@ export const useAuthStore = defineStore('auth', () => {
     isLoggedIn.value = true
     persistEmployee(res.employee)
     persistLoggedIn(true)
+    startSseOnLogin()
     return res.employee
   }
 
   /** 注销:调用后端清 Cookie + 加入黑名单,再清前端状态 */
   const logout = async (): Promise<void> => {
+    // 先关闭 SSE,避免登出后仍持有连接
+    stopEmployeeSse()
     try {
       await authApi.logout()
     } catch {
@@ -160,10 +183,98 @@ export const useAuthStore = defineStore('auth', () => {
     persistLoggedIn(emp !== null)
   }
 
+  // ============ SSE 员工维度长连接(全局管理) ============
+  /**
+   * 建立员工 SSE 长连接:终端核销支付码后实时推送 paycode_used 事件。
+   * 全局管理(不随页面切换断开),登录期间一直保持。
+   */
+  const cleanupSseSource = (): void => {
+    if (sseSource) {
+      sseSource.close()
+      sseSource = null
+    }
+  }
+
+  const scheduleSseReconnect = (): void => {
+    if (sseReconnectTimer) clearTimeout(sseReconnectTimer)
+    if (sseRetryCount >= SSE_MAX_RETRY) return
+    const delay = Math.min(1000 * Math.pow(2, sseRetryCount), 30000)
+    sseRetryCount++
+    sseReconnectTimer = setTimeout(() => {
+      sseReconnectTimer = null
+      startEmployeeSse()
+    }, delay)
+  }
+
+  const startEmployeeSse = async (): Promise<void> => {
+    if (!isLoggedIn.value) return
+    // 已有连接不重复建立
+    if (sseSource) return
+
+    try {
+      const { ticket } = await authApi.getEmployeeTicket()
+      if (!ticket || sseStopped) return
+
+      const url = `/api/sse/subscribe-employee?ticket=${encodeURIComponent(ticket)}`
+      sseSource = new EventSource(url)
+
+      sseSource.addEventListener('open', () => {
+        sseRetryCount = 0
+      })
+
+      // 监听 paycode_used 事件:终端核销后更新时间戳,Profile.vue watch 刷新二维码
+      sseSource.addEventListener('paycode_used', () => {
+        payCodeUsedAt.value = Date.now()
+      })
+
+      sseSource.onerror = () => {
+        cleanupSseSource()
+        if (!sseStopped) {
+          scheduleSseReconnect()
+        }
+      }
+    } catch {
+      cleanupSseSource()
+      if (!sseStopped) {
+        scheduleSseReconnect()
+      }
+    }
+  }
+
+  /** 登录成功后启动 SSE(由 login/phoneLogin/wechatLogin/wechatBind 调用) */
+  const startSseOnLogin = (): void => {
+    sseStopped = false
+    sseRetryCount = 0
+    startEmployeeSse()
+  }
+
+  /** 登出时关闭 SSE(由 logout 调用) */
+  const stopEmployeeSse = (): void => {
+    sseStopped = true
+    if (sseReconnectTimer) {
+      clearTimeout(sseReconnectTimer)
+      sseReconnectTimer = null
+    }
+    cleanupSseSource()
+  }
+
+  /**
+   * 页面刷新后恢复 SSE 连接(App.vue onMounted 调用)。
+   * 如果已登录但 SSE 未启动,则启动。
+   */
+  const ensureSseRunning = (): void => {
+    if (isLoggedIn.value && sseStopped) {
+      sseStopped = false
+      sseRetryCount = 0
+      startEmployeeSse()
+    }
+  }
+
   return {
     // state
     employee,
     isLoggedIn,
+    payCodeUsedAt,
     // getters
     balance,
     employeeName,
@@ -178,5 +289,9 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     refreshEmployee,
     setEmployee,
+    // SSE
+    startSseOnLogin,
+    stopEmployeeSse,
+    ensureSseRunning,
   }
 })
