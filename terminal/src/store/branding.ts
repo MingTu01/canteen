@@ -2,6 +2,11 @@ import { reactive, ref } from 'vue'
 import api from '@/api'
 import { loadConfig } from '@/api'
 import { getServerUrl as getShellServerUrl } from '@/api/shellApi'
+import {
+  getCachedBrandingImageUrl,
+  preloadBrandingImage,
+  clearAllBrandingImages,
+} from '@/utils/brandingImageCache'
 
 /**
  * 获取服务器地址,优先从终端绑定配置读取,兜底从 Python Shell config.json 读取。
@@ -108,9 +113,67 @@ const loadedStoreId = ref<number | null>(null)
 const currentEtag = ref<string | null>(null)
 
 /**
+ * 仅从本地缓存恢复品牌数据(不请求网络),用于软件启动时秒开背景。
+ *
+ * 从 localStorage 读取品牌元数据,再从 IndexedDB 读取品牌图片 blob URL,
+ * 设置到 brandingState。这样应用挂载时背景已经是本地 blob URL,加载极快。
+ *
+ * 调用时机:main.ts 中 app.mount() 之前。
+ * 后续 fetchBranding({ background: true }) 会异步校验是否有更新。
+ */
+export async function initBrandingFromCache(): Promise<void> {
+  const cfg = loadConfig()
+  if (!cfg || !cfg.storeId) return
+
+  const storeId = cfg.storeId
+  const cache = readCache(storeId)
+  if (!cache?.data) return
+
+  const serverUrl = await getServerUrl()
+  const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+
+  // 优先用本地 IndexedDB 缓存的 blob URL(秒开,无网络请求)
+  const bgUrl = absolutized.terminalBackgroundUrl
+  if (bgUrl) {
+    const localBg = await getCachedBrandingImageUrl(bgUrl)
+    if (localBg) absolutized.terminalBackgroundUrl = localBg
+  }
+  const logoUrl = absolutized.logoUrl
+  if (logoUrl) {
+    const localLogo = await getCachedBrandingImageUrl(logoUrl)
+    if (localLogo) absolutized.logoUrl = localLogo
+  }
+
+  brandingState.data = absolutized
+  loadedStoreId.value = storeId
+  currentEtag.value = cache.etag || null
+}
+
+/**
+ * 将 branding 数据中的网络图片 URL 替换为本地 blob URL(异步预加载)。
+ * 已缓存时秒返回,未缓存时 fetch 下载并缓存。
+ */
+async function applyLocalImageCache(data: StoreBranding): Promise<StoreBranding> {
+  const result = { ...data }
+  // 背景图和 logo 并行预加载
+  const [bgLocal, logoLocal] = await Promise.all([
+    result.terminalBackgroundUrl
+      ? preloadBrandingImage(result.terminalBackgroundUrl)
+      : Promise.resolve(result.terminalBackgroundUrl),
+    result.logoUrl
+      ? preloadBrandingImage(result.logoUrl)
+      : Promise.resolve(result.logoUrl),
+  ])
+  if (result.terminalBackgroundUrl) result.terminalBackgroundUrl = bgLocal
+  if (result.logoUrl) result.logoUrl = logoLocal
+  return result
+}
+
+/**
  * 拉取当前绑定食堂的品牌信息(带 ETag 304 缓存)。
  * - 缓存命中时先秒开缓存,后台异步校验
  * - 数据有更新时自动刷新
+ * - 图片优先用本地 IndexedDB 缓存的 blob URL,避免网络加载闪烁
  *
  * @param options.background true=后台静默校验(不显示 loading)
  */
@@ -131,8 +194,15 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
 
   const cache = readCache(storeId)
   // 有缓存则先秒开(无论前台还是后台模式,确保图片立即显示)
-  if (cache?.data) {
-    brandingState.data = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+  // 注意:initBrandingFromCache 已在启动时从 IndexedDB 恢复了 blob URL,
+  // 这里仅在 brandingState.data 为空时才从 localStorage 恢复(避免覆盖已有的 blob URL)
+  if (cache?.data && !brandingState.data) {
+    const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+    // 异步替换为本地 blob URL(不阻塞,先用网络 URL 秒开)
+    brandingState.data = absolutized
+    applyLocalImageCache(absolutized).then((local) => {
+      brandingState.data = local
+    })
   }
 
   if (!isBackground) brandingState.loading = true
@@ -148,7 +218,11 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
 
     if (res.status === 304) {
       if (!brandingState.data && cache?.data) {
-        brandingState.data = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+        const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+        brandingState.data = absolutized
+        applyLocalImageCache(absolutized).then((local) => {
+          brandingState.data = local
+        })
       }
       loadedStoreId.value = storeId
       currentEtag.value = cache?.etag || null
@@ -159,14 +233,24 @@ export async function fetchBranding(options: { background?: boolean } = {}): Pro
     const etag = res.headers['etag'] as string | undefined
     if (data) {
       const absolutized = serverUrl ? absolutizeBranding(data, serverUrl) : data
+      // 先用网络 URL 立即展示,异步替换为本地 blob URL
       brandingState.data = absolutized
       loadedStoreId.value = storeId
       currentEtag.value = etag || cache?.etag || null
+      // 持久化元数据(存原始网络 URL,启动时再从 IndexedDB 恢复 blob URL)
       writeCache(storeId, etag || cache?.etag || null, absolutized)
+      // 异步预加载图片到 IndexedDB 并替换为 blob URL
+      applyLocalImageCache(absolutized).then((local) => {
+        brandingState.data = local
+      })
     }
   } catch {
     if (!brandingState.data && cache?.data) {
-      brandingState.data = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+      const absolutized = serverUrl ? absolutizeBranding(cache.data, serverUrl) : cache.data
+      brandingState.data = absolutized
+      applyLocalImageCache(absolutized).then((local) => {
+        brandingState.data = local
+      })
       loadedStoreId.value = storeId
       currentEtag.value = cache?.etag || null
     }
@@ -183,6 +267,8 @@ export function clearBranding(): void {
   brandingState.data = null
   loadedStoreId.value = null
   currentEtag.value = null
+  // 同步清理 IndexedDB 品牌图片缓存
+  clearAllBrandingImages()
 }
 
 /**

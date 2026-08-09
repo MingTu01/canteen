@@ -16,11 +16,10 @@ import { fullDateLabel, pad2 } from '@/utils'
 import { Utensils, Search, Home } from 'lucide-vue-next'
 import UserInfoBar from '@/components/UserInfoBar.vue'
 
-import { brandingState, fetchBranding } from '@/store/branding'
+import { fetchBranding } from '@/store/branding'
 
 const router = useRouter()
 const emp = computed(() => orderStore.employee)
-const branding = computed(() => brandingState.data)
 
 const clock = ref('')
 const dateLabel = ref('')

@@ -22,11 +22,10 @@ import { Pause, Play } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import Modal from '@/components/Modal.vue'
 
-import { brandingState, fetchBranding } from '@/store/branding'
+import { fetchBranding } from '@/store/branding'
 
 const router = useRouter()
 const employee = computed(() => pickupStore.employee)
-const branding = computed(() => brandingState.data)
 const order = computed(() => pickupStore.order)
 
 const COUNTDOWN_TOTAL = 30

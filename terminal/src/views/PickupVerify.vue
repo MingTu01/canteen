@@ -9,7 +9,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
 import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
-import { brandingState, fetchBranding } from '@/store/branding'
+import { fetchBranding } from '@/store/branding'
 import { toDateKey } from '@/utils'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { useCardReader } from '@/composables/useCardReader'
@@ -19,7 +19,6 @@ import Modal from '@/components/Modal.vue'
 
 const router = useRouter()
 const employee = computed(() => pickupStore.employee)
-const branding = computed(() => brandingState.data)
 
 /** 头像缓存处理 */
 const avatarError = ref(false)
