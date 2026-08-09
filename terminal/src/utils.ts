@@ -14,9 +14,29 @@ export function mealTypeLabel(t: number): string {
   return ({ 1: '早餐', 2: '午餐', 3: '晚餐' } as Record<number, string>)[t] || '未知'
 }
 
-/** 餐别对应时段(取餐信息页 "午餐 · 12:00时段") */
-export function mealTypeTime(t: number): string {
-  return ({ 1: '08:00', 2: '12:00', 3: '18:00' } as Record<number, string>)[t] || '12:00'
+/**
+ * 餐别对应时段文字(取餐信息页 "午餐 · 12:00-13:00 时段")。
+ *
+ * 优先使用从后端拉取的真实就餐时段(admin-web 时间管理配置);
+ * 若 slots 为空(接口未加载/失败),降级到写死的默认时段,保证页面不空白。
+ *
+ * @param t 餐次 1/2/3
+ * @param slots 从 useMealTimeSlots 拉取的真实时段列表(可选)
+ */
+export function mealTypeTime(t: number, slots?: { mealType: number; startTime: string; endTime: string }[] | null): string {
+  if (slots && slots.length > 0) {
+    const slot = slots.find(s => s.mealType === t)
+    if (slot && slot.startTime && slot.endTime) {
+      // "07:00:00" -> "07:00"
+      const fmt = (s: string) => {
+        const parts = s.split(':')
+        return `${parts[0]}:${parts[1] || '00'}`
+      }
+      return `${fmt(slot.startTime)}-${fmt(slot.endTime)}`
+    }
+  }
+  // 降级:写死默认时段(仅在后端时段未加载时兜底,避免页面空白)
+  return ({ 1: '08:00-09:00', 2: '12:00-13:00', 3: '18:00-19:00' } as Record<number, string>)[t] || '12:00-13:00'
 }
 
 /** 选菜页餐别图标:早 sunrise / 午 sun / 晚 sunset */

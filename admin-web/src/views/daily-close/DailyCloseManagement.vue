@@ -21,6 +21,7 @@ import {
   TrendingDown,
   Users,
   Coins,
+  Utensils,
 } from 'lucide-vue-next'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -195,6 +196,7 @@ watch(() => authStore.storeId, () => {
             <StatCard title="订单总数" :value="summary.orderCount" :icon="ShoppingCart" color="primary" />
             <StatCard title="已支付" :value="summary.paidCount" :icon="CheckCircle2" color="success" />
             <StatCard title="已取消" :value="summary.cancelledCount" :icon="XCircle" color="danger" />
+            <StatCard title="未就餐" :value="summary.missedCount ?? 0" :icon="Utensils" color="warning" />
             <StatCard title="营业额" :value="money(summary.totalRevenue)" :icon="TrendingUp" color="success" />
             <StatCard title="退款总额" :value="money(summary.totalRefund)" :icon="TrendingDown" color="danger" />
             <StatCard title="充值总额" :value="money(summary.rechargeAmount)" :icon="Wallet" color="accent" />

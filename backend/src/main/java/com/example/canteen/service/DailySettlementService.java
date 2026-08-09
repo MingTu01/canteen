@@ -33,10 +33,10 @@ import java.util.Map;
  * - confirmSettlement:确认对账(1→2),记录 settledAt。
  * - closeStore:关店(2→3),记录 closedAt,需先确认对账。
  *
- * 订单状态口径:1=待支付 2=已完成(等同已取餐) 3=已取消。
- * 营业额:已完成订单(status=2)的 totalAmount 之和。
+ * 订单状态口径:1=待取餐 2=已完成(已取餐) 3=已取消 4=未就餐(超时未核销,已付款未退款)。
+ * 营业额:已完成(2) + 未就餐(4) 的 totalAmount 之和(均已收款未退款,未就餐也是食堂收入)。
  * 退款总额:已取消订单(status=3)的 totalAmount 之和。
- * 消费总额:与营业额同口径(已完成订单)。
+ * 消费总额:与营业额同口径。
  * 充值无支付方式字段,现金充值=充值总额,线上充值=0。
  */
 @Service
@@ -91,11 +91,14 @@ public class DailySettlementService {
         int orderCount = orders.size();
         int completedCount = (int) orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == 2).count();
         int cancelledCount = (int) orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == 3).count();
+        // 未就餐(超时未核销,已付款未退款)
+        int missedCount = (int) orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == 4).count();
         // 已取餐 = 已完成(status=2)
         int servedCount = completedCount;
 
+        // 营业额:已完成(2) + 未就餐(4) 的金额之和(均已收款未退款,未就餐也是食堂收入)
         BigDecimal totalRevenue = orders.stream()
-                .filter(o -> o.getStatus() != null && o.getStatus() == 2)
+                .filter(o -> o.getStatus() != null && (o.getStatus() == 2 || o.getStatus() == 4))
                 .map(o -> o.getTotalAmount() == null ? BigDecimal.ZERO : o.getTotalAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalRefund = orders.stream()
@@ -125,6 +128,8 @@ public class DailySettlementService {
             existing.setCompletedCount(completedCount);
             existing.setCancelledCount(cancelledCount);
             existing.setServedCount(servedCount);
+            // 刷新时同步更新未就餐数,否则 totalRevenue 已含未就餐金额而 missedCount 仍为旧值,构成不一致
+            existing.setMissedCount(missedCount);
             existing.setStatus(STATUS_PENDING);
             existing.setUpdatedAt(LocalDateTime.now());
             dailySettlementMapper.updateById(existing);
@@ -145,6 +150,7 @@ public class DailySettlementService {
         ds.setCompletedCount(completedCount);
         ds.setCancelledCount(cancelledCount);
         ds.setServedCount(servedCount);
+        ds.setMissedCount(missedCount);
         ds.setOperatorId(SecurityContext.currentAdminId());
         ds.setStatus(STATUS_PENDING);
         dailySettlementMapper.insert(ds);

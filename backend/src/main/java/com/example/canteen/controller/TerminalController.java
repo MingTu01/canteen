@@ -19,6 +19,8 @@ import com.example.canteen.security.LoginRateLimiter;
 import com.example.canteen.security.SecurityContext;
 import com.example.canteen.service.EmployeeService;
 import com.example.canteen.service.PayCodeService;
+import com.example.canteen.entity.DiningTimeSlot;
+import com.example.canteen.service.DiningTimeSlotService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -51,13 +53,15 @@ public class TerminalController {
     private final PasswordEncoder passwordEncoder;
     private final LoginRateLimiter rateLimiter;
     private final PayCodeService payCodeService;
+    private final DiningTimeSlotService diningTimeSlotService;
 
     public TerminalController(AdminMapper adminMapper, StoreMapper storeMapper,
                               EmployeeMapper employeeMapper, DepartmentMapper departmentMapper,
                               EmployeeService employeeService,
                               JwtTokenProvider jwtTokenProvider, PasswordEncoder passwordEncoder,
                               JwtAuthenticationFilter jwtFilter,
-                              PayCodeService payCodeService) {
+                              PayCodeService payCodeService,
+                              DiningTimeSlotService diningTimeSlotService) {
         this.adminMapper = adminMapper;
         this.storeMapper = storeMapper;
         this.employeeMapper = employeeMapper;
@@ -67,6 +71,7 @@ public class TerminalController {
         this.passwordEncoder = passwordEncoder;
         this.rateLimiter = jwtFilter.getRateLimiter();
         this.payCodeService = payCodeService;
+        this.diningTimeSlotService = diningTimeSlotService;
     }
 
     /**
@@ -315,6 +320,29 @@ public class TerminalController {
         }
         EmployeeVO vo = payCodeService.verifyPayCode(code);
         return ApiResponse.success(vo);
+    }
+
+    /**
+     * 获取本食堂的就餐时段配置(终端用于取餐时段校验和展示)。
+     *
+     * 终端启动时和刷卡取餐前调用,缓存到本地:
+     * - 展示真实时段文字(如"早餐 07:00-10:00")
+     * - 判定当前时间是否在就餐时段内(空档期拒绝取餐,提示"未到用餐时间")
+     * - 识别当前时段对应的餐次(避免午餐时段核销早餐订单的严重 BUG)
+     *
+     * 返回当前门店所有餐次的时段配置列表(mealType/startTime/endTime)。
+     */
+    @GetMapping("/meal-slots")
+    public ApiResponse<List<DiningTimeSlot>> getMealSlots() {
+        Integer role = SecurityContext.currentRole();
+        if (role == null || role != 3) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "仅终端设备可获取就餐时段");
+        }
+        Long storeId = SecurityContext.currentStoreId();
+        if (storeId == null) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
+        }
+        return ApiResponse.success(diningTimeSlotService.getTimeSlotsByStore(storeId));
     }
 
     private static String strVal(Object o) {

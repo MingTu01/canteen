@@ -361,6 +361,7 @@ CREATE TABLE IF NOT EXISTS daily_settlement (
     completed_count INT DEFAULT 0,
     cancelled_count INT DEFAULT 0,
     served_count INT DEFAULT 0,
+    missed_count INT DEFAULT 0,
     operator_id BIGINT,
     status INT DEFAULT 1,
     remark VARCHAR(500),

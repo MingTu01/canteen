@@ -10,7 +10,8 @@ import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
 import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { fetchBranding } from '@/store/branding'
-import { toDateKey } from '@/utils'
+import { toDateKey, mealTypeLabel } from '@/utils'
+import { useMealTimeSlots } from '@/composables/useMealTimeSlots'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { useCardReader } from '@/composables/useCardReader'
 import { User } from 'lucide-vue-next'
@@ -20,6 +21,7 @@ import BrandingHeader from '@/components/BrandingHeader.vue'
 
 const router = useRouter()
 const employee = computed(() => pickupStore.employee)
+const { loadMealSlots, getCurrentMealType } = useMealTimeSlots()
 
 /** 头像缓存处理 */
 const avatarError = ref(false)
@@ -99,18 +101,25 @@ const fetchAndAdvance = async () => {
     router.replace('/pickup')
     return
   }
+  // 时段校验:空档期(不在任何餐次的 [startTime,endTime] 内)拒绝取餐
+  const curMealType = getCurrentMealType()
+  if (curMealType === null) {
+    showErrorWithAutoClose('未到用餐时间', '未到用餐时间,请在就餐时段内取餐', 'warning')
+    return
+  }
   try {
     const resp = await api.get(`/order/employee/${employee.value.id}`)
     const list: any[] = resp.data?.code === 200 ? (resp.data.data ?? []) : []
     const today = toDateKey(new Date())
+    // 关键:只保留当前时段餐次的订单,绝对避免"午餐时段核销早餐订单"的错配
     const pending = list
-      .filter((o) => o.date === today && o.status === 1)
+      .filter((o) => o.date === today && o.status === 1 && Number(o.mealType) === curMealType)
       .sort((a, b) => Number(a.mealType) - Number(b.mealType))
     if (pending.length === 0) {
-      // 无待取餐订单:5 秒后自动消失,不影响下一位刷卡
+      // 当前时段无待取餐订单(可能订单已被标记为未就餐,或没订该餐次)
       showErrorWithAutoClose(
         '暂无待取餐订单',
-        '今日暂无待取餐订单,请先在订餐端下单',
+        `${employee.value.name || '该员工'}${mealTypeLabel(curMealType)}暂无待取餐订单`,
         'info',
       )
       return
@@ -192,7 +201,8 @@ const onErrorConfirm = () => {
 onMounted(() => {
   startedAt.value = Date.now()
   fetchBranding({ background: true })
-  fetchAndAdvance()
+  // 加载就餐时段配置(admin-web 时间管理),用于时段校验
+  loadMealSlots().then(() => fetchAndAdvance())
 })
 onUnmounted(() => {
   done = true

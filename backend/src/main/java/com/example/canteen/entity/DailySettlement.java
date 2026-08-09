@@ -41,6 +41,8 @@ public class DailySettlement {
     private Integer cancelledCount;
     /** 已取餐订单数 */
     private Integer servedCount;
+    /** 未就餐订单数(超时未核销,已付款未退款) */
+    private Integer missedCount;
     /** 操作人 */
     private Long operatorId;
     /** 1=待对账 2=已对账 3=已关店 */

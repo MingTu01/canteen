@@ -194,10 +194,11 @@ public class ReportService {
         long completedOrders = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.COMPLETED.getCode()).count();
         long canceledOrders = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.CANCELED.getCode()).count();
         long pendingOrders = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.PENDING.getCode()).count();
+        long missedOrders = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.MISSED.getCode()).count();
 
-        // 营业额(已完成订单总额)
+        // 营业额:已完成(2) + 未就餐(4) 的金额之和(均已收款未退款,与 DailyCloseService 口径一致)
         BigDecimal totalRevenue = orders.stream()
-                .filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.COMPLETED.getCode())
+                .filter(o -> o.getStatus() != null && (o.getStatus() == OrderStatus.COMPLETED.getCode() || o.getStatus() == OrderStatus.MISSED.getCode()))
                 .map(Order::getTotalAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -257,6 +258,7 @@ public class ReportService {
         result.put("completedOrders", completedOrders);
         result.put("canceledOrders", canceledOrders);
         result.put("pendingOrders", pendingOrders);
+        result.put("missedOrders", missedOrders);
         // 金额
         result.put("totalRevenue", totalRevenue);
         result.put("totalRefund", totalRefund);

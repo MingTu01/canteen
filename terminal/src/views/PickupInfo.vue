@@ -15,6 +15,7 @@ import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
 import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { useMealConfig } from '@/composables/useMealConfig'
+import { useMealTimeSlots } from '@/composables/useMealTimeSlots'
 import { mealTypeLabel, mealTypeTime, toDateKey } from '@/utils'
 import { getDishImgUrl } from '@/utils/cache'
 import { getCachedAvatar } from '@/utils/imageCache'
@@ -65,6 +66,10 @@ watch(
 )
 
 const { mealBadgeStyle, mealIconMap, mealIconColor } = useMealConfig()
+const { slots: mealSlots, loadMealSlots, getCurrentMealType, getSlotByMealType } = useMealTimeSlots()
+
+/** 当前时间所属餐次(null=空档期,不可取餐) */
+const currentMealType = computed(() => getCurrentMealType())
 
 /* 错误弹窗 */
 const showError = ref(false)
@@ -203,6 +208,13 @@ const switchEmployee = async (cardNo: string) => {
   const oldEmployee = pickupStore.employee
   const oldOrder = pickupStore.order
   try {
+    // 时段校验:空档期(不在任何餐次的 [startTime,endTime] 内)拒绝取餐
+    const curMealType = getCurrentMealType()
+    if (curMealType === null) {
+      errorMsg.value = '未到用餐时间,请在就餐时段内取餐'
+      showError.value = true
+      return
+    }
     const resp = await api.get(`/terminal/employee/${encodeURIComponent(cardNo)}`)
     if (resp.data.code !== 200 || !resp.data.data) {
       // 卡号无效:保留原状态,仅弹错误提示
@@ -215,12 +227,13 @@ const switchEmployee = async (cardNo: string) => {
     const listResp = await api.get(`/order/employee/${newEmp.id}`)
     const list: any[] = listResp.data?.code === 200 ? (listResp.data.data ?? []) : []
     const today = toDateKey(new Date())
+    // 关键:只保留当前时段餐次的订单,绝对避免"午餐时段核销早餐订单"的错配
     const pending = list
-      .filter((o) => o.date === today && o.status === 1)
+      .filter((o) => o.date === today && o.status === 1 && Number(o.mealType) === curMealType)
       .sort((a, b) => Number(a.mealType) - Number(b.mealType))
     if (pending.length === 0) {
-      // 无待取餐订单:保留原状态,仅弹错误提示
-      errorMsg.value = `${newEmp.name || '该员工'}今日暂无待取餐订单`
+      // 当前时段无待取餐订单(可能订单已被标记为未就餐,或没订该餐次)
+      errorMsg.value = `${newEmp.name || '该员工'}${mealTypeLabel(curMealType)}暂无待取餐订单`
       showError.value = true
       return
     }
@@ -261,6 +274,8 @@ onMounted(() => {
     return
   }
   fetchBranding()
+  // 加载就餐时段配置(admin-web 时间管理),用于时段校验和真实时段展示
+  loadMealSlots()
   timer = window.setInterval(tick, 1000)
   window.addEventListener('keydown', onKeyPress)
 })
@@ -331,7 +346,7 @@ onUnmounted(() => {
             />
             <span>{{ mealTypeLabel(order.mealType) }}</span>
           </div>
-          <span class="pickup-info__time">{{ mealTypeTime(order.mealType) }}时段</span>
+          <span class="pickup-info__time">{{ mealTypeTime(order.mealType, mealSlots) }}时段</span>
           <!-- 未订餐用餐标识 -->
           <span v-if="order.orderSource === 1" class="pickup-info__source-tag">
             未订餐用餐

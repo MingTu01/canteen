@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.example.canteen.dto.OrderCreateDTO;
 import com.example.canteen.dto.OrderItemDTO;
+import com.example.canteen.entity.DiningTimeSlot;
 import com.example.canteen.entity.Dish;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.entity.MealType;
@@ -46,17 +47,41 @@ public class OrderService {
     private final EmployeeMapper employeeMapper;
     private final JdbcTemplate jdbcTemplate;
     private final WechatNotifyService wechatNotifyService;
+    private final DiningTimeSlotService diningTimeSlotService;
 
     public OrderService(OrderMapper orderMapper, OrderItemMapper orderItemMapper,
                         DishMapper dishMapper, EmployeeMapper employeeMapper,
                         JdbcTemplate jdbcTemplate,
-                        WechatNotifyService wechatNotifyService) {
+                        WechatNotifyService wechatNotifyService,
+                        DiningTimeSlotService diningTimeSlotService) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.dishMapper = dishMapper;
         this.employeeMapper = employeeMapper;
         this.jdbcTemplate = jdbcTemplate;
         this.wechatNotifyService = wechatNotifyService;
+        this.diningTimeSlotService = diningTimeSlotService;
+    }
+
+    /**
+     * 校验订单核销时是否处于该餐次的就餐时段内。
+     * 规则:订单日期必须是今天,且当前时间在 dining_time_slot 配置的 [startTime, endTime] 内。
+     * 未配置时段的餐次拒绝核销(避免无配置即可任意核销)。
+     * @throws BusinessException 不在就餐时段或订单日期不是今天
+     */
+    private void checkPickupTimeWindow(Order order) {
+        LocalDate today = LocalDate.now(ZONE_SHANGHAI);
+        if (order.getDate() == null || !order.getDate().equals(today)) {
+            throw new BusinessException("仅支持核销当日订单");
+        }
+        LocalTime now = LocalTime.now(ZONE_SHANGHAI);
+        if (!diningTimeSlotService.isWithinDiningTime(order.getStoreId(), order.getMealType(), now)) {
+            DiningTimeSlot slot = diningTimeSlotService.getByStoreAndMealType(order.getStoreId(), order.getMealType());
+            if (slot == null) {
+                throw new BusinessException("该餐次未配置就餐时段,无法核销");
+            }
+            throw new BusinessException("未到用餐时间," + slot.getStartTime() + "-" + slot.getEndTime() + " 才可取餐");
+        }
     }
 
     /**
@@ -299,6 +324,8 @@ public class OrderService {
         }
         // B12 订单归属校验
         SecurityContext.checkStoreAccess(order.getStoreId());
+        // 就餐时段校验:只能在配置的 [startTime, endTime] 内核销当日订单
+        checkPickupTimeWindow(order);
         // P0-4 原子状态更新:仅 status=1 可完成,防并发重复操作
         // 使用 UpdateWrapper+字符串列名(非 LambdaUpdateWrapper),兼容无 Spring 上下文的单元测试
         int rows = orderMapper.update(null, new UpdateWrapper<Order>()
@@ -370,6 +397,8 @@ public class OrderService {
             throw new BusinessException("订单状态不允许核销");
         }
         SecurityContext.checkStoreAccess(order.getStoreId());
+        // 就餐时段校验:只能在配置的 [startTime, endTime] 内核销当日订单
+        checkPickupTimeWindow(order);
         // P0-4 原子状态更新:仅 status=1 可核销,防并发重复核销
         // 使用 UpdateWrapper+字符串列名,兼容单元测试
         int rows = orderMapper.update(null, new UpdateWrapper<Order>()
@@ -381,6 +410,56 @@ public class OrderService {
         }
         order.setStatus(OrderStatus.COMPLETED.getCode());
         return order;
+    }
+
+    /**
+     * 标记超时未核销订单为"未就餐"(status=4)。
+     * 由定时任务 OrderStatusScheduler 每分钟调用:
+     * 扫描所有 status=1 且订单日期<=今天 的订单,若该订单餐次的就餐时段已过,则标记为 4。
+     * 幂等:仅 status=1 才更新,重复执行无副作用。
+     * @return 本次标记的订单数
+     */
+    @Transactional
+    public int markExpiredOrdersAsMissed() {
+        LocalDate today = LocalDate.now(ZONE_SHANGHAI);
+        LocalTime now = LocalTime.now(ZONE_SHANGHAI);
+        // 查 status=1 且日期在 [今天-7天, 今天] 范围内的订单。
+        // 加 7 天下限:避免定时任务长期挂掉后恢复时全表扫描大量历史订单(7天前的订单
+        // 即使被标记也无实际意义,且可能影响性能)。正常情况下 pending 订单不会有 7 天前的。
+        LocalDate scanFrom = today.minusDays(7);
+        List<Order> pendingOrders = orderMapper.selectList(new LambdaQueryWrapper<Order>()
+                .eq(Order::getStatus, OrderStatus.PENDING.getCode())
+                .ge(Order::getDate, scanFrom)
+                .le(Order::getDate, today));
+        if (pendingOrders == null || pendingOrders.isEmpty()) {
+            return 0;
+        }
+        int marked = 0;
+        for (Order order : pendingOrders) {
+            // 订单日期早于今天:全天所有餐次都已过,直接标记
+            // 订单日期是今天:按该餐次 endTime 判断
+            boolean shouldMark;
+            if (order.getDate().isBefore(today)) {
+                shouldMark = true;
+            } else {
+                shouldMark = diningTimeSlotService.isDiningTimePassed(order.getStoreId(), order.getMealType(), now);
+            }
+            if (shouldMark) {
+                int rows = orderMapper.update(null, new UpdateWrapper<Order>()
+                        .eq("id", order.getId())
+                        .eq("status", OrderStatus.PENDING.getCode())
+                        .set("status", OrderStatus.MISSED.getCode()));
+                if (rows > 0) {
+                    marked++;
+                    log.info("订单超时未核销标记为未就餐: orderId={}, date={}, mealType={}",
+                            order.getId(), order.getDate(), order.getMealType());
+                }
+            }
+        }
+        if (marked > 0) {
+            log.info("本次标记未就餐订单 {} 单", marked);
+        }
+        return marked;
     }
 
     /**

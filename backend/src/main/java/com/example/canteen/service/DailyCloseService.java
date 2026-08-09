@@ -33,9 +33,10 @@ import java.util.stream.Collectors;
  * 日终对账 Service:汇总当日订单/营业额/退款/充值/新增员工/菜品销量 TOP5,
  * 确认后落库 daily_close 表,并提供历史对账记录查询。
  *
- * 订单状态:1=待支付 2=已完成(等同已支付) 3=已取消。
- * 营业额口径:已支付/已完成订单(status=2)的 totalAmount 之和。
+ * 订单状态:1=待取餐 2=已完成(已取餐) 3=已取消 4=未就餐(超时未核销,已付款未退款)。
+ * 营业额口径:已完成(status=2) + 未就餐(status=4) 的 totalAmount 之和(均已收款未退款)。
  * 退款口径:已取消订单(status=3)的 totalAmount 之和。
+ * missedCount:未就餐(status=4)订单数,单独展示让财务看清营业额构成。
  */
 @Service
 public class DailyCloseService {
@@ -76,13 +77,16 @@ public class DailyCloseService {
                 .lt(RechargeRecord::getCreatedAt, end));
 
         long orderCount = orders.size();
-        // status=2 视为已支付/已完成
+        // status=2 视为已支付/已完成(已取餐)
         long paidCount = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == 2).count();
         long completedCount = paidCount;
         long cancelledCount = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == 3).count();
+        // status=4 未就餐(超时未核销,已付款未退款)
+        long missedCount = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == 4).count();
 
+        // 营业额:已完成(2) + 未就餐(4) 的金额之和(均已收款未退款,未就餐也是食堂收入)
         BigDecimal totalRevenue = orders.stream()
-                .filter(o -> o.getStatus() != null && o.getStatus() == 2)
+                .filter(o -> o.getStatus() != null && (o.getStatus() == 2 || o.getStatus() == 4))
                 .map(o -> o.getTotalAmount() == null ? BigDecimal.ZERO : o.getTotalAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalRefund = orders.stream()
@@ -136,6 +140,7 @@ public class DailyCloseService {
         result.put("paidCount", paidCount);
         result.put("completedCount", completedCount);
         result.put("cancelledCount", cancelledCount);
+        result.put("missedCount", missedCount);
         result.put("totalRevenue", totalRevenue);
         result.put("totalRefund", totalRefund);
         result.put("rechargeAmount", rechargeAmount);

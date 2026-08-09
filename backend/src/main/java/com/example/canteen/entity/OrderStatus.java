@@ -12,7 +12,9 @@ public enum OrderStatus {
     /** 已完成(已取餐) */
     COMPLETED(2),
     /** 已取消(用户取消或异常) */
-    CANCELED(3);
+    CANCELED(3),
+    /** 未就餐(超过就餐时段未核销,由定时任务自动标记) */
+    MISSED(4);
 
     private final int code;
 

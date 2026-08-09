@@ -41,7 +41,7 @@ ACCELERATOR_PREFIXES = [
 SETUP_NAME_RE = re.compile(r'CanteenTerminal-Setup-([\d.]+)\.exe', re.IGNORECASE)
 
 # 当前终端版本(与 installer.iss 的 MyAppVersion 保持一致)
-CURRENT_VERSION = '1.0.15'
+CURRENT_VERSION = '1.0.17'
 
 USER_AGENT = 'CanteenTerminal-Updater/1.0'
 
