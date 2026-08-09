@@ -874,17 +874,17 @@ main() {
     # 步骤:重启服务
     #==========================================================
     step "步骤 ${current_step}/${total_steps} 重启服务"
-    info "重启服务(卷映射模式,用 up -d 确保重读配置)..."
+    info "重启服务(卷映射模式,force-recreate 确保加载新产物)..."
     local restart_failed=false
     case "$SCOPE" in
         backend)
-            docker compose up -d --no-deps backend || restart_failed=true
+            docker compose up -d --force-recreate --no-deps backend || restart_failed=true
             ;;
         frontend)
-            docker compose up -d --no-deps admin-web h5 || restart_failed=true
+            docker compose up -d --force-recreate --no-deps admin-web h5 || restart_failed=true
             ;;
         all)
-            docker compose up -d || restart_failed=true
+            docker compose up -d --force-recreate --no-deps backend admin-web h5 || restart_failed=true
             ;;
     esac
 
