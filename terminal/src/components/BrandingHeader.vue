@@ -31,6 +31,9 @@ const onLogoError = (e: Event) => {
       />
       <span class="branding-header__name">{{ storeName }}</span>
     </div>
+    <div v-if="$slots.right" class="branding-header__right">
+      <slot name="right" />
+    </div>
   </header>
 </template>
 
@@ -38,6 +41,9 @@ const onLogoError = (e: Event) => {
 .branding-header {
   position: relative;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 20px 32px;
 }
 .branding-header__brand {
@@ -45,13 +51,15 @@ const onLogoError = (e: Event) => {
   align-items: center;
   gap: 12px;
 }
+.branding-header__right {
+  display: flex;
+  align-items: center;
+}
 .branding-header__logo {
   width: 48px;
   height: 48px;
   border-radius: 50%;
   object-fit: cover;
-  /* 白色描边,适配深色背景 */
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
 }
 .branding-header__name {
   font-size: var(--fs-xl);

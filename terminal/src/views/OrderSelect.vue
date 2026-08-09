@@ -36,7 +36,6 @@ import { mealTypeLabel } from '@/utils'
 import { menuInvalidated, getCachedMenu, cacheMenu } from '@/utils/cache'
 import { ShoppingCart, X, Plus, Minus, Trash2 } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
-import BrandingHeader from '@/components/BrandingHeader.vue'
 import DatePicker from '@/components/DatePicker.vue'
 import DateSidebar from '@/components/DateSidebar.vue'
 import MealSection from '@/components/MealSection.vue'
@@ -401,7 +400,6 @@ watch(menuInvalidated, (v) => {
 
 <template>
   <main class="select">
-    <BrandingHeader />
     <TopBar title="选菜" @back="router.push('/order/menu')" />
 
     <!-- 左右布局:左侧 DateSidebar + 右侧菜品 -->
@@ -578,6 +576,8 @@ watch(menuInvalidated, (v) => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  /* 内容页:不显示品牌背景,用不透明白色遮住全局背景 */
+  background: var(--doubao-background);
 }
 .select__body {
   flex: 1;

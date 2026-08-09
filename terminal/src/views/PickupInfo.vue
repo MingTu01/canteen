@@ -19,7 +19,6 @@ import { mealTypeLabel, mealTypeTime, toDateKey } from '@/utils'
 import { getDishImgUrl } from '@/utils/cache'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { Pause, Play } from 'lucide-vue-next'
-import TopBar from '@/components/TopBar.vue'
 import BrandingHeader from '@/components/BrandingHeader.vue'
 import Modal from '@/components/Modal.vue'
 
@@ -277,8 +276,7 @@ onUnmounted(() => {
 
 <template>
   <main v-if="employee" class="pickup-info">
-    <BrandingHeader />
-    <TopBar title="取餐窗口" :show-back="false">
+    <BrandingHeader>
       <template #right>
         <div class="pickup-info__countdown">
           <span class="pickup-info__countdown-text">{{ countdownText }}</span>
@@ -292,7 +290,7 @@ onUnmounted(() => {
           </button>
         </div>
       </template>
-    </TopBar>
+    </BrandingHeader>
 
     <div class="pickup-info__body" :class="{ 'pickup-info__body--switching': switching }">
       <!-- 切换中提示遮罩 -->
