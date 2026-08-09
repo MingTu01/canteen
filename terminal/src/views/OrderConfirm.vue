@@ -314,6 +314,8 @@ onMounted(() => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  /* 内容页:不显示品牌背景,用不透明白色遮住全局背景 */
+  background: var(--doubao-background);
 }
 .confirm__content {
   flex: 1;

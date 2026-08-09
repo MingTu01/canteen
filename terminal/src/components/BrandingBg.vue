@@ -4,8 +4,8 @@
  * - 绝对定位铺满父容器
  * - 半透明遮罩保证文字可读
  * - 无背景图时不渲染
- * - 预加载图片:加载完成前不渲染背景(页面自身深色背景透出,不黑屏),
- *   加载完成后淡入显示(transition opacity),避免突兀闪烁
+ * - 预加载图片:加载完成前保持旧背景显示(不隐藏),加载完成后切换到新图,
+ *   避免URL变化时"背景消失再出现"的闪烁
  * - 图片 URL 不变时不会重新加载(浏览器 HTTP 缓存 + 已加载标记)
  */
 import { ref, watch } from 'vue'
@@ -20,27 +20,28 @@ const props = withDefaults(defineProps<{
 
 /** 图片是否已加载完成(用于控制淡入) */
 const loaded = ref(false)
-/** 当前已加载的 URL(避免相同 URL 重复加载) */
-let loadedUrl = ''
+/** 已加载完成并实际显示的 URL(加载完成后才切换,避免闪烁) */
+const displayUrl = ref('')
 
 watch(
   () => props.bgUrl,
   (url) => {
     if (!url) {
       loaded.value = false
-      loadedUrl = ''
+      displayUrl.value = ''
       return
     }
     // URL 未变化,不重复加载
-    if (url === loadedUrl && loaded.value) return
-    loaded.value = false
+    if (url === displayUrl.value && loaded.value) return
+    // 关键:不立即清除 loaded,保持旧背景显示直到新图加载完成
     const img = new Image()
     img.onload = () => {
+      displayUrl.value = url
       loaded.value = true
-      loadedUrl = url
     }
     img.onerror = () => {
-      loaded.value = false
+      // 加载失败:仅当没有任何已加载背景时才隐藏,否则保持旧背景
+      if (!displayUrl.value) loaded.value = false
     }
     img.src = url
   },
@@ -54,7 +55,7 @@ watch(
     class="branding-bg"
     :class="{ 'branding-bg--loaded': loaded }"
     :style="{
-      backgroundImage: loaded ? `url(${bgUrl})` : 'none',
+      backgroundImage: loaded ? `url(${displayUrl})` : 'none',
     }"
   >
     <div
