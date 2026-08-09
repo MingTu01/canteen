@@ -39,27 +39,6 @@ export function generatePayCode(): Promise<PayCode> {
   return post<PayCode>('/employee/paycode')
 }
 
-/** 支付码核销状态响应(轮询用) */
-export interface PayCodeUsedResult {
-  /** true=已核销/无效, false=仍有效 */
-  used: boolean
-}
-
-/**
- * 检查支付码是否已被核销(轮询用)。
- * 终端扫码核销后,Redis 中支付码立即删除,此接口返回 used=true。
- * 静默失败(_silent):轮询失败不弹 toast 干扰用户。
- *
- * 重要:加 _t 时间戳参数防止微信浏览器缓存 GET 请求(每次轮询 code 相同,
- * URL 相同,微信浏览器可能返回缓存的 used=false,导致永远检测不到核销)。
- */
-export function checkPayCodeUsed(code: string): Promise<PayCodeUsedResult> {
-  return get<PayCodeUsedResult>('/employee/paycode/used', {
-    params: { code, _t: Date.now() },
-    _silent: true,
-  })
-}
-
 /** 获取当前登录员工的完整信息(基于 token,无需传 ID) */
 export function getMe(): Promise<Employee> {
   return get<Employee>('/employee/me')

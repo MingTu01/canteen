@@ -57,10 +57,6 @@ let payCodeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const PAY_CODE_REFRESH_INTERVAL = 4 * 60 * 1000
 /** 刷新限流:正在刷新时不再重复触发,避免短时间多次核销导致重复请求 */
 let isRefreshingFromSse = false
-/** 轮询定时器:每 5 秒检查支付码是否被核销(不依赖 SSE/visibilitychange) */
-let payCodePollTimer: ReturnType<typeof setInterval> | null = null
-/** 轮询间隔(5 秒,平衡实时性与资源消耗) */
-const PAY_CODE_POLL_INTERVAL = 5000
 
 // ============ 修改密码表单 ============
 const passwordForm = ref({
@@ -98,39 +94,28 @@ onMounted(async () => {
   await authStore.refreshEmployee()
   // 自动加载取餐码(不弹层,供内嵌卡片展示)
   loadQrcode()
-  // 监听页面可见性:页面不可见时暂停轮询(省资源),可见时立即检查并恢复轮询
+  // 监听页面可见性:页面切回前台时恢复 SSE 连接(防止后台被中断后未重连)
   document.addEventListener('visibilitychange', onVisibilityChange)
   // 确保全局 SSE 连接运行(SSE 在 auth store 全局管理,登录时已启动,
   // 此处为页面刷新后的双保险)
   authStore.ensureSseRunning()
-  // 启动轮询:每 5 秒检查支付码是否被核销
-  // (SSE 在微信浏览器中可能不稳定,轮询是最可靠的兜底方案)
-  startPayCodePoll()
 })
 
 /**
  * keep-alive 组件激活时(从其他页面切回"我的"):
- * - 立即检查一次支付码(可能在离开期间被核销)
- * - 恢复轮询
+ * 恢复 SSE 连接(防止长时间切走后 SSE 被中断未重连)。
+ * SSE 在 auth store 全局管理,不随页面切换断开,此处仅做恢复保险。
  */
 onActivated(() => {
-  // 首次挂载时 onMounted 已启动轮询,onActivated 也会触发,避免重复启动
-  // 仅当轮询未运行时(从其他页面切回)才检查并恢复
-  if (!payCodePollTimer) {
-    checkPayCodeOnce()
-    startPayCodePoll()
-  }
+  authStore.ensureSseRunning()
 })
 
 /**
  * keep-alive 组件停用时(切到其他页面):
- * - 暂停轮询(省资源,组件仍在内存但不在前台)
+ * SSE 连接在 auth store 全局管理,不随页面切换断开,此处无需操作。
  */
 onDeactivated(() => {
-  if (payCodePollTimer) {
-    clearInterval(payCodePollTimer)
-    payCodePollTimer = null
-  }
+  /* SSE 全局管理,无需暂停 */
 })
 
 /**
@@ -158,11 +143,6 @@ onUnmounted(() => {
     clearTimeout(payCodeRefreshTimer)
     payCodeRefreshTimer = null
   }
-  // 清理轮询定时器
-  if (payCodePollTimer) {
-    clearInterval(payCodePollTimer)
-    payCodePollTimer = null
-  }
   // 移除可见性监听
   document.removeEventListener('visibilitychange', onVisibilityChange)
   // 注意:SSE 连接在 auth store 全局管理,不随 Profile.vue 卸载关闭
@@ -170,24 +150,17 @@ onUnmounted(() => {
 
 /**
  * 页面可见性变化处理:
- * - 不可见(hidden):暂停轮询省资源(用户去终端扫码时切后台,轮询无意义)
- * - 可见(visible):立即检查一次支付码(可能在后台期间被核销),再恢复轮询
+ * - 不可见(hidden):无需操作(SSE 全局管理,保持连接接收事件)
+ * - 可见(visible):恢复 SSE 连接(防止后台被中断后未重连)
  *
- * 注意:iOS 微信可能不触发 visibilitychange,所以轮询是主路径,这只是优化
+ * SSE 是支付码核销实时刷新的唯一机制:
+ * 终端核销后后端通过 SSE 推送 paycode_used 事件,store 更新时间戳,
+ * Profile.vue watch 时间戳变化后刷新二维码。
  */
 const onVisibilityChange = (): void => {
-  if (document.visibilityState === 'hidden') {
-    // 页面切到后台:暂停轮询省资源
-    if (payCodePollTimer) {
-      clearInterval(payCodePollTimer)
-      payCodePollTimer = null
-    }
-    return
-  }
-  // 页面切回前台:立即检查一次(可能在后台期间被核销)
-  checkPayCodeOnce()
-  // 恢复轮询
-  startPayCodePoll()
+  if (document.visibilityState === 'hidden') return
+  // 页面切回前台:恢复 SSE 连接(可能后台被中断)
+  authStore.ensureSseRunning()
 }
 
 /** 重新生成支付码(静默,不显示 loading) */
@@ -204,42 +177,6 @@ const refreshPayCode = async (): Promise<void> => {
   } catch {
     /* 刷新失败,保留旧码,下次可见时再试 */
   }
-}
-
-/**
- * 检查一次支付码是否被核销(轮询单次执行逻辑,也供 visibilitychange 立即检查用)。
- * 被核销则重新生成,正在刷新时跳过避免重复请求。
- */
-const checkPayCodeOnce = async (): Promise<void> => {
-  // 没有支付码或正在刷新,跳过
-  if (!qrcodeData.value || isRefreshingFromSse) return
-  try {
-    const res = await authApi.checkPayCodeUsed(qrcodeData.value.code)
-    if (res.used) {
-      // 支付码已被核销,重新生成
-      isRefreshingFromSse = true
-      await refreshPayCode()
-      isRefreshingFromSse = false
-    }
-  } catch {
-    /* 轮询失败静默忽略,下次重试 */
-  }
-}
-
-/**
- * 启动支付码核销轮询:每 5 秒检查当前支付码是否被终端核销。
- *
- * 轮询是最可靠的刷新方案(SSE 在微信浏览器中可能不稳定,visibilitychange
- * 在 iOS 微信中也可能不触发)。终端核销后 Redis 中支付码立即删除,
- * 轮询检测到 used=true 时立即重新生成支付码。
- *
- * 资源优化:页面不可见时由 onVisibilityChange 暂停轮询,可见时恢复。
- */
-const startPayCodePoll = (): void => {
-  if (payCodePollTimer) clearInterval(payCodePollTimer)
-  payCodePollTimer = setInterval(() => {
-    checkPayCodeOnce()
-  }, PAY_CODE_POLL_INTERVAL)
 }
 
 // ============ 跳转 ============
