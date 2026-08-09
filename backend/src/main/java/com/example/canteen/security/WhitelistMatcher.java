@@ -31,6 +31,7 @@ public class WhitelistMatcher {
             // SSE subscribe 改用一次性 ticket 认证(由 SseController 内部校验 ticket),
             // 不再需要 Bearer token,避免 token 出现在 URL query 中
             "/api/sse/subscribe",
+            "/api/sse/subscribe-employee",
     };
 
     /** 前缀匹配的白名单路径 */

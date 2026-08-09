@@ -45,6 +45,26 @@ export function getMe(): Promise<Employee> {
 }
 
 /* ============================================================
+ * SSE 员工维度订阅(支付码核销实时刷新)
+ * ============================================================ */
+
+/** SSE Ticket 响应(对应后端 /sse/employee-ticket) */
+export interface SseTicketResult {
+  /** 一次性 ticket,30 秒有效,仅可使用一次 */
+  ticket: string
+  /** 过期秒数(固定 30) */
+  expiresIn: number
+}
+
+/**
+ * 获取一次性 SSE ticket(员工维度,30 秒有效)。
+ * 用 ticket 建立 EventSource,避免 token 出现在 URL query 中。
+ */
+export function getEmployeeTicket(): Promise<SseTicketResult> {
+  return get<SseTicketResult>('/sse/employee-ticket')
+}
+
+/* ============================================================
  * 微信登录相关
  * ============================================================ */
 

@@ -72,6 +72,41 @@ public class SseController {
         return sseService.subscribe(storeId);
     }
 
+    /**
+     * 获取一次性 SSE ticket(需员工 Bearer token)。
+     * 用于 H5 端订阅员工维度事件(如支付码核销通知)。
+     * 返回:{ ticket: "xxx", expiresIn: 30 }
+     */
+    @GetMapping("/employee-ticket")
+    public ApiResponse<Map<String, Object>> getEmployeeTicket() {
+        Long employeeId = SecurityContext.currentEmployeeId();
+        if (employeeId == null) {
+            throw new SecurityException("未登录");
+        }
+        String ticket = sseTicketService.createTicket(employeeId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("ticket", ticket);
+        result.put("expiresIn", 30);
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 订阅员工维度事件流(H5 端用)。
+     * 路径:/api/sse/subscribe-employee?ticket=xxx
+     * 返回:text/event-stream
+     *
+     * ticket 为 GET /api/sse/employee-ticket 返回的一次性凭证,30 秒内有效。
+     * 校验通过后从 ticket 中取出 employeeId,隔离到对应员工的事件流。
+     */
+    @GetMapping(value = "/subscribe-employee", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribeEmployee(@RequestParam String ticket) {
+        Long employeeId = sseTicketService.validateAndConsume(ticket);
+        if (employeeId == null) {
+            throw new SecurityException("ticket 无效或已过期");
+        }
+        return sseService.subscribeByEmployee(employeeId);
+    }
+
     /** 监控接口:当前 SSE 连接总数(仅管理员) */
     @GetMapping("/stats")
     public ApiResponse<Integer> stats() {

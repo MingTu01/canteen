@@ -48,6 +48,8 @@ public class PayCodeService {
     /** 使用 ObjectProvider 支持 dev 环境无 Redis 的降级检测 */
     private final ObjectProvider<StringRedisTemplate> stringRedisTemplateProvider;
     private final ObjectMapper objectMapper;
+    /** SSE 推送服务:支付码核销后实时通知员工 H5 刷新二维码 */
+    private final SseService sseService;
 
     /** 支付码有效期:5 分钟 */
     private static final Duration PAY_CODE_TTL = Duration.ofMinutes(5);
@@ -81,11 +83,13 @@ public class PayCodeService {
     public PayCodeService(EmployeeMapper employeeMapper,
                           DepartmentMapper departmentMapper,
                           ObjectProvider<StringRedisTemplate> stringRedisTemplateProvider,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          SseService sseService) {
         this.employeeMapper = employeeMapper;
         this.departmentMapper = departmentMapper;
         this.stringRedisTemplateProvider = stringRedisTemplateProvider;
         this.objectMapper = objectMapper;
+        this.sseService = sseService;
     }
 
     /** 获取 StringRedisTemplate(降级安全) */
@@ -225,6 +229,17 @@ public class PayCodeService {
                 vo.setDepartmentName(dept.getName());
             }
         }
+
+        // 核销成功:通过 SSE 实时通知员工 H5 刷新二维码
+        // (支付码是一次性的,核销后旧码失效,H5 需重新生成才能继续使用)
+        try {
+            sseService.sendToEmployee(employeeId, "paycode_used", java.util.Map.of(
+                    "timestamp", System.currentTimeMillis()
+            ));
+        } catch (Exception e) {
+            // SSE 推送失败不影响核销主流程(员工切回页面时可见性监听会兜底刷新)
+        }
+
         return vo;
     }
 

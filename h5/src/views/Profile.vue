@@ -56,6 +56,30 @@ let payCodeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 /** 支付码刷新间隔(4 分钟,留 1 分钟余量避免过期) */
 const PAY_CODE_REFRESH_INTERVAL = 4 * 60 * 1000
 
+// ============ SSE 员工维度长连接(实时刷新支付码) ============
+/**
+ * 终端核销支付码后,后端通过 SSE 推送 paycode_used 事件,
+ * H5 收到后立即重新生成支付码,无需切换页面。
+ *
+ * 认证流程(避免 token 出现在 URL query):
+ * 1. 用 Cookie 调 /api/sse/employee-ticket 获取一次性 ticket(30s)
+ * 2. 用 ticket 建立 EventSource:/api/sse/subscribe-employee?ticket=xxx
+ * 3. ticket 校验后立即销毁
+ *
+ * 断线重连:浏览器 EventSource 自带重连,但 ticket 一次性+连接被服务端关闭后
+ * readyState=CLOSED 不再自动重连。这里手动用指数退避重新获取 ticket 并重建连接。
+ */
+let sseSource: EventSource | null = null
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null
+/** 当前重连次数(用于指数退避) */
+let sseRetryCount = 0
+/** SSE 重连次数上限(超过后停止重连,避免无限重试) */
+const SSE_MAX_RETRY = 10
+/** SSE 是否被主动关闭(组件卸载/退出登录时置 true,停止重连) */
+let sseStopped = false
+/** 刷新限流:正在刷新时不再重复触发,避免短时间多次核销导致重复请求 */
+let isRefreshingFromSse = false
+
 // ============ 修改密码表单 ============
 const passwordForm = ref({
   oldPassword: '',
@@ -95,6 +119,9 @@ onMounted(async () => {
   // 监听页面可见性:用户从终端扫码核销后切回 H5,自动刷新支付码
   // (支付码是一次性的,核销后前端无法感知,必须重新生成才能继续使用)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // 建立员工 SSE 长连接:终端核销后实时推送 paycode_used 事件刷新二维码
+  // (SSE 是实时刷新的主路径,visibilitychange 是兜底)
+  startEmployeeSse()
 })
 
 onUnmounted(() => {
@@ -105,6 +132,8 @@ onUnmounted(() => {
   }
   // 移除可见性监听
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  // 关闭 SSE 连接(置 sseStopped=true 阻止重连)
+  stopEmployeeSse()
 })
 
 /** 页面重新可见时刷新支付码:用户离开 H5 去终端扫码,回来时大概率已核销,重新生成保证可用 */
@@ -134,6 +163,91 @@ const refreshPayCode = async (): Promise<void> => {
   } catch {
     /* 刷新失败,保留旧码,下次可见时再试 */
   }
+}
+
+// ============ SSE 员工维度长连接(实时刷新支付码) ============
+/**
+ * 建立员工 SSE 长连接。
+ * 流程:获取一次性 ticket → EventSource → 监听 paycode_used 事件 → 重新生成支付码
+ * 失败/断线通过指数退避重连(1s → 2s → 4s → ... → 上限 30s)。
+ */
+const startEmployeeSse = async (): Promise<void> => {
+  // 未登录或已主动停止则不启动
+  if (sseStopped || !authStore.isLoggedIn) return
+  // 已有连接不重复建立
+  if (sseSource) return
+
+  try {
+    // 1. 用 Cookie 获取一次性 ticket(30s 有效)
+    const { ticket } = await authApi.getEmployeeTicket()
+    if (!ticket || sseStopped) return
+
+    // 2. 用 ticket 建立 EventSource(ticket 一次性,不出现在 Cookie/历史)
+    //    baseURL 与 axios 一致(/api),浏览器以同源/相对路径发起,自动携带 Cookie
+    const url = `/api/sse/subscribe-employee?ticket=${encodeURIComponent(ticket)}`
+    sseSource = new EventSource(url)
+
+    // 连接建立:重置重连计数
+    sseSource.addEventListener('open', () => {
+      sseRetryCount = 0
+    })
+
+    // 监听 paycode_used 事件:终端核销后立即刷新支付码
+    sseSource.addEventListener('paycode_used', () => {
+      // 限流:正在刷新时跳过,避免短时间多次核销触发重复请求
+      if (isRefreshingFromSse) return
+      isRefreshingFromSse = true
+      refreshPayCode().finally(() => {
+        isRefreshingFromSse = false
+      })
+    })
+
+    // 连接异常/服务端关闭:浏览器会自动重连一次,若仍失败 readyState=CLOSED
+    // 这里在 onerror 中主动关闭并安排重连,避免浏览器默认重连拿不到新 ticket
+    sseSource.onerror = () => {
+      cleanupSseSource()
+      if (!sseStopped) {
+        scheduleSseReconnect()
+      }
+    }
+  } catch {
+    // 获取 ticket 失败(如网络异常/未登录):安排重连
+    cleanupSseSource()
+    if (!sseStopped) {
+      scheduleSseReconnect()
+    }
+  }
+}
+
+/** 关闭当前 EventSource(不置 sseStopped,供重连内部使用) */
+const cleanupSseSource = (): void => {
+  if (sseSource) {
+    sseSource.close()
+    sseSource = null
+  }
+}
+
+/** 安排 SSE 重连(指数退避:1s → 2s → 4s → ... → 上限 30s,达上限停止) */
+const scheduleSseReconnect = (): void => {
+  if (sseReconnectTimer) clearTimeout(sseReconnectTimer)
+  if (sseRetryCount >= SSE_MAX_RETRY) return
+  // 指数退避:base * 2^n,上限 30s
+  const delay = Math.min(1000 * Math.pow(2, sseRetryCount), 30000)
+  sseRetryCount++
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null
+    startEmployeeSse()
+  }, delay)
+}
+
+/** 主动关闭 SSE 并停止重连(组件卸载/退出登录调用) */
+const stopEmployeeSse = (): void => {
+  sseStopped = true
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer)
+    sseReconnectTimer = null
+  }
+  cleanupSseSource()
 }
 
 // ============ 跳转 ============
@@ -297,6 +411,8 @@ const onLogout = (): void => {
       brandingStore.clearBranding()
       // 清空购物车,避免跨用户泄漏
       cartStore.clearAll()
+      // 关闭 SSE 连接,避免下一用户复用上一用户的员工通道
+      stopEmployeeSse()
       // 清空取餐码缓存和定时器,避免下一用户看到上一用户的支付码
       if (payCodeRefreshTimer) {
         clearTimeout(payCodeRefreshTimer)

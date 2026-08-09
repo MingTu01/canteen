@@ -13,8 +13,9 @@ import java.util.concurrent.CopyOnWriteArraySet;
 /**
  * Server-Sent Events 推送服务。
  *
- * 按 storeId 维度管理终端长连接,管理员修改菜品/菜单后调用 broadcast 通知所有终端。
- * 单终端单连接,长连接几乎不占带宽,适合"菜品变更通知"等低频场景。
+ * 支持两个维度的长连接管理:
+ * 1. storeId 维度(终端):管理员修改菜品/菜单后调用 broadcast 通知所有终端
+ * 2. employeeId 维度(员工 H5):支付码核销后调用 sendToEmployee 通知员工刷新二维码
  *
  * 连接清理:SSE 默认超时 30 分钟,客户端断开后下次发送会触发 IOException 自动清理。
  */
@@ -28,8 +29,11 @@ public class SseService {
     /** 连接超时时间(毫秒),默认 30 分钟 */
     private static final long EMITTER_TIMEOUT_MS = 30 * 60 * 1000L;
 
-    /** storeId -> 该门店所有 SSE 连接集合 */
+    /** storeId -> 该门店所有 SSE 连接集合(终端用) */
     private final Map<Long, Set<SseEmitter>> storeEmitters = new ConcurrentHashMap<>();
+
+    /** employeeId -> 该员工所有 SSE 连接集合(H5 用,同一员工可能多设备登录) */
+    private final Map<Long, Set<SseEmitter>> employeeEmitters = new ConcurrentHashMap<>();
 
     /** 心beat 定时器(延迟启动,避免容器未就绪) */
     private volatile boolean heartbeatStarted = false;
@@ -74,6 +78,44 @@ public class SseService {
     }
 
     /**
+     * 创建一个 SSE 连接并注册到指定员工。
+     * 用于 H5 端接收员工维度的事件(如支付码核销通知)。
+     */
+    public SseEmitter subscribeByEmployee(Long employeeId) {
+        if (employeeId == null) {
+            throw new IllegalArgumentException("employeeId 不能为空");
+        }
+        SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
+
+        Set<SseEmitter> set = employeeEmitters.computeIfAbsent(employeeId, k -> new CopyOnWriteArraySet<>());
+        set.add(emitter);
+
+        emitter.onCompletion(() -> {
+            set.remove(emitter);
+            log.debug("SSE 员工连接完成:employeeId={}, 当前连接数={}", employeeId, set.size());
+        });
+        emitter.onTimeout(() -> {
+            set.remove(emitter);
+            emitter.complete();
+            log.debug("SSE 员工连接超时:employeeId={}, 当前连接数={}", employeeId, set.size());
+        });
+        emitter.onError((e) -> {
+            set.remove(emitter);
+            log.debug("SSE 员工连接异常:employeeId={}, err={}", employeeId, e.getMessage());
+        });
+
+        try {
+            emitter.send(SseEmitter.event().name("open").data("connected"));
+        } catch (IOException e) {
+            set.remove(emitter);
+        }
+
+        ensureHeartbeat();
+        log.debug("SSE 员工新订阅:employeeId={}, 当前连接数={}", employeeId, set.size());
+        return emitter;
+    }
+
+    /**
      * 向指定门店的所有终端广播事件。
      * 单个终端发送失败不影响其他终端。
      *
@@ -96,6 +138,31 @@ public class SseService {
             }
         }
         log.debug("SSE 广播:storeId={}, event={}, 连接数={}", storeId, eventName, set.size());
+    }
+
+    /**
+     * 向指定员工推送事件(H5 端接收)。
+     * 单个连接发送失败不影响其他连接。
+     *
+     * @param employeeId 员工 ID
+     * @param eventName 事件名:paycode_used
+     * @param data 事件数据(会被 JSON 序列化)
+     */
+    public void sendToEmployee(Long employeeId, String eventName, Object data) {
+        Set<SseEmitter> set = employeeEmitters.get(employeeId);
+        if (set == null || set.isEmpty()) {
+            return;
+        }
+        SseEmitter.SseEventBuilder builder = SseEmitter.event().name(eventName).data(data);
+        for (SseEmitter emitter : set) {
+            try {
+                emitter.send(builder);
+            } catch (IOException | IllegalStateException e) {
+                set.remove(emitter);
+                log.debug("员工推送时清理失效连接:employeeId={}, err={}", employeeId, e.getMessage());
+            }
+        }
+        log.debug("SSE 员工推送:employeeId={}, event={}, 连接数={}", employeeId, eventName, set.size());
     }
 
     /**
@@ -158,6 +225,17 @@ public class SseService {
                         }
                     }
                 }
+                // 员工维度连接也需心跳保活
+                for (Map.Entry<Long, Set<SseEmitter>> entry : employeeEmitters.entrySet()) {
+                    Set<SseEmitter> set = entry.getValue();
+                    for (SseEmitter emitter : set) {
+                        try {
+                            emitter.send(SseEmitter.event().comment("heartbeat"));
+                        } catch (IOException | IllegalStateException e) {
+                            set.remove(emitter);
+                        }
+                    }
+                }
             }
         }, "sse-heartbeat");
         t.setDaemon(true);
@@ -165,8 +243,10 @@ public class SseService {
         log.info("SSE 心跳线程已启动,间隔 {}ms", HEARTBEAT_INTERVAL_MS);
     }
 
-    /** 获取当前所有门店的连接总数(监控用) */
+    /** 获取当前所有门店和员工的连接总数(监控用) */
     public int totalConnections() {
-        return storeEmitters.values().stream().mapToInt(Set::size).sum();
+        int storeCount = storeEmitters.values().stream().mapToInt(Set::size).sum();
+        int employeeCount = employeeEmitters.values().stream().mapToInt(Set::size).sum();
+        return storeCount + employeeCount;
     }
 }
