@@ -288,19 +288,39 @@ def check_env():
 # 自检:服务容器状态
 # ==============================================================
 def check_services():
-    """检查各服务容器状态。返回问题列表。"""
+    """检查各服务容器状态。返回问题列表。
+
+    用 docker compose ps 动态读取真实服务名/容器名/状态,避免硬编码
+    容器名与实际部署不一致(或 docker inspect 异常)导致误报"不存在"。
+    """
     problems = []
-    for name in ["mysql", "redis", "backend", "admin-web", "h5"]:
-        cname = "canteen-" + ("admin" if name == "admin-web" else
-                              ("mysql" if name == "mysql" else
-                               ("redis" if name == "redis" else name)))
-        state = container_state(cname)
-        if state is None:
-            problems.append("%s 容器不存在" % name)
-        elif state["status"] != "running":
-            problems.append("%s 未运行(status=%s)" % (name, state["status"]))
-        elif state["health"] not in ("healthy", "n/a", "?"):
-            problems.append("%s 不健康(health=%s)" % (name, state["health"]))
+    rc, out, err = run(["docker", "compose", "ps", "-a",
+                        "--format", "{{.Service}}|{{.Name}}|{{.State}}|{{.Health}}"],
+                       cwd=PROJECT_DIR)
+    if rc != 0:
+        problems.append("无法读取容器状态(docker compose ps 失败): %s"
+                        % (err or out).strip())
+        return problems
+
+    containers = {}
+    for line in out.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) < 4 or not parts[0]:
+            continue
+        containers[parts[0]] = {
+            "name": parts[1].strip(),
+            "state": parts[2].strip(),
+            "health": parts[3].strip(),
+        }
+
+    for svc in ["mysql", "redis", "backend", "admin-web", "h5"]:
+        c = containers.get(svc)
+        if c is None:
+            problems.append("%s 容器不存在" % svc)
+        elif c["state"] != "running":
+            problems.append("%s 未运行(status=%s)" % (svc, c["state"]))
+        elif c["health"] not in ("healthy", "n/a", ""):
+            problems.append("%s 不健康(health=%s)" % (svc, c["health"]))
     return problems
 
 
