@@ -218,7 +218,8 @@ public class EmployeeService {
                         existing.setPhone(e.getPhone());
                         changed = true;
                     }
-                    // 更新密码(提供了非空密码才更新)
+                    // 更新密码:提供了非空密码则用新密码;密码为空则重置为默认密码 12345678
+                    // (导入模板已移除密码列,空密码 = 使用默认密码)
                     String pwd = e.getPassword();
                     if (pwd != null && !pwd.isBlank()
                             && !pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
@@ -226,6 +227,12 @@ public class EmployeeService {
                         existing.setPassword(passwordEncoder.encode(pwd));
                         existing.setPasswordUpdatedAt(LocalDateTime.now());
                         existing.setMustChangePassword(0);
+                        changed = true;
+                    } else {
+                        // 密码为空:重置为默认密码 12345678,首次登录强制修改
+                        existing.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
+                        existing.setPasswordUpdatedAt(LocalDateTime.now());
+                        existing.setMustChangePassword(1);
                         changed = true;
                     }
                     // 更新部门(有变化才更新)
@@ -335,6 +342,40 @@ public class EmployeeService {
         Map<String, Object> result = new HashMap<>();
         result.put("successCount", successCount);
         result.put("totalAmount", totalAmount);
+        return result;
+    }
+
+    /**
+     * 批量重置密码:把指定员工 ID 列表的密码重置为默认密码 12345678,
+     * 并标记 must_change_password=1(首次登录强制修改),同时刷新 password_updated_at 使旧 token 失效。
+     * 会校验所有员工归属当前门店,防止跨门店越权。
+     */
+    @Transactional
+    public Map<String, Object> resetPasswords(Long storeId, List<Long> employeeIds) {
+        SecurityContext.checkStoreAccess(storeId);
+        if (employeeIds == null || employeeIds.isEmpty()) {
+            throw new BusinessException("未选择员工");
+        }
+        List<Employee> employees = employeeMapper.selectList(new LambdaQueryWrapper<Employee>()
+                .in(Employee::getId, employeeIds)
+                .eq(Employee::getIsDeleted, 0));
+        // 校验归属:所有员工必须属于当前门店
+        for (Employee e : employees) {
+            if (!storeId.equals(e.getStoreId())) {
+                throw new BusinessException("无权操作员工: " + e.getName());
+            }
+        }
+        String encodedPwd = passwordEncoder.encode(DEFAULT_PASSWORD);
+        int count = 0;
+        for (Employee e : employees) {
+            e.setPassword(encodedPwd);
+            e.setMustChangePassword(1);
+            e.setPasswordUpdatedAt(LocalDateTime.now());
+            employeeMapper.updateById(e);
+            count++;
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("successCount", count);
         return result;
     }
 

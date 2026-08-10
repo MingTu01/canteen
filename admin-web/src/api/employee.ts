@@ -63,6 +63,9 @@ export const employeeApi = {
   /** 批量充值:给本食堂所有在职员工充值指定金额 */
   batchRecharge: (data: { storeId?: number; amount: number }) =>
     api.post<{ successCount: number; totalAmount: number }>('/employee/batch-recharge', data).then((r) => r.data),
+  /** 批量重置密码:把勾选员工密码重置为 12345678,首次登录强制修改 */
+  resetPasswords: (data: { storeId?: number; employeeIds: number[] }) =>
+    api.post<{ successCount: number }>('/employee/reset-passwords', data).then((r) => r.data),
   /** 余额预警名单(分页) */
   lowBalanceList: (params: LowBalanceQuery) =>
     api.get<PageResult<Employee>>('/employee/low-balance', { params }).then((r) => r.data),

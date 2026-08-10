@@ -18,7 +18,7 @@ import {
   ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
-import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, Info } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, Info, KeyRound } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -249,6 +249,52 @@ const confirmBatchRecharge = async () => {
   }
 }
 
+// ===== 批量重置密码(勾选) =====
+const employeeTableRef = ref()
+const selectedEmployees = ref<Employee[]>([])
+const resetPasswordsLoading = ref(false)
+
+const handleSelectionChange = (rows: Employee[]) => {
+  selectedEmployees.value = rows
+}
+
+const clearSelection = () => {
+  employeeTableRef.value?.clearSelection()
+}
+
+const handleResetPasswords = async () => {
+  if (selectedEmployees.value.length === 0) {
+    ElMessage.warning('请先勾选要重置密码的员工')
+    return
+  }
+  const names = selectedEmployees.value.map((e) => e.name).slice(0, 5).join('、')
+  const extra = selectedEmployees.value.length > 5 ? ` 等 ${selectedEmployees.value.length} 人` : ''
+  try {
+    await ElMessageBox.confirm(
+      `确定要把所选员工的密码重置为 12345678 吗？\n选中:${names}${extra}\n重置后员工首次登录时需要修改密码。`,
+      '重置密码确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认重置',
+        cancelButtonText: '取消',
+      }
+    )
+  } catch {
+    return
+  }
+  resetPasswordsLoading.value = true
+  try {
+    const ids = selectedEmployees.value.map((e) => e.id!).filter(Boolean)
+    const result = await employeeApi.resetPasswords({ storeId: sid.value ?? undefined, employeeIds: ids })
+    ElMessage.success(`已重置 ${result.successCount} 名员工的密码为 12345678`)
+    clearSelection()
+  } catch {
+    /* 错误已由拦截器统一提示 */
+  } finally {
+    resetPasswordsLoading.value = false
+  }
+}
+
 const handleSearch = () => {
   page.value = 1
   fetchList()
@@ -287,12 +333,12 @@ const importResult = ref<EmployeeImportResult | null>(null)
 /** 下载导入模板 */
 const handleDownloadTemplate = () => {
   const data = [
-    { 卡号: 'CARD001', 手机号: '13800000001', 姓名: '张三', 部门名称: '技术部', 初始余额: 5000, 密码: '', 状态: '启用', 头像URL: '' },
-    { 卡号: 'CARD002', 手机号: '13800000002', 姓名: '李四', 部门名称: '市场部', 初始余额: 5000, 密码: '', 状态: '启用', 头像URL: 'https://example.com/avatar.png' },
+    { 卡号: 'CARD001', 手机号: '13800000001', 姓名: '张三', 部门名称: '技术部', 初始余额: 5000, 状态: '启用', 头像URL: '' },
+    { 卡号: 'CARD002', 手机号: '13800000002', 姓名: '李四', 部门名称: '市场部', 初始余额: 5000, 状态: '启用', 头像URL: 'https://example.com/avatar.png' },
   ]
   const ws = XLSX.utils.json_to_sheet(data)
   // 列宽
-  ws['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 40 }]
+  ws['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 40 }]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '员工导入模板')
   XLSX.writeFile(wb, '员工导入模板.xlsx')
@@ -319,7 +365,6 @@ const handleImportFile = async (file: UploadFile) => {
         name: String(r['姓名'] ?? r['name'] ?? '').trim(),
         departmentName: String(r['部门名称'] ?? r['departmentName'] ?? '').trim() || undefined,
         balance: Number(r['初始余额'] ?? r['balance'] ?? 0) || 0,
-        password: String(r['密码'] ?? r['password'] ?? '').trim() || undefined,
         status: statusStr === '禁用' ? 0 : 1,
         avatar: avatarStr || undefined,
       }
@@ -719,14 +764,37 @@ const photoStats = computed(() => {
       </SearchBar>
 
       <div class="card overflow-hidden">
+        <!-- 选中操作条 -->
+        <div
+          v-if="selectedEmployees.length > 0"
+          class="flex items-center justify-between bg-blue-50 px-4 py-2 text-sm"
+        >
+          <span class="text-blue-700">
+            已选择 <strong>{{ selectedEmployees.length }}</strong> 名员工
+          </span>
+          <div class="flex gap-2">
+            <ElButton
+              size="small"
+              :icon="KeyRound"
+              :loading="resetPasswordsLoading"
+              @click="handleResetPasswords"
+            >
+              重置所选密码为 12345678
+            </ElButton>
+            <ElButton size="small" text @click="clearSelection">取消选择</ElButton>
+          </div>
+        </div>
         <ElTable
+          ref="employeeTableRef"
           v-loading="loading"
           :data="employees"
           style="width: 100%"
           :show-overflow-tooltip="true"
           row-key="id"
           aria-label="员工列表"
+          @selection-change="handleSelectionChange"
         >
+          <ElTableColumn type="selection" width="50" align="center" header-align="center" />
           <ElTableColumn label="头像" width="80" align="center" header-align="center">
             <template #default="{ row }">
               <ElImage

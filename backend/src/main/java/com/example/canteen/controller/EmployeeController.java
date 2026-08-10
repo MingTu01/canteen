@@ -263,6 +263,32 @@ public class EmployeeController {
     }
 
     /**
+     * 批量重置密码:把勾选员工的密码重置为默认密码 12345678,首次登录强制修改。
+     * 请求体:{ "storeId": 1, "employeeIds": [1,2,3] } (门店管理员可不传 storeId,自动取当前门店)
+     * 返回:{ "successCount": N }
+     */
+    @OperationLog(value = "批量重置员工密码", detail = "'门店ID ' + #body['storeId'] + ' 人数 ' + #body['employeeIds']")
+    @PostMapping("/reset-passwords")
+    @SuppressWarnings("unchecked")
+    public ApiResponse<Map<String, Object>> resetPasswords(@RequestBody Map<String, Object> body) {
+        Object storeIdObj = body.get("storeId");
+        Long storeId = storeIdObj != null
+                ? Long.valueOf(storeIdObj.toString())
+                : SecurityContext.currentStoreId();
+        if (storeId == null) {
+            throw new com.example.canteen.exception.BusinessException("缺少 storeId");
+        }
+        Object idsObj = body.get("employeeIds");
+        if (idsObj == null) {
+            throw new com.example.canteen.exception.BusinessException("缺少 employeeIds");
+        }
+        List<Long> employeeIds = ((List<Object>) idsObj).stream()
+                .map(o -> Long.valueOf(o.toString()))
+                .collect(java.util.stream.Collectors.toList());
+        return ApiResponse.success(employeeService.resetPasswords(storeId, employeeIds));
+    }
+
+    /**
      * 余额预警名单:查询余额低于阈值的员工列表(分页)。
      * GET /api/employee/low-balance?storeId=&threshold=&page=&size=
      */
