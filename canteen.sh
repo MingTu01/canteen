@@ -1298,63 +1298,71 @@ menu_reset_db() {
         return
     fi
 
-    # 步骤 1:自动备份
+    # 步骤 1:自动备份(mysqldump,直接在 MySQL 容器内执行)
     echo ""
     info "步骤 1/4:自动备份当前数据..."
     local backup_prefix="pre_reset_$(date +%Y%m%d_%H%M%S)"
-    if docker exec canteen-backend java -jar app.jar --backup="$backup_prefix" 2>/dev/null; then
-        info "已创建备份: $backup_prefix"
+    local backup_dir="$PROJECT_DIR/backup"
+    local backup_file="${backup_dir}/${backup_prefix}.sql.gz"
+    mkdir -p "$backup_dir" 2>/dev/null
+    if docker exec canteen-mysql mysqldump -uroot -p"$mysql_pass" --single-transaction canteen 2>/dev/null | gzip > "$backup_file"; then
+        local fsize
+        fsize=$(du -h "$backup_file" 2>/dev/null | cut -f1)
+        info "已创建备份: $(basename "$backup_file") ($fsize)"
     else
-        # 后端不支持 --backup 参数时,用 mysqldump 直接备份
-        local backup_file="$PROJECT_DIR/backup/${backup_prefix}.sql.gz"
-        mkdir -p "$PROJECT_DIR/backup" 2>/dev/null
-        if docker exec canteen-mysql mysqldump -uroot -p"$mysql_pass" canteen 2>/dev/null | gzip > "$backup_file"; then
-            info "已创建备份: $(basename "$backup_file")"
-        else
-            warn "自动备份失败!继续重置将无法回滚。"
-            if ! confirm "备份失败,是否仍然继续重置?"; then
-                info "已取消"
-                pause
-                return
-            fi
+        warn "自动备份失败!继续重置将无法回滚。"
+        if ! confirm "备份失败,是否仍然继续重置?"; then
+            info "已取消"
+            pause
+            return
         fi
     fi
 
-    # 步骤 2:清空 MySQL 业务表
+    # 步骤 2:清空 MySQL 业务表(用临时 SQL 文件 + 管道,避免 -e 拼接解析问题)
     echo ""
     info "步骤 2/4:清空 MySQL 业务数据..."
-    local sql
-    sql="SET FOREIGN_KEY_CHECKS=0;"
-    sql="${sql} DELETE FROM canteen.dining_time_slot;"
-    sql="${sql} DELETE FROM canteen.group_order_item;"
-    sql="${sql} DELETE FROM canteen.group_order;"
-    sql="${sql} DELETE FROM canteen.order_item;"
-    sql="${sql} DELETE FROM canteen.\`order\`;"
-    sql="${sql} DELETE FROM canteen.daily_settlement;"
-    sql="${sql} DELETE FROM canteen.daily_close;"
-    sql="${sql} DELETE FROM canteen.recharge_record;"
-    sql="${sql} DELETE FROM canteen.feedback;"
-    sql="${sql} DELETE FROM canteen.notification;"
-    sql="${sql} DELETE FROM canteen.menu_item;"
-    sql="${sql} DELETE FROM canteen.menu;"
-    sql="${sql} DELETE FROM canteen.dish;"
-    sql="${sql} DELETE FROM canteen.dish_category;"
-    sql="${sql} DELETE FROM canteen.employee;"
-    sql="${sql} DELETE FROM canteen.department;"
-    sql="${sql} DELETE FROM canteen.stock_count;"
-    sql="${sql} DELETE FROM canteen.purchase_item;"
-    sql="${sql} DELETE FROM canteen.purchase;"
-    sql="${sql} DELETE FROM canteen.material;"
-    sql="${sql} DELETE FROM canteen.supplier;"
-    sql="${sql} DELETE FROM canteen.store;"
-    # 保留超管(role=1),删除其他管理员
-    sql="${sql} DELETE FROM canteen.admin WHERE role != 1;"
-    # 重置超管的 store_id 为 0(全局)
-    sql="${sql} UPDATE canteen.admin SET store_id=0 WHERE role=1;"
-    sql="${sql} SET FOREIGN_KEY_CHECKS=1;"
+    local tmp_sql="/tmp/reset_db_$$.sql"
+    cat > "$tmp_sql" <<'SQLEOF'
+USE canteen;
+SET FOREIGN_KEY_CHECKS=0;
+DELETE FROM dining_time_slot;
+DELETE FROM group_order_item;
+DELETE FROM group_order;
+DELETE FROM order_item;
+DELETE FROM `order`;
+DELETE FROM daily_settlement;
+DELETE FROM daily_close;
+DELETE FROM recharge_record;
+DELETE FROM feedback;
+DELETE FROM notification;
+DELETE FROM menu_item;
+DELETE FROM menu;
+DELETE FROM dish;
+DELETE FROM dish_category;
+DELETE FROM employee;
+DELETE FROM department;
+DELETE FROM stock_count;
+DELETE FROM purchase_item;
+DELETE FROM purchase;
+DELETE FROM material;
+DELETE FROM supplier;
+DELETE FROM store;
+DELETE FROM admin WHERE role != 1;
+UPDATE admin SET store_id=0 WHERE role=1;
+SET FOREIGN_KEY_CHECKS=1;
+SQLEOF
 
-    if ! docker exec canteen-mysql mysql -uroot -p"$mysql_pass" -e "$sql" 2>/dev/null; then
-        error "MySQL 清空失败!请检查数据库状态。"
+    # 用 docker exec -i + 管道执行 SQL 文件(最可靠方式)
+    local mysql_err
+    mysql_err=$(docker exec -i canteen-mysql mysql -uroot -p"$mysql_pass" < "$tmp_sql" 2>&1)
+    rm -f "$tmp_sql"
+
+    # 检查是否含真正的错误(过滤密码警告)
+    local real_err
+    real_err=$(echo "$mysql_err" | grep -v "using a password on the command line" | grep -i "error" || true)
+    if [[ -n "$real_err" ]]; then
+        error "MySQL 清空失败!"
+        echo "  错误信息: $real_err"
         echo "  可用备份恢复: $backup_prefix"
         pause
         return
