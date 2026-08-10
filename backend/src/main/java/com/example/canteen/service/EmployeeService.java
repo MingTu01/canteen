@@ -165,7 +165,8 @@ public class EmployeeService {
 
     /**
      * 批量导入员工。逐行处理,失败行记录错误信息但不中断整体导入。
-     * 返回 {success, failed, errors:[{row, cardNo, reason}]}。
+     * 重复导入(按姓名匹配同门店已有员工)时,自动更新卡号/手机号/密码(有变化才更新)。
+     * 返回 {success, failed, created, updated, errors:[{row, cardNo, reason}]}。
      */
     public Map<String, Object> batchImport(Long storeId, List<Employee> rows) {
         SecurityContext.checkStoreAccess(storeId);
@@ -179,6 +180,8 @@ public class EmployeeService {
         }
 
         int success = 0;
+        int created = 0;
+        int updated = 0;
         List<Map<String, Object>> errors = new ArrayList<>();
         for (int i = 0; i < rows.size(); i++) {
             Employee e = rows.get(i);
@@ -193,6 +196,52 @@ public class EmployeeService {
                 if (e.getPhone() == null || e.getPhone().isBlank()) {
                     throw new BusinessException("手机号不能为空");
                 }
+                // 部门名称 -> id 转换:优先使用 departmentName,其次 departmentId
+                if (e.getDepartmentId() == null && e.getDepartmentName() != null) {
+                    e.setDepartmentId(deptNameToId.get(e.getDepartmentName().trim()));
+                }
+
+                // 按姓名匹配同门店已有员工:命中则批量更新(卡号/手机号/密码)
+                Employee existing = employeeMapper.selectByNameAndStore(e.getName().trim(), storeId);
+                if (existing != null) {
+                    boolean changed = false;
+                    // 更新卡号(有变化且不与其他人冲突)
+                    if (e.getCardNo() != null && !e.getCardNo().equals(existing.getCardNo())) {
+                        if (employeeMapper.countByCardNoExcludeId(e.getCardNo(), existing.getId()) > 0) {
+                            throw new BusinessException("卡号已存在: " + e.getCardNo());
+                        }
+                        existing.setCardNo(e.getCardNo());
+                        changed = true;
+                    }
+                    // 更新手机号(有变化才更新)
+                    if (e.getPhone() != null && !e.getPhone().equals(existing.getPhone())) {
+                        existing.setPhone(e.getPhone());
+                        changed = true;
+                    }
+                    // 更新密码(提供了非空密码才更新)
+                    String pwd = e.getPassword();
+                    if (pwd != null && !pwd.isBlank()
+                            && !pwd.startsWith("$2a$") && !pwd.startsWith("$2b$") && !pwd.startsWith("$2y$")) {
+                        PasswordValidator.validate(pwd);
+                        existing.setPassword(passwordEncoder.encode(pwd));
+                        existing.setPasswordUpdatedAt(LocalDateTime.now());
+                        existing.setMustChangePassword(0);
+                        changed = true;
+                    }
+                    // 更新部门(有变化才更新)
+                    if (e.getDepartmentId() != null && !e.getDepartmentId().equals(existing.getDepartmentId())) {
+                        existing.setDepartmentId(e.getDepartmentId());
+                        changed = true;
+                    }
+                    if (changed) {
+                        employeeMapper.updateById(existing);
+                        updated++;
+                    }
+                    success++;
+                    continue;
+                }
+
+                // 未匹配到已有员工:新建
                 // 卡号唯一性校验(全局,对齐数据库唯一索引含已删除记录)
                 if (employeeMapper.countByCardNoExcludeId(e.getCardNo(), null) > 0) {
                     throw new BusinessException("卡号已存在");
@@ -205,10 +254,6 @@ public class EmployeeService {
                 if (e.getStatus() == null) e.setStatus(1);
                 if (e.getBalance() == null) {
                     e.setBalance(java.math.BigDecimal.ZERO);
-                }
-                // 部门名称 -> id 转换:优先使用 departmentName,其次 departmentId
-                if (e.getDepartmentId() == null && e.getDepartmentName() != null) {
-                    e.setDepartmentId(deptNameToId.get(e.getDepartmentName().trim()));
                 }
                 // P1-5 密码处理:未提供则使用默认密码 12345678
                 boolean usedDefault = false;
@@ -229,6 +274,7 @@ public class EmployeeService {
                 e.setPassword(pwd);
                 e.setMustChangePassword(usedDefault ? 1 : 0);
                 employeeMapper.insert(e);
+                created++;
                 success++;
             } catch (Exception ex) {
                 Map<String, Object> err = new HashMap<>();
@@ -242,6 +288,8 @@ public class EmployeeService {
         Map<String, Object> result = new HashMap<>();
         result.put("success", success);
         result.put("failed", errors.size());
+        result.put("created", created);
+        result.put("updated", updated);
         result.put("errors", errors);
         return result;
     }

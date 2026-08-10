@@ -121,7 +121,7 @@ const routes: RouteRecordRaw[] = [
     path: '/admin',
     name: 'AdminManagement',
     component: () => import('@/views/admin/AdminManagement.vue'),
-    meta: { requiresAuth: true, title: '账号管理', icon: 'UserCog', roles: [1, 2] },
+    meta: { requiresAuth: true, title: '账号管理', icon: 'UserCog', roles: [1] },
   },
   {
     path: '/backup',

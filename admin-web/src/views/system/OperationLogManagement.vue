@@ -21,7 +21,8 @@ import type { PageResult } from '@/api/types'
 const authStore = useAuthStore()
 // 超管未选择食堂时返回 null,不再静默回退到 storeId=1
 const sid = computed(() => authStore.storeId || null)
-const noStoreSelected = computed(() => sid.value === null)
+// 超管全局视图:未选择食堂时查看所有门店日志
+const isGlobalView = computed(() => authStore.isSuperAdmin && !sid.value)
 
 const logs = ref<OperationLogItem[]>([])
 const total = ref(0)
@@ -55,8 +56,9 @@ const buildQuery = (overrides: Partial<OperationLogQuery> = {}): OperationLogQue
 })
 
 const fetchLogs = async () => {
-  // 超管未选择食堂:不请求,清空列表
-  if (noStoreSelected.value) {
+  // 非超管且未选择食堂:不请求,清空列表
+  // 超管全局视图:不传 storeId,后端返回所有日志
+  if (!isGlobalView.value && !sid.value) {
     logs.value = []
     total.value = 0
     return
@@ -109,9 +111,15 @@ watch(() => authStore.storeId, () => {
 <template>
   <Layout>
     <PageContainer title="操作日志" description="查看管理员操作记录，支持按操作关键词与状态筛选">
-      <!-- 超管未选择食堂提示 -->
+      <!-- 超管全局视图提示 -->
       <div
-        v-if="noStoreSelected"
+        v-if="isGlobalView"
+        class="mb-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-700"
+      >
+        当前为全局视图,展示所有门店操作日志。选择具体食堂可查看单店日志。
+      </div>
+      <div
+        v-else-if="!sid"
         class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700"
       >
         请先选择食堂后再查看操作日志。
@@ -124,7 +132,7 @@ watch(() => authStore.storeId, () => {
           style="width: 200px"
           @keyup.enter="handleSearch"
         />
-        <ElSelect v-model="filters.status" placeholder="全部状态" clearable style="width: 120px">
+        <ElSelect v-model="filters.status" placeholder="全部状态" clearable style="width: 120px" @change="handleSearch">
           <ElOption v-for="o in statusOptions" :key="o.value" :label="o.label" :value="o.value" />
         </ElSelect>
       </SearchBar>

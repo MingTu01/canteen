@@ -293,10 +293,10 @@ watch(() => authStore.storeId, () => {
           aria-label="搜索订单号、卡号或姓名"
           @keyup.enter="handleSearch"
         />
-        <ElSelect v-model="filters.status" placeholder="订单状态" clearable style="width: 120px" aria-label="筛选订单状态">
+        <ElSelect v-model="filters.status" placeholder="订单状态" clearable style="width: 120px" aria-label="筛选订单状态" @change="handleSearch">
           <ElOption v-for="o in statusOptions" :key="o.value" :label="o.label" :value="o.value" />
         </ElSelect>
-        <ElSelect v-model="filters.mealType" placeholder="餐次" clearable style="width: 100px" aria-label="筛选餐次">
+        <ElSelect v-model="filters.mealType" placeholder="餐次" clearable style="width: 100px" aria-label="筛选餐次" @change="handleSearch">
           <ElOption v-for="o in mealTypeOptions" :key="o.value" :label="o.label" :value="o.value" />
         </ElSelect>
         <ElDatePicker

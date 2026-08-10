@@ -66,10 +66,7 @@ watch(
 )
 
 const { mealBadgeStyle, mealIconMap, mealIconColor } = useMealConfig()
-const { slots: mealSlots, loadMealSlots, getCurrentMealType, getSlotByMealType } = useMealTimeSlots()
-
-/** 当前时间所属餐次(null=空档期,不可取餐) */
-const currentMealType = computed(() => getCurrentMealType())
+const { slots: mealSlots, loadMealSlots, getCurrentMealType } = useMealTimeSlots()
 
 /* 错误弹窗 */
 const showError = ref(false)

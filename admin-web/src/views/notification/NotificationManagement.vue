@@ -254,7 +254,7 @@ onMounted(fetchList)
       </div>
 
       <SearchBar @search="handleSearch" @reset="handleReset">
-        <ElSelect v-model="typeFilter" placeholder="通知类型" clearable style="width: 140px">
+        <ElSelect v-model="typeFilter" placeholder="通知类型" clearable style="width: 140px" @change="handleSearch">
           <ElOption
             v-for="(meta, key) in NOTIFICATION_TYPE"
             :key="key"
@@ -262,7 +262,7 @@ onMounted(fetchList)
             :value="Number(key)"
           />
         </ElSelect>
-        <ElSelect v-model="displayStatusFilter" placeholder="展示状态" clearable style="width: 140px">
+        <ElSelect v-model="displayStatusFilter" placeholder="展示状态" clearable style="width: 140px" @change="handleSearch">
           <ElOption
             v-for="(meta, key) in NOTIFICATION_DISPLAY_STATUS"
             :key="key"

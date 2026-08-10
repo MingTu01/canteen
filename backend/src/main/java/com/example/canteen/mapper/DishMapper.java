@@ -22,4 +22,24 @@ public interface DishMapper extends BaseMapper<Dish> {
      */
     @Update("UPDATE dish SET is_deleted = 0 WHERE id = #{id}")
     int restoreById(@Param("id") Long id);
+
+    /**
+     * 回收站查询:查 is_deleted=1 的菜品。
+     * 需用自定义 SQL 绕过逻辑删除拦截器(selectPage 会自动追加 is_deleted=0)。
+     */
+    List<Dish> selectTrashByStoreId(@Param("storeId") Long storeId);
+
+    /** 回收站计数 */
+    long countTrashByStoreId(@Param("storeId") Long storeId);
+
+    /**
+     * 彻底删除:物理删除已放入回收站的菜品。
+     * deleteById 在逻辑删除模式下会变成 UPDATE SET is_deleted=1,对已删除记录无效。
+     */
+    int purgeById(@Param("id") Long id);
+
+    /**
+     * 按 ID 查询已删除的菜品(绕过逻辑删除拦截器),供恢复/彻底删除前校验用。
+     */
+    Dish selectDeletedById(@Param("id") Long id);
 }

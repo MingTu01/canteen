@@ -1,8 +1,12 @@
 {
-  "version": "0.0.23",
-  "buildTime": "2026-08-09",
+  "version": "0.0.27",
+  "buildTime": "2026-08-10",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.27 管理后台7项BUG修复:①员工管理部门筛选不生效——EmployeeController.getEmployeesByStore新增departmentId参数过滤,前端ElSelect补@change=handleSearch;②门店管理员访问账号管理被退出登录——/admin路由与Layout菜单roles改为仅[1]隐藏tab;③超管看不到门店管理员添加的员工——新增/api/employee/all全局视图接口供超管查看所有门店员工,EmployeeManagement.vue超管未选食堂时走全局视图;④员工管理下载模板按钮重复——移除actions槽按钮仅保留导入弹窗内;⑤重复导入用于批量更新——EmployeeService.batchImport按姓名+门店匹配已有员工,有变化才更新卡号/手机号/密码/部门,无变化忽略;⑥菜品回收站无效——MyBatis-Plus逻辑删除拦截器导致查不到is_deleted=1记录,DishMapper.xml新增自定义SQL(selectTrashByStoreId/selectDeletedById/restoreById/purgeById)绕过拦截器,DishService.getTrashList/restoreDish/purgeDish改用自定义SQL;⑦超管权限问题——OperationLogManagement.vue新增超管全局视图查看所有门店日志,OperationLogController超管可不传storeId查看全部;同步修复OrderManagement/NotificationManagement/Recharge/OperationLog的ElSelect筛选器缺@change问题",
+    "V0.0.26 修复DailySettlementService.generateSettlement更新分支(已有对账记录刷新场景)遗漏setMissedCount的BUG:此前仅新建记录分支设置missedCount,刷新分支只更新totalRevenue(含未就餐金额)却不更新missedCount,导致后续刷新后营业额已含未就餐金额而未就餐数仍为旧值,订单总数=已完成+已取消+未就餐对不上;现刷新分支同步setMissedCount,数据恢复一致",
+    "V0.0.25 修复MISSED(未就餐)订单金额在对账中消失的严重财务问题:①DailyCloseService/DailySettlementService/ReportService的totalRevenue口径从仅status=2改为status=2+4(已完成+未就餐,均已收款未退款,未就餐也是食堂收入),修复前未就餐订单金额既不计入营业额也不计入退款导致对账时钱对不上;②DailyCloseService.summary新增missedCount返回,DailySettlement实体新增missedCount字段+V19迁移加missed_count列+schema-h2同步,ReportService.dailyCloseReport新增missedOrders返回,让财务看清订单总数=已完成+已取消+未就餐;③markExpiredOrdersAsMissed扫描加7天下限(date>=today-7)避免定时任务长期挂掉后恢复时全表扫描大量历史订单",
+    "V0.0.24 取餐时段管控+超时未核销标记未就餐:①新增OrderStatus.MISSED(4)未就餐状态(超过就餐时段未核销由定时任务自动标记);②DiningTimeSlotService新增getByStoreAndMealType/isWithinDiningTime/isDiningTimePassed/getCurrentMealType方法,按门店+餐次查询就餐时段并判定当前是否在就餐时段内;③OrderService.completeOrder与pickup增加checkPickupTimeWindow校验,仅订单日期为今天且当前时间在dining_time_slot配置的[startTime,endTime]内才允许核销,空档期拒绝核销提示未到用餐时间,未配置时段的餐次拒绝核销(避免无配置即可任意核销);④新增markExpiredOrdersAsMissed方法,扫描status=1且日期<=今天的订单,订单日期早于今天直接标记,今天的按餐次endTime判断就餐时段是否已过,幂等仅status=1才更新;⑤新增OrderStatusScheduler定时任务每分钟调用markExpiredOrdersAsMissed;⑥TerminalController新增GET/api/terminal/meal-slots接口返回本食堂就餐时段配置供终端拉取校验",
     "V0.0.23 重新构建触发CI部署:后端版本号升级触发GitHub Actions重新构建并推送deploy分支,确保服务器git pull能拉到包含/api/employee/paycode/used和/api/sse/employee-ticket接口的最新jar(排查发现服务器仍运行旧版本jar导致这两个接口404,H5轮询和SSE均无法工作)",
     "V0.0.21 支付码核销实时刷新(H5 SSE):新增员工维度SSE推送(SseService.employeeEmitters/subscribeByEmployee/sendToEmployee),PayCodeService.verifyPayCode核销成功后推送paycode_used事件;SseController新增/api/sse/employee-ticket(凭Cookie获取一次性ticket)与/api/sse/subscribe-employee(ticket建连)接口;WhitelistMatcher放行subscribe-employee;心跳机制覆盖员工连接;H5 Profile.vue订阅员工SSE,监听paycode_used事件实时刷新二维码(指数退避重连,断线自动恢复),解决核销后需切换页面才刷新的问题",
     "V0.0.19 微信通知推送适配订阅消息:旧版模板消息接口(message/template/send)已于2021-04-30下线,改用订阅消息接口(message/subscribe/bizsend);更新部署文档适配微信开发者平台(developers.weixin.qq.com)新配置路径;更新配置脚本前置条件说明",

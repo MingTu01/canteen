@@ -19,6 +19,8 @@ public class EmployeeVO {
     private Long departmentId;
     /** 部门名称(由 Controller 查表填充,非持久化字段) */
     private String departmentName;
+    /** 门店名称(超管全局视图时填充,非持久化字段) */
+    private String storeName;
     private BigDecimal balance;
     private Integer status;
     /** 是否需要强制修改密码(首次登录使用默认密码时为 1) */

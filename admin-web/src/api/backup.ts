@@ -27,6 +27,8 @@ export interface BackupImportResult {
   restored?: boolean
   restoredTables?: string[]
   restoredRows?: number
+  /** 因敏感字段脱敏被跳过的管理员账号数(需部署脚本重置密码后登录) */
+  redactedAdminsSkipped?: number
 }
 
 export const backupApi = {

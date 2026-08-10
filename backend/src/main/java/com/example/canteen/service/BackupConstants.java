@@ -32,6 +32,10 @@ public final class BackupConstants {
     /** 备份格式版本 */
     public static final String FORMAT_VERSION = "2.0";
 
+    /** 导出时敏感字段(password/wx_openid/wx_unionid)的脱敏占位符。
+     *  恢复时据此识别"已脱敏"的 admin 行并跳过,避免把坏密码写回数据库。 */
+    public static final String REDACTED_PLACEHOLDER = "***REDACTED***";
+
     /** 备份包含的业务表(按依赖顺序:父表在前) */
     public static final List<String> TABLES_IN_ORDER = List.of(
             "store", "admin", "department", "dish", "dish_category",

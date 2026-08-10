@@ -245,17 +245,24 @@ public class DishService {
 
     public IPage<Dish> getTrashList(Long storeId, int page, int size) {
         SecurityContext.checkStoreAccess(storeId);
-        LambdaQueryWrapper<Dish> wrapper = new LambdaQueryWrapper<Dish>()
-                .eq(Dish::getStoreId, storeId)
-                .eq(Dish::getIsDeleted, 1)
-                .orderByDesc(Dish::getId);
-        return dishMapper.selectPage(new Page<>(page, size), wrapper);
+        // 使用自定义 SQL 绕过 MyBatis-Plus 逻辑删除拦截器
+        // (selectPage 会自动追加 is_deleted=0,导致查不到已删除记录)
+        List<Dish> allTrash = dishMapper.selectTrashByStoreId(storeId);
+        long total = allTrash.size();
+        int fromIndex = Math.min((page - 1) * size, allTrash.size());
+        int toIndex = Math.min(fromIndex + size, allTrash.size());
+        List<Dish> pageRecords = allTrash.subList(fromIndex, toIndex);
+        Page<Dish> p = new Page<>(page, size);
+        p.setRecords(pageRecords);
+        p.setTotal(total);
+        return p;
     }
 
     public void restoreDish(Long id) {
-        Dish dish = dishMapper.selectById(id);
+        // selectById 在逻辑删除模式下查不到 is_deleted=1 的记录,需用自定义 SQL
+        Dish dish = dishMapper.selectDeletedById(id);
         if (dish == null) {
-            throw new BusinessException("菜品不存在");
+            throw new BusinessException("菜品不存在或未被删除");
         }
         SecurityContext.checkStoreAccess(dish.getStoreId());
         // 恢复需把 is_deleted 置 0:不能用 updateById(逻辑删除字段被跳过),
@@ -267,12 +274,15 @@ public class DishService {
     }
 
     public void purgeDish(Long id) {
-        Dish dish = dishMapper.selectById(id);
+        // selectById 在逻辑删除模式下查不到 is_deleted=1 的记录,需用自定义 SQL
+        Dish dish = dishMapper.selectDeletedById(id);
         if (dish == null) {
-            throw new BusinessException("菜品不存在");
+            throw new BusinessException("菜品不存在或未被删除");
         }
         SecurityContext.checkStoreAccess(dish.getStoreId());
-        dishMapper.deleteById(id);
+        // 物理删除:deleteById 在逻辑删除模式下会变成 UPDATE SET is_deleted=1,
+        // 对已经是 is_deleted=1 的记录无效,需用自定义 DELETE
+        dishMapper.purgeById(id);
         cacheEvictByStore(dish.getStoreId());
         broadcastSse(dish.getStoreId(), id, "purge");
     }

@@ -1,5 +1,6 @@
 package com.example.canteen.service;
 
+import com.example.canteen.entity.Store;
 import com.example.canteen.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,14 +35,17 @@ public class BackupSchedulerService {
 
     private final BackupService backupService;
     private final SystemConfigService systemConfigService;
+    private final StoreService storeService;
 
     private volatile CronExpression cronExpression;
     private volatile String currentCron;
     private volatile LocalDateTime nextRun;
 
-    public BackupSchedulerService(BackupService backupService, SystemConfigService systemConfigService) {
+    public BackupSchedulerService(BackupService backupService, SystemConfigService systemConfigService,
+                                  StoreService storeService) {
         this.backupService = backupService;
         this.systemConfigService = systemConfigService;
+        this.storeService = storeService;
     }
 
     /**
@@ -72,6 +76,8 @@ public class BackupSchedulerService {
             LocalDateTime now = LocalDateTime.now();
             if (nextRun != null && !now.isBefore(nextRun)) {
                 doScheduledFullBackup();
+                // 若开启门店级定时备份,为每个门店生成 store 备份
+                doScheduledStoreBackups();
                 nextRun = cronExpression.next(now);
             }
         } catch (Exception e) {
@@ -129,6 +135,86 @@ public class BackupSchedulerService {
         for (int i = 0; i < toDelete; i++) {
             if (!autoBackups[i].delete()) {
                 log.warn("清理旧备份失败: {}", autoBackups[i].getName());
+            }
+        }
+    }
+
+    /**
+     * 门店级定时备份:遍历所有门店,为每个门店生成 store 级备份。
+     * 受 sys_config 的 backup_auto_store_enabled 控制(默认关闭)。
+     * 单个门店备份失败不中断其它门店。
+     */
+    private void doScheduledStoreBackups() {
+        boolean storeEnabled = systemConfigService.getBoolConfig("backup_auto_store_enabled", false);
+        if (!storeEnabled) return;
+
+        List<Store> stores;
+        try {
+            stores = storeService.getAllStores();
+        } catch (Exception e) {
+            log.warn("门店级定时备份:获取门店列表失败: {}", e.getMessage());
+            return;
+        }
+        if (stores == null || stores.isEmpty()) return;
+
+        for (Store store : stores) {
+            Long storeId = store.getId();
+            if (storeId == null) continue;
+            try {
+                Map<String, List<Map<String, Object>>> data = backupService.exportData("store", storeId);
+                Map<String, Object> document = new LinkedHashMap<>();
+                document.put("version", BackupConstants.FORMAT_VERSION);
+                document.put("type", "store");
+                document.put("storeId", storeId);
+                document.put("storeName", store.getName());
+                document.put("createdAt", LocalDateTime.now().toString());
+                document.put("createdBy", "scheduler");
+                int totalRows = 0;
+                List<String> tableNames = new ArrayList<>();
+                for (Map.Entry<String, List<Map<String, Object>>> e : data.entrySet()) {
+                    tableNames.add(e.getKey());
+                    totalRows += e.getValue().size();
+                }
+                document.put("tableNames", tableNames);
+                document.put("tableCount", tableNames.size());
+                document.put("totalRows", totalRows);
+                document.put("data", data);
+                String fileName = backupService.generateBackupFileName("store" + storeId + "_auto");
+                backupService.writeBackupDocument(document, fileName);
+            } catch (Exception e) {
+                log.warn("门店 {} 定时备份失败: {}", storeId, e.getMessage());
+            }
+        }
+
+        // 清理超出保留份数的门店自动备份
+        cleanupStoreAutoBackups();
+    }
+
+    /** 按门店分组清理超出 backup_keep_copies 的门店自动备份。 */
+    private void cleanupStoreAutoBackups() {
+        int keepCopies = systemConfigService.getIntConfig("backup_keep_copies", 30);
+        if (keepCopies <= 0) return;
+        File dir = backupService.ensureBackupDir();
+        File[] all = dir.listFiles((d, name) ->
+                name.startsWith("store") && name.endsWith("_auto.json.gz"));
+        if (all == null || all.length == 0) return;
+
+        // 按门店前缀分组
+        Map<String, List<File>> byStore = new LinkedHashMap<>();
+        for (File f : all) {
+            String name = f.getName();
+            int idx = name.indexOf("_auto.json.gz");
+            if (idx < 0) continue;
+            String prefix = name.substring(0, idx);
+            byStore.computeIfAbsent(prefix, k -> new ArrayList<>()).add(f);
+        }
+        for (List<File> files : byStore.values()) {
+            if (files.size() <= keepCopies) continue;
+            files.sort(Comparator.comparingLong(File::lastModified));
+            for (int i = 0; i < files.size() - keepCopies; i++) {
+                if (!files.get(i).delete()) {
+                    log.warn("清理门店旧备份失败: {}", files.get(i).getName());
+                }
             }
         }
     }

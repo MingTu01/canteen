@@ -9,4 +9,28 @@
         UPDATE dish SET stock = stock - #{qty}, updated_at = NOW()
         WHERE id = #{id} AND (stock IS NULL OR stock >= #{qty}) AND is_deleted = 0
     </update>
+
+    <!-- 回收站查询:查 is_deleted=1 的菜品。
+         需用自定义 SQL 绕过 MyBatis-Plus 逻辑删除拦截器
+         (拦截器会给 selectPage 自动追加 is_deleted=0,导致查不到已删除记录)。 -->
+    <select id="selectTrashByStoreId" resultType="com.example.canteen.entity.Dish">
+        SELECT * FROM dish WHERE store_id = #{storeId} AND is_deleted = 1 ORDER BY id DESC
+    </select>
+
+    <!-- 回收站计数 -->
+    <select id="countTrashByStoreId" resultType="long">
+        SELECT COUNT(*) FROM dish WHERE store_id = #{storeId} AND is_deleted = 1
+    </select>
+
+    <!-- 彻底删除:物理删除已放入回收站的菜品。
+         deleteById 在逻辑删除模式下会变成 UPDATE SET is_deleted=1,
+         对已经是 is_deleted=1 的记录无效,需用自定义 DELETE。 -->
+    <delete id="purgeById">
+        DELETE FROM dish WHERE id = #{id} AND is_deleted = 1
+    </delete>
+
+    <!-- 按 ID 查询已删除的菜品(绕过逻辑删除拦截器),供恢复/彻底删除前校验用 -->
+    <select id="selectDeletedById" resultType="com.example.canteen.entity.Dish">
+        SELECT * FROM dish WHERE id = #{id} AND is_deleted = 1 LIMIT 1
+    </select>
 </mapper>

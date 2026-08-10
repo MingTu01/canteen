@@ -39,8 +39,10 @@ import { compressImage } from '@/utils/imageCompress'
 const authStore = useAuthStore()
 // 超管未选择食堂时返回 null,不再静默回退到 storeId=1
 const sid = computed(() => authStore.storeId || null)
+// 超管全局视图:未选择食堂时查看所有门店员工
+const isGlobalView = computed(() => authStore.isSuperAdmin && !sid.value)
 
-type EmployeeRow = Employee & { departmentName?: string }
+type EmployeeRow = Employee & { departmentName?: string; storeName?: string }
 
 const keyword = ref('')
 const departmentId = ref<number | undefined>(undefined)
@@ -53,6 +55,17 @@ const deptName = (id?: number) => departments.value.find((d) => d.id === id)?.na
 
 const { list: employees, loading, fetchList, handleDelete, dialogVisible, dialogLoading, isEdit } = useCrud<Employee>({
   list: async () => {
+    // 超管未选择食堂:调用 /all 接口查看所有门店员工
+    if (isGlobalView.value) {
+      const res = await employeeApi.listAll({
+        page: page.value,
+        size: size.value,
+        keyword: keyword.value,
+        departmentId: departmentId.value,
+      })
+      total.value = res.total ?? res.records.length
+      return res.records as EmployeeRow[]
+    }
     const sidVal = sid.value
     if (!sidVal) return []
     const res = await employeeApi.list({
@@ -334,7 +347,10 @@ const handleImportFile = async (file: UploadFile) => {
     const res = await employeeApi.batchImport(sid.value ?? 0, employees)
     importResult.value = res
     if (res.failed === 0) {
-      ElMessage.success(`导入成功,共 ${res.success} 条`)
+      const parts = [`成功 ${res.success} 条`]
+      if (res.created != null) parts.push(`新增 ${res.created} 条`)
+      if (res.updated != null) parts.push(`更新 ${res.updated} 条`)
+      ElMessage.success(`导入完成：${parts.join('，')}`)
     } else {
       ElMessage.warning(`导入完成: 成功 ${res.success} 条, 失败 ${res.failed} 条`)
     }
@@ -645,17 +661,22 @@ const onPhotoImportClose = () => {
   <Layout>
     <PageContainer title="员工管理" description="维护员工信息、部门归属与账户余额">
       <template #actions>
-        <ElButton :icon="Download" @click="handleDownloadTemplate">下载模板</ElButton>
         <ElButton :icon="Upload" @click="openImportDialog">导入员工</ElButton>
         <ElButton v-if="sid" :icon="ImagePlus" @click="openPhotoImport">批量照片</ElButton>
         <ElButton v-if="sid" :icon="AlertTriangle" type="danger" @click="openLowBalance">余额预警</ElButton>
         <ElButton v-if="sid" :icon="FileSpreadsheet" :loading="exportLoading" @click="handleExport">导出</ElButton>
         <ElButton v-if="sid" type="warning" :icon="Wallet" @click="openBatchRecharge">批量充值</ElButton>
-        <ElButton type="primary" :icon="Plus" @click="openAdd">添加员工</ElButton>
+        <ElButton v-if="sid" type="primary" :icon="Plus" @click="openAdd">添加员工</ElButton>
       </template>
 
       <div
-        v-if="!sid"
+        v-if="isGlobalView"
+        class="mb-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-700"
+      >
+        当前为全局视图,展示所有门店员工。选择具体食堂可查看单店数据。
+      </div>
+      <div
+        v-else-if="!sid"
         class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700"
       >
         请先选择食堂后再查看数据。
@@ -671,11 +692,13 @@ const onPhotoImportClose = () => {
           @keyup.enter="handleSearch"
         />
         <ElSelect
+          v-if="sid"
           v-model="departmentId"
           placeholder="全部部门"
           clearable
           style="width: 160px"
           aria-label="筛选部门"
+          @change="handleSearch"
         >
           <ElOption v-for="d in departments" :key="d.id" :label="d.name" :value="d.id!" />
         </ElSelect>
@@ -715,6 +738,11 @@ const onPhotoImportClose = () => {
             </template>
           </ElTableColumn>
           <ElTableColumn prop="name" label="姓名" min-width="120" align="left" header-align="left" />
+          <ElTableColumn v-if="isGlobalView" label="门店" min-width="120" align="left" header-align="left">
+            <template #default="{ row }">
+              {{ row.storeName || '—' }}
+            </template>
+          </ElTableColumn>
           <ElTableColumn label="部门" min-width="120" align="left" header-align="left">
             <template #default="{ row }">
               {{ row.departmentName || deptName(row.departmentId) || '—' }}
@@ -926,6 +954,7 @@ const onPhotoImportClose = () => {
               <li>请先下载模板，按模板格式填写员工信息。</li>
               <li>表头：卡号 / 手机号 / 姓名 / 部门名称 / 初始余额 / 密码 / 状态（启用/禁用）/ 头像URL。</li>
               <li>部门名称需与门店已有部门一致，否则该字段会被忽略。</li>
+              <li><b>重复导入可用于批量更新</b>：按姓名匹配同门店已有员工，自动更新卡号/手机号/密码/部门（有变化才更新，无变化则跳过）。</li>
               <li>卡号在同门店内必须唯一，重复行会被跳过并记录。</li>
               <li>手机号同门店内唯一,留空则该员工无法用手机号登录(H5/小程序)。</li>
               <li>密码留空默认为 <code class="rounded bg-bg-tertiary px-1">12345678</code>。</li>
@@ -949,6 +978,8 @@ const onPhotoImportClose = () => {
           <div v-if="importResult" class="rounded-lg border border-border p-4">
             <div class="mb-2 flex items-center gap-4 text-sm">
               <span class="text-success">成功：{{ importResult.success }} 条</span>
+              <span v-if="importResult.created != null" class="text-primary">新增：{{ importResult.created }} 条</span>
+              <span v-if="importResult.updated != null" class="text-warning">更新：{{ importResult.updated }} 条</span>
               <span class="text-danger">失败：{{ importResult.failed }} 条</span>
             </div>
             <ElTable

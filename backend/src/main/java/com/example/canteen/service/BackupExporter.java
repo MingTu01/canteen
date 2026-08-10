@@ -106,7 +106,7 @@ public class BackupExporter {
         if (row == null) return;
         for (String col : FULL_REDACT_COLUMNS) {
             if (row.containsKey(col) && row.get(col) != null) {
-                row.put(col, "***REDACTED***");
+                row.put(col, BackupConstants.REDACTED_PLACEHOLDER);
             }
         }
     }

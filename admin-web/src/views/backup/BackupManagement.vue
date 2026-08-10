@@ -176,10 +176,17 @@ const restoreBackup = async (backup: BackupInfo) => {
   restoring.value = backup.name
   try {
     const res = await backupApi.restore(backup.name)
-    const r = res as { restoredRows?: number; restoredTables?: string[] }
+    const r = res as { restoredRows?: number; restoredTables?: string[]; redactedAdminsSkipped?: number }
     ElMessage.success(
       `数据恢复成功${r.restoredRows != null ? `(共 ${r.restoredRows} 行 / ${(r.restoredTables || []).length} 表)` : ''},即将刷新页面`
     )
+    if (r.redactedAdminsSkipped) {
+      ElMessageBox.alert(
+        `${r.redactedAdminsSkipped} 个管理员账号因密码敏感脱敏未随备份恢复,当前无法登录。请通过部署脚本重置超管密码后再登录。`,
+        '管理员账号提醒',
+        { confirmButtonText: '知道了', type: 'warning' }
+      )
+    }
     setTimeout(() => window.location.reload(), 1500)
   } catch {
     /* 拦截器提示 */
@@ -239,6 +246,7 @@ const importResult = ref<{
   imported: boolean
   restored?: boolean
   restoredRows?: number
+  redactedAdminsSkipped?: number
 } | null>(null)
 
 const openImportDialog = () => {
@@ -286,6 +294,7 @@ const configDialogVisible = ref(false)
 const configSaving = ref(false)
 const configForm = ref({
   backup_auto_enabled: true,
+  backup_auto_store_enabled: false,
   backup_keep_copies: 30,
   backup_keep_days: 30,
   backup_cron: '0 0 2 * * ?',
@@ -311,6 +320,7 @@ const fetchBackupConfig = async () => {
     const list = await systemApi.config()
     configForm.value = {
       backup_auto_enabled: getBool(list, 'backup_auto_enabled', true),
+      backup_auto_store_enabled: getBool(list, 'backup_auto_store_enabled', false),
       backup_keep_copies: getNum(list, 'backup_keep_copies', 30),
       backup_keep_days: getNum(list, 'backup_keep_days', 30),
       backup_cron: getStr(list, 'backup_cron', '0 0 2 * * ?'),
@@ -330,6 +340,7 @@ const saveBackupConfig = async () => {
   try {
     await systemApi.batchUpdateConfig([
       { key: 'backup_auto_enabled', value: String(configForm.value.backup_auto_enabled) },
+      { key: 'backup_auto_store_enabled', value: String(configForm.value.backup_auto_store_enabled) },
       { key: 'backup_keep_copies', value: String(configForm.value.backup_keep_copies) },
       { key: 'backup_keep_days', value: String(configForm.value.backup_keep_days) },
       { key: 'backup_cron', value: configForm.value.backup_cron },
@@ -589,6 +600,12 @@ const saveBackupConfig = async () => {
               已恢复 {{ importResult.restoredRows ?? 0 }} 行
             </span>
           </div>
+          <div
+            v-if="importResult.restored && importResult.redactedAdminsSkipped"
+            class="mt-2 rounded bg-warning/10 px-3 py-2 text-xs text-warning"
+          >
+            有 {{ importResult.redactedAdminsSkipped }} 个管理员账号因密码脱敏未随备份恢复,需通过部署脚本重置密码后登录。
+          </div>
           <div class="text-xs text-text-muted">文件名:{{ importResult.name }}</div>
         </div>
       </div>
@@ -617,6 +634,10 @@ const saveBackupConfig = async () => {
       <ElForm :model="configForm" label-width="140px" label-position="right">
         <ElFormItem label="启用定时备份">
           <ElSwitch v-model="configForm.backup_auto_enabled" />
+        </ElFormItem>
+        <ElFormItem label="门店级定时备份">
+          <ElSwitch v-model="configForm.backup_auto_store_enabled" />
+          <span class="ml-3 text-xs text-text-muted">开启后随定时备份为每个门店额外生成门店级备份</span>
         </ElFormItem>
         <ElFormItem label="备份保留份数">
           <ElInputNumber v-model="configForm.backup_keep_copies" :min="1" :max="365" />

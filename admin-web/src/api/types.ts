@@ -198,6 +198,10 @@ export interface Employee {
   name: string
   avatar?: string
   departmentId?: number
+  /** 部门名称(后端填充,非持久化) */
+  departmentName?: string
+  /** 门店名称(超管全局视图时填充,非持久化) */
+  storeName?: string
   balance?: number
   status?: number
   password?: string

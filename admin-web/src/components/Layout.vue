@@ -106,7 +106,7 @@ const menuItems: MenuItem[] = [
   { path: '/settlement', name: '关店对账', icon: CalendarCheck, roles: [1, 2, 4, 6] },
   { path: '/recharge', name: '充值记录', icon: Wallet, roles: [1, 2, 4, 6] },
   { path: '/store', name: '食堂管理', icon: StoreIcon, roles: [1] },
-  { path: '/admin', name: '账号管理', icon: UserCog, roles: [1, 2] },
+  { path: '/admin', name: '账号管理', icon: UserCog, roles: [1] },
   { path: '/settings', name: '系统设置', icon: Settings, roles: [1] },
   { path: '/backup', name: '备份恢复', icon: DatabaseBackup, roles: [1, 2] },
   { path: '/operation-log', name: '操作日志', icon: FileText, roles: [1, 2] },

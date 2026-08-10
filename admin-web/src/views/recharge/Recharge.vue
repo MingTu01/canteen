@@ -208,6 +208,7 @@ onMounted(() => {
           clearable
           filterable
           style="width: 180px"
+          @change="handleSearch"
         >
           <ElOption
             v-for="emp in employees"
@@ -224,6 +225,7 @@ onMounted(() => {
           start-placeholder="开始"
           end-placeholder="结束"
           style="width: 220px"
+          @change="handleSearch"
         />
       </SearchBar>
 

@@ -106,19 +106,21 @@ public class RestoreService {
 
         // 按顺序插入
         int restoredRows = 0;
+        int redactedAdminsSkipped = 0;
         List<String> restoredTables = new ArrayList<>();
         for (String table : BackupConstants.TABLES_IN_ORDER) {
             List<Map<String, Object>> rows = data.get(table);
             if (rows == null || rows.isEmpty()) continue;
             // P0-5 门店备份恢复时跳过 store 表插入(store 记录不删除,直接插入会主键冲突)
             if (!"full".equals(type) && "store".equals(table)) continue;
-            insertRows(table, rows);
-            restoredRows += rows.size();
+            int[] counts = insertRows(table, rows);
+            restoredRows += counts[0];
+            redactedAdminsSkipped += counts[1];
             restoredTables.add(table);
         }
 
         // 恢复后只读校验:关键表行数应与备份声明一致(不一致则抛异常回滚事务)
-        verifyRestoredData(document, data);
+        verifyRestoredData(document, data, redactedAdminsSkipped);
 
         // 恢复成功后清理 Redis 缓存(dish/menu),避免前端读到旧数据
         // 全库恢复清理所有门店缓存;门店恢复只清理该门店缓存
@@ -131,6 +133,7 @@ public class RestoreService {
         result.put("storeName", document.get("storeName"));
         result.put("restoredTables", restoredTables);
         result.put("restoredRows", restoredRows);
+        result.put("redactedAdminsSkipped", redactedAdminsSkipped);
         result.put("preRestoreSnapshot", snapshotName);
         return result;
     }
@@ -171,11 +174,16 @@ public class RestoreService {
      * 不一致则抛异常,触发事务回滚。
      */
     private void verifyRestoredData(Map<String, Object> document,
-                                    Map<String, List<Map<String, Object>>> data) {
+                                    Map<String, List<Map<String, Object>>> data,
+                                    int redactedAdminsSkipped) {
         String type = (String) document.getOrDefault("type", "full");
         for (Map.Entry<String, List<Map<String, Object>>> e : data.entrySet()) {
             String table = e.getKey();
             int expected = e.getValue().size();
+            // 脱敏 admin 行被跳过,admin 表预期行数相应减少
+            if ("admin".equals(table)) {
+                expected -= redactedAdminsSkipped;
+            }
             // P0-5 门店备份恢复时跳过 store 表校验(store 记录不删除,全表总数不匹配)
             if (!"full".equals(type) && "store".equals(table)) continue;
             int actual;
@@ -218,9 +226,12 @@ public class RestoreService {
         // store 表本身不删(门店记录保留)
     }
 
-    /** 批量插入行。动态构建 INSERT,保留备份中的原始值(含 id)。 */
-    private void insertRows(String table, List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) return;
+    /**
+     * 批量插入行。动态构建 INSERT,保留备份中的原始值(含 id)。
+     * 返回 [插入行数, 因敏感脱敏跳过的 admin 行数]。
+     */
+    private int[] insertRows(String table, List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) return new int[]{0, 0};
         // 取列名(以第一行为准)
         Map<String, Object> first = rows.get(0);
         List<String> columns = new ArrayList<>(first.keySet());
@@ -243,7 +254,16 @@ public class RestoreService {
         sql.append(")");
 
         List<Object[]> batchArgs = new ArrayList<>();
+        int skipped = 0;
         for (Map<String, Object> row : rows) {
+            // 脱敏 admin 行跳过:password 为占位符时说明该账号密码未随备份导出,
+            // 直接写入会得到无效密码导致无法登录。跳过该行,由部署脚本(INIT_ADMIN_*)或
+            // 后续管理员重置密码重建,避免恢复出不可登录账号。
+            if ("admin".equals(table)
+                    && BackupConstants.REDACTED_PLACEHOLDER.equals(row.get("password"))) {
+                skipped++;
+                continue;
+            }
             // P0-3 对 admin 表的 role 字段做 clamp:不低于调用者角色(防注入超管)
             if (clampAdminRole && row.containsKey("role")) {
                 Object roleObj = row.get("role");
@@ -263,7 +283,12 @@ public class RestoreService {
             }
             batchArgs.add(args);
         }
-        jdbcTemplate.batchUpdate(sql.toString(), batchArgs);
+        int inserted = 0;
+        if (!batchArgs.isEmpty()) {
+            int[] counts = jdbcTemplate.batchUpdate(sql.toString(), batchArgs);
+            for (int c : counts) inserted += c;
+        }
+        return new int[]{inserted, skipped};
     }
 
     /**
