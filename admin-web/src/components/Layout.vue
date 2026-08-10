@@ -241,7 +241,7 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-1.5">
           <StoreIcon class="h-3.5 w-3.5 shrink-0 text-text-muted" />
           <span class="truncate text-xs text-text-muted">
-            {{ currentStore ? currentStore.name : '全局视图' }}
+            {{ currentStore ? currentStore.name : '未选择食堂' }}
           </span>
           <router-link to="/store" class="ml-auto shrink-0 text-xs text-primary hover:underline">
             切换
@@ -307,7 +307,7 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-1.5">
             <StoreIcon class="h-3.5 w-3.5 shrink-0 text-text-muted" />
             <span class="truncate text-xs text-text-muted">
-              {{ currentStore ? currentStore.name : '全局视图' }}
+              {{ currentStore ? currentStore.name : '未选择食堂' }}
             </span>
             <router-link to="/store" class="ml-auto shrink-0 text-xs text-primary hover:underline">
               切换

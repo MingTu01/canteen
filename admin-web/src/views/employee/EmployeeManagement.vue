@@ -39,8 +39,6 @@ import { compressImage } from '@/utils/imageCompress'
 const authStore = useAuthStore()
 // 超管未选择食堂时返回 null,不再静默回退到 storeId=1
 const sid = computed(() => authStore.storeId || null)
-// 超管全局视图:未选择食堂时查看所有门店员工
-const isGlobalView = computed(() => authStore.isSuperAdmin && !sid.value)
 
 type EmployeeRow = Employee & { departmentName?: string; storeName?: string }
 
@@ -55,17 +53,6 @@ const deptName = (id?: number) => departments.value.find((d) => d.id === id)?.na
 
 const { list: employees, loading, fetchList, handleDelete, dialogVisible, dialogLoading, isEdit } = useCrud<Employee>({
   list: async () => {
-    // 超管未选择食堂:调用 /all 接口查看所有门店员工
-    if (isGlobalView.value) {
-      const res = await employeeApi.listAll({
-        page: page.value,
-        size: size.value,
-        keyword: keyword.value,
-        departmentId: departmentId.value,
-      })
-      total.value = res.total ?? res.records.length
-      return res.records as EmployeeRow[]
-    }
     const sidVal = sid.value
     if (!sidVal) return []
     const res = await employeeApi.list({
@@ -670,13 +657,7 @@ const onPhotoImportClose = () => {
       </template>
 
       <div
-        v-if="isGlobalView"
-        class="mb-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-700"
-      >
-        当前为全局视图,展示所有门店员工。选择具体食堂可查看单店数据。
-      </div>
-      <div
-        v-else-if="!sid"
+        v-if="!sid"
         class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700"
       >
         请先选择食堂后再查看数据。
@@ -738,11 +719,6 @@ const onPhotoImportClose = () => {
             </template>
           </ElTableColumn>
           <ElTableColumn prop="name" label="姓名" min-width="120" align="left" header-align="left" />
-          <ElTableColumn v-if="isGlobalView" label="门店" min-width="120" align="left" header-align="left">
-            <template #default="{ row }">
-              {{ row.storeName || '—' }}
-            </template>
-          </ElTableColumn>
           <ElTableColumn label="部门" min-width="120" align="left" header-align="left">
             <template #default="{ row }">
               {{ row.departmentName || deptName(row.departmentId) || '—' }}

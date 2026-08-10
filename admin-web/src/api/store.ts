@@ -21,7 +21,7 @@ export const storeApi = {
     api.put<Store>(`/store/${id}/branding`, data).then((r) => r.data),
   /** 获取当前登录用户所属食堂 */
   getCurrent: () => api.get<Store | null>('/store/current').then((r) => r.data),
-  /** 超管切换当前管理食堂(重签 token,targetStoreId=0 回到全局视图) */
+  /** 超管切换当前管理食堂(重签 token,必须指定具体食堂 ID) */
   switchTo: (id: number) =>
     api.post<SwitchStoreResult>(`/store/${id}/switch`).then((r) => r.data),
 }

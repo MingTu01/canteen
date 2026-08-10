@@ -7,6 +7,7 @@ import com.example.canteen.entity.Admin;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.exception.SecurityException;
 import com.example.canteen.mapper.AdminMapper;
+import com.example.canteen.mapper.StoreMapper;
 import com.example.canteen.security.JwtAuthenticationFilter;
 import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.LoginRateLimiter;
@@ -22,13 +23,15 @@ import java.util.Map;
 @Service
 public class AdminService {
     private final AdminMapper adminMapper;
+    private final StoreMapper storeMapper;
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordEncoder passwordEncoder;
     private final LoginRateLimiter rateLimiter;
 
-    public AdminService(AdminMapper adminMapper, JwtTokenProvider jwtTokenProvider,
+    public AdminService(AdminMapper adminMapper, StoreMapper storeMapper, JwtTokenProvider jwtTokenProvider,
                         PasswordEncoder passwordEncoder, JwtAuthenticationFilter jwtFilter) {
         this.adminMapper = adminMapper;
+        this.storeMapper = storeMapper;
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordEncoder = passwordEncoder;
         this.rateLimiter = jwtFilter.getRateLimiter();
@@ -53,6 +56,19 @@ public class AdminService {
         }
 
         rateLimiter.recordSuccess(username);
+
+        // 门店管理员(role=2)校验所属食堂是否存在且未删除
+        // 修复 BUG:删除食堂后若 admin.store_id 残留旧值,管理员仍可登录并操作孤儿数据
+        if (admin.getRole() != null && admin.getRole() == 2) {
+            Long storeId = admin.getStoreId();
+            if (storeId == null || storeId <= 0) {
+                throw new BusinessException("账号未绑定有效食堂,请联系超管");
+            }
+            if (storeMapper.selectById(storeId) == null) {
+                throw new BusinessException("所属食堂已被删除,账号已失效,请联系超管");
+            }
+        }
+
         String token = jwtTokenProvider.generateToken(admin);
 
         Map<String, Object> result = new HashMap<>();

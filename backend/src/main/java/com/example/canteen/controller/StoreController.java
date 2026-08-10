@@ -208,21 +208,20 @@ public class StoreController {
      * 超管切换"当前管理食堂"。
      * 实现方式:重签 JWT token,把 storeId 设为目标食堂,role 保持 1(超管)。
      * 这样超管既能跨店权限,又能锁定当前管理食堂的数据视图。
-     * targetStoreId=0 表示回到"全局视图"(不锁定具体食堂)。
+     * 已移除全局视图:必须指定具体食堂 ID,不允许切换到 storeId=0。
      */
     @PostMapping("/{id}/switch")
     public ApiResponse<Map<String, Object>> switchStore(@PathVariable Long id,
                                                          HttpServletRequest httpRequest,
                                                          HttpServletResponse httpResponse) {
         SecurityContext.checkSuperAdmin("仅超级管理员可切换管理食堂");
-        Long targetStoreId = id.equals(0L) ? 0L : id;
+        if (id == null || id <= 0) {
+            throw new BusinessException("请选择具体的食堂进行管理");
+        }
 
-        // 校验目标食堂存在(0 表示全局视图,跳过校验)
-        if (targetStoreId != 0L) {
-            Store store = storeService.getStoreById(targetStoreId);
-            if (store == null) {
-                throw new BusinessException("食堂不存在");
-            }
+        Store store = storeService.getStoreById(id);
+        if (store == null) {
+            throw new BusinessException("食堂不存在");
         }
 
         // 从 DB 查 admin,临时修改 storeId 后重签 token(不保存到 DB)
@@ -234,21 +233,16 @@ public class StoreController {
         if (admin == null) {
             throw new BusinessException("管理员不存在");
         }
-        admin.setStoreId(targetStoreId);
+        admin.setStoreId(id);
         String newToken = jwtTokenProvider.generateToken(admin);
 
         // 写入 Cookie
         authCookieUtil.setAuthCookie(httpResponse, newToken, httpRequest);
 
         Map<String, Object> result = new HashMap<>();
-        result.put("storeId", targetStoreId);
+        result.put("storeId", id);
         result.put("token", newToken);
-        if (targetStoreId != 0L) {
-            Store store = storeService.getStoreById(targetStoreId);
-            result.put("storeName", store != null ? store.getName() : null);
-        } else {
-            result.put("storeName", "全局视图");
-        }
+        result.put("storeName", store.getName());
         return ApiResponse.success(result);
     }
 

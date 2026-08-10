@@ -49,9 +49,6 @@ export interface EmployeeExportQuery {
 export const employeeApi = {
   list: (params: EmployeeQuery) =>
     api.get<PageResult<Employee>>(`/employee/store/${params.storeId}`, { params }).then((r) => r.data),
-  /** 超管全局视图:查看所有门店员工 */
-  listAll: (params: Omit<EmployeeQuery, 'storeId'> & { storeId?: number }) =>
-    api.get<PageResult<Employee>>('/employee/all', { params }).then((r) => r.data),
   detail: (id: number) => api.get<Employee>(`/employee/${id}`).then((r) => r.data),
   getByCardNo: (cardNo: string) =>
     api.get<Employee>(`/employee/card/${cardNo}`).then((r) => r.data),

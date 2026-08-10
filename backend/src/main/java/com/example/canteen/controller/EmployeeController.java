@@ -9,7 +9,6 @@ import com.example.canteen.dto.EmployeeVO;
 import com.example.canteen.entity.Department;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.mapper.EmployeeMapper;
-import com.example.canteen.mapper.StoreMapper;
 import com.example.canteen.security.SecurityContext;
 import com.example.canteen.service.EmployeeService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,15 +42,13 @@ import java.util.stream.Collectors;
 public class EmployeeController {
     private final EmployeeService employeeService;
     private final EmployeeMapper employeeMapper;
-    private final StoreMapper storeMapper;
 
     @Autowired
     private ObjectMapper objectMapper;
 
-    public EmployeeController(EmployeeService employeeService, EmployeeMapper employeeMapper, StoreMapper storeMapper) {
+    public EmployeeController(EmployeeService employeeService, EmployeeMapper employeeMapper) {
         this.employeeService = employeeService;
         this.employeeMapper = employeeMapper;
-        this.storeMapper = storeMapper;
     }
 
     @GetMapping("/store/{storeId}")
@@ -88,71 +85,6 @@ public class EmployeeController {
             EmployeeVO vo = EmployeeVO.from(e);
             if (e.getDepartmentId() != null) {
                 vo.setDepartmentName(deptNameMap.getOrDefault(e.getDepartmentId(), null));
-            }
-            return vo;
-        }).collect(Collectors.toList());
-        Map<String, Object> result = new HashMap<>();
-        result.put("records", voList);
-        result.put("total", p.getTotal());
-        result.put("page", page);
-        result.put("size", size);
-        return ApiResponse.success(result);
-    }
-
-    /**
-     * 超管查看所有门店员工(全局视图)。
-     * 支持按 keyword / departmentId / storeId(可选) 筛选。
-     */
-    @GetMapping("/all")
-    public ApiResponse<Map<String, Object>> getAllEmployees(@RequestParam(defaultValue = "1") int page,
-                                                             @RequestParam(defaultValue = "10") int size,
-                                                             @RequestParam(required = false) String keyword,
-                                                             @RequestParam(required = false) Long departmentId,
-                                                             @RequestParam(required = false) Long storeId) {
-        if (!SecurityContext.isSuperAdmin()) {
-            throw new com.example.canteen.exception.SecurityException("仅超级管理员可查看全部员工");
-        }
-        LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<Employee>()
-                .eq(Employee::getIsDeleted, 0);
-        if (storeId != null) {
-            wrapper.eq(Employee::getStoreId, storeId);
-        }
-        if (keyword != null && !keyword.isBlank()) {
-            wrapper.and(w -> w.like(Employee::getName, keyword)
-                    .or().like(Employee::getCardNo, keyword));
-        }
-        if (departmentId != null) {
-            wrapper.eq(Employee::getDepartmentId, departmentId);
-        }
-        wrapper.orderByDesc(Employee::getId);
-        IPage<Employee> p = employeeMapper.selectPage(new Page<>(page, size), wrapper);
-        // 预加载所有门店的部门名称映射
-        Map<Long, String> deptNameMap = new HashMap<>();
-        List<com.example.canteen.entity.Store> stores = storeMapper.selectList(null);
-        if (stores != null) {
-            for (com.example.canteen.entity.Store s : stores) {
-                List<Department> depts = employeeService.getDepartmentsByStore(s.getId());
-                if (depts != null) {
-                    for (Department d : depts) {
-                        deptNameMap.put(d.getId(), d.getName());
-                    }
-                }
-            }
-        }
-        // 门店名称映射
-        Map<Long, String> storeNameMap = new HashMap<>();
-        if (stores != null) {
-            for (com.example.canteen.entity.Store s : stores) {
-                storeNameMap.put(s.getId(), s.getName());
-            }
-        }
-        List<EmployeeVO> voList = p.getRecords().stream().map(e -> {
-            EmployeeVO vo = EmployeeVO.from(e);
-            if (e.getDepartmentId() != null) {
-                vo.setDepartmentName(deptNameMap.getOrDefault(e.getDepartmentId(), null));
-            }
-            if (e.getStoreId() != null) {
-                vo.setStoreName(storeNameMap.getOrDefault(e.getStoreId(), null));
             }
             return vo;
         }).collect(Collectors.toList());
