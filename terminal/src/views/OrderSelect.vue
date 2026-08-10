@@ -228,6 +228,15 @@ const availableSet = computed(() => {
   return s
 })
 
+/** 已订餐日期集合(status=1 的已下单订单日期,用于 DatePicker 蓝点标记) */
+const orderedDateSet = computed(() => {
+  const s = new Set<string>()
+  for (const o of orderedOrders.value) {
+    if (o.date && o.status === 1) s.add(o.date)
+  }
+  return s
+})
+
 /** 当日菜单按餐别排序 */
 const mealSections = computed(() => {
   const menus = selectedDate.value ? menuCache.value[selectedDate.value] || [] : []
@@ -416,6 +425,7 @@ watch(menuInvalidated, (v) => {
             :dates="allDates"
             :selected-date="selectedDate"
             :available-set="availableSet"
+            :marked-set="orderedDateSet"
             @select="onSelectDate"
           />
         </template>

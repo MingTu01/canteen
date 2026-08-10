@@ -13,6 +13,8 @@
  *   dates: 日期字符串数组(yyyy-MM-dd),决定哪些日期在范围内
  *   selectedDate: 当前选中的日期
  *   availableSet: 可选日期集合(Set<string>)
+ *   markedSet: 已订餐日期集合(Set<string>),这些日期下方显示蓝色圆点标记;
+ *              未传时回退到 availableSet(向后兼容)
  */
 import { ref, computed, watch, nextTick } from 'vue'
 import { parseDateKey, relativeLabel, pad2, toDateKey } from '@/utils'
@@ -24,14 +26,16 @@ interface DateCell {
   rel: string
   available: boolean
   inDates: boolean
+  marked: boolean
   isPlaceholder: boolean
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   dates: string[]
   selectedDate: string
   availableSet: Set<string>
-}>()
+  markedSet?: Set<string>
+}>(), {})
 
 const emit = defineEmits<{ (e: 'select', key: string): void }>()
 
@@ -71,8 +75,10 @@ const grid = computed<DateCell[]>(() => {
   const cells: DateCell[] = []
 
   for (let i = 0; i < leadPlaceholders; i++) {
-    cells.push({ key: `ph-${i}`, md: '', rel: '', available: false, inDates: false, isPlaceholder: true })
+    cells.push({ key: `ph-${i}`, md: '', rel: '', available: false, inDates: false, marked: false, isPlaceholder: true })
   }
+  // markedSet 未传时回退到 availableSet(向后兼容:订单查询页 availableSet 即已订餐日期)
+  const markedSet = props.markedSet ?? props.availableSet
   for (let day = 1; day <= daysInMonth; day++) {
     const key = `${y}-${pad2(m)}-${pad2(day)}`
     cells.push({
@@ -81,11 +87,12 @@ const grid = computed<DateCell[]>(() => {
       rel: relativeLabel(key),
       available: props.availableSet.has(key),
       inDates: datesSet.value.has(key),
+      marked: markedSet.has(key),
       isPlaceholder: false,
     })
   }
   while (cells.length % 7 !== 0) {
-    cells.push({ key: `ph-end-${cells.length}`, md: '', rel: '', available: false, inDates: false, isPlaceholder: true })
+    cells.push({ key: `ph-end-${cells.length}`, md: '', rel: '', available: false, inDates: false, marked: false, isPlaceholder: true })
   }
   return cells
 })
@@ -210,6 +217,8 @@ watch(showPicker, (open) => {
                 class="date-cell__label"
                 :class="{ 'date-cell__label--rel': !!it.rel }"
               >{{ it.rel }}</span>
+              <!-- 已订餐蓝色圆点标记 -->
+              <span v-if="it.marked" class="date-cell__dot"></span>
             </template>
           </button>
         </div>
@@ -441,6 +450,20 @@ watch(showPicker, (open) => {
 }
 .date-cell--active .date-cell__label--rel {
   color: var(--doubao-primary-foreground);
+}
+
+/* 已订餐蓝色圆点标记 */
+.date-cell__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--doubao-primary);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+/* 选中态(高亮底色)下圆点改白色,保证对比度 */
+.date-cell--active .date-cell__dot {
+  background: var(--doubao-primary-foreground);
 }
 
 /* 底部提示 */
