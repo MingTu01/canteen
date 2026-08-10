@@ -140,10 +140,8 @@ const handleEnterManage = async (row: Store) => {
   switching.value = row.id
   try {
     const result = await storeApi.switchTo(row.id)
-    // 更新本地 auth store 的 storeId(供 Layout 显示)
-    if (authStore.admin) {
-      authStore.admin.storeId = result.storeId
-    }
+    // 用 switchStore action 整体替换 admin 对象,确保 persist 插件正确持久化
+    authStore.switchStore(result.storeId)
     ElMessage.success(`已切换到「${result.storeName}」`)
     router.push('/dashboard')
   } catch {

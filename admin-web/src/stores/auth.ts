@@ -51,6 +51,18 @@ export const useAuthStore = defineStore('auth', () => {
     admin.value = null
   }
 
+  /**
+   * 超管切换管理食堂:用整体替换 admin 对象的方式更新 storeId,
+   * 确保 Pinia persist 插件正确检测到变化并持久化到 localStorage。
+   * (直接修改 authStore.admin.storeId 的嵌套属性突变可能不被 persist 检测到,
+   *  刷新页面后会从 localStorage 恢复旧值 storeId=0,导致所有页面空白。)
+   */
+  const switchStore = (storeId: number) => {
+    if (!admin.value) return
+    // 整体替换 admin 对象,触发 ref setter + persist 持久化
+    admin.value = { ...admin.value, storeId }
+  }
+
   /** 清空内存状态(供 401 拦截器调用,避免与路由守卫状态不一致)
    *  不再手动 removeItem:persist 插件会自动同步空状态到 localStorage */
   const clearState = () => {
@@ -88,7 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     admin, isLoggedIn, isSuperAdmin, storeId,
-    login, logout, clearState,
+    login, logout, clearState, switchStore,
     hasRole, hasRoleArray,
     canViewFinance, canManageDish, canManageProcurement, canManageSystem, canSettle,
   }
