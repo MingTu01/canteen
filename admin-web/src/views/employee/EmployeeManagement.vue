@@ -30,7 +30,7 @@ import ImageUploader from '@/components/ImageUploader.vue'
 import { useCrud } from '@/composables/useCrud'
 import { useAuthStore } from '@/stores/auth'
 import { employeeApi, departmentApi, rechargeApi, orderApi } from '@/api'
-import type { EmployeeImportRow, LowBalanceStats } from '@/api/employee'
+import type { EmployeeImportResult, EmployeeImportRow, LowBalanceStats } from '@/api/employee'
 import type { Department, Employee, Order, PageResult } from '@/api/types'
 import { COMMON_STATUS, ORDER_STATUS, MEAL_TYPE } from '@/constants/dict'
 import { formatMoney } from '@/utils/money'
@@ -295,7 +295,7 @@ const fetchDepartments = async () => {
 // ===== 批量导入 =====
 const importDialogVisible = ref(false)
 const importLoading = ref(false)
-const importResult = ref<{ success: number; failed: number; errors: Array<{ row: number; cardNo?: string; name?: string; reason: string }> } | null>(null)
+const importResult = ref<EmployeeImportResult | null>(null)
 
 /** 下载导入模板 */
 const handleDownloadTemplate = () => {
