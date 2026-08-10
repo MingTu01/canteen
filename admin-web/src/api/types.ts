@@ -873,6 +873,8 @@ export interface DailyCloseSummary {
   paidCount: number
   completedCount: number
   cancelledCount: number
+  /** 未就餐订单数(超时未核销,已付款未退款) */
+  missedCount?: number
   totalRevenue: number
   totalRefund: number
   rechargeAmount: number
