@@ -244,12 +244,18 @@ cp "$PROJECT_DIR/backend/Dockerfile.runtime" backend/
 # 运行时脚本(仅复制服务器需要的,不含 build.sh / publish.sh)
 # 注意:init-db-user.sh 必须包含,deploy.sh 分阶段启动依赖它创建应用数据库用户
 mkdir -p scripts
-for script in upgrade.sh snapshot.sh backup.sh restore.sh clean-redeploy.sh init-db-user.sh cron_backup.sh; do
+for script in upgrade.sh snapshot.sh backup.sh restore.sh clean-redeploy.sh init-db-user.sh cron_backup.sh cron_self_heal.sh; do
     if [ -f "$PROJECT_DIR/scripts/$script" ]; then
         cp "$PROJECT_DIR/scripts/$script" scripts/
         chmod +x "scripts/$script"
     fi
 done
+
+# Python 自愈脚本(self_heal.py 由 canteen 菜单 17/18 与 cron_self_heal.sh 调用)
+if [ -f "$PROJECT_DIR/scripts/self_heal.py" ]; then
+    cp "$PROJECT_DIR/scripts/self_heal.py" scripts/
+    chmod +x "scripts/self_heal.py"
+fi
 
 # 验证关键文件
 if [ ! -f "docker-compose.yml" ]; then

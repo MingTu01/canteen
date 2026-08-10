@@ -161,10 +161,12 @@ jobs:
 
           # 运行时脚本(deploy.sh 分阶段启动依赖,不含 build.sh / publish.sh)
           for s in upgrade.sh snapshot.sh backup.sh restore.sh \
-                   clean-redeploy.sh init-db-user.sh cron_backup.sh; do
+                   clean-redeploy.sh init-db-user.sh cron_backup.sh cron_self_heal.sh; do
             cp "$WS/scripts/$s" scripts/
             chmod +x "scripts/$s"
           done
+          # Python 自愈脚本
+          cp "$WS/scripts/self_heal.py" scripts/ && chmod +x scripts/self_heal.py
 
           # 构建产物
           cp -r "$WS/deploy" deploy

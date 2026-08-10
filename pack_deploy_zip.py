@@ -40,6 +40,8 @@ INCLUDES = [
     ("scripts/clean-redeploy.sh", "scripts/clean-redeploy.sh"),
     ("scripts/init-db-user.sh", "scripts/init-db-user.sh"),
     ("scripts/cron_backup.sh", "scripts/cron_backup.sh"),
+    ("scripts/cron_self_heal.sh", "scripts/cron_self_heal.sh"),
+    ("scripts/self_heal.py", "scripts/self_heal.py"),
     # 构建产物 - 后端
     ("deploy/backend/app.jar", "deploy/backend/app.jar"),
     # 构建产物 - admin-web

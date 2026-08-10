@@ -1050,6 +1050,172 @@ menu_diagnostics() {
 }
 
 #==============================================================
+# 17. 数据库/项目自检自愈(新增)
+#==============================================================
+# 触发 scripts/self_heal.py:
+#   - 自检:检查 Docker/Compose、服务容器状态、MySQL 是否 crash-loop(数据损坏)、
+#     项目关键文件是否缺失/损坏、.env 是否完整。
+#   - 自动修复:MySQL 数据损坏→备份优先恢复,无备份则重建空库;
+#     项目文件缺失/损坏→配置 GitHub 加速器后自动从远程拉取修复。
+#==============================================================
+menu_self_heal() {
+    echo ""
+    echo -e "${BLUE}========== 数据库/项目自检自愈 ==========${NC}"
+    echo "  1) 自检(仅检查,列出问题,不修复)"
+    echo "  2) 自检 + 自动修复(一键)${YELLOW}(崩溃自动重建/拉取)${NC}"
+    echo "  0) 返回"
+    echo ""
+    read -p "$(echo -e "${CYAN}[?]${NC} 选择 [0-2]: ")" sh_choice
+
+    local heal_script="$PROJECT_DIR/scripts/self_heal.py"
+    if [ ! -f "$heal_script" ]; then
+        error "自愈脚本不存在: $heal_script"
+        echo "  请先升级项目或从 GitHub 拉取最新代码"
+        pause
+        return
+    fi
+
+    case "$sh_choice" in
+        1)
+            python3 "$heal_script" check
+            ;;
+        2)
+            echo ""
+            warn "自动修复将可能执行:"
+            warn "  1. MySQL 数据损坏时:抢救损坏数据 → 从最新备份/快照恢复,无备份则重建空库"
+            warn "  2. 项目文件缺失/损坏时:配置 GitHub 加速器后自动从远程拉取修复"
+            echo ""
+            if confirm "确认执行自检并自动修复?"; then
+                python3 "$heal_script" fix
+            else
+                info "已取消"
+            fi
+            ;;
+        0) return ;;
+        *) warn "无效选择"; return ;;
+    esac
+    pause
+}
+
+#==============================================================
+# 18. 后台定时自愈监控(新增)
+#==============================================================
+# 通过 cron 周期性运行 scripts/cron_self_heal.sh:
+#   - 每 N 分钟自动检测 MySQL 数据损坏/crash-loop、项目文件缺失/损坏
+#   - 发现严重问题时自动修复(无需人工进菜单)
+#   - 带互斥锁 + 冷却时间,避免反复破坏性重建
+# 本菜单用于:查看状态、启用/停用、查看历史日志。
+#==============================================================
+menu_self_heal_schedule() {
+    local cron_script="$PROJECT_DIR/scripts/cron_self_heal.sh"
+    echo ""
+    echo -e "${BLUE}========== 后台定时自愈监控 ==========${NC}"
+    echo "  1) 查看当前状态"
+    echo "  2) 启用定时自愈 (每 5 分钟自动检测+修复)"
+    echo "  3) 停用定时自愈"
+    echo "  4) 立即手动执行一次并查看结果"
+    echo "  5) 查看自愈历史日志"
+    echo "  0) 返回"
+    echo ""
+    read -p "$(echo -e "${CYAN}[?]${NC} 选择 [0-5]: ")" shs_choice
+
+    if [ ! -f "$cron_script" ]; then
+        error "定时自愈脚本不存在: $cron_script"
+        echo "  请先升级项目或从 GitHub 拉取最新代码"
+        pause
+        return
+    fi
+
+    local installed=""
+    if crontab -l 2>/dev/null | grep -F "$cron_script" >/dev/null 2>&1; then
+        installed="yes"
+    fi
+
+    case "$shs_choice" in
+        1)
+            echo ""
+            echo -e "${BLUE}---------- 定时自愈状态 ----------${NC}"
+            if [ "$installed" = "yes" ]; then
+                info "状态: ${GREEN}已启用${NC}"
+                echo "  定时规则:"
+                crontab -l 2>/dev/null | grep -F "$cron_script" | sed 's/^/    /'
+            else
+                warn "状态: 未启用"
+                echo "  提示: 选择 2) 启用后可每 5 分钟自动检测并修复数据库/项目异常"
+            fi
+            echo ""
+            # 最近一次运行记录
+            local last_run
+            last_run=$(tail -1 "$PROJECT_DIR/logs/self_heal.log" 2>/dev/null || echo "暂无记录")
+            if [ "$last_run" != "暂无记录" ]; then
+                echo -e "${BLUE}---------- 最近一次记录 ----------${NC}"
+                echo "  $last_run"
+            fi
+            ;;
+        2)
+            echo ""
+            if [ "$installed" = "yes" ]; then
+                info "定时自愈已启用,无需重复操作"
+            else
+                warn "启用后,系统将每 5 分钟自动:"
+                warn "  1. 检测 MySQL 数据损坏/crash-loop → 自动修复(备份优先,无备份重建空库)"
+                warn "  2. 检测项目文件缺失/损坏 → 自动从 GitHub 拉取修复"
+                echo ""
+                if confirm "确认启用后台定时自愈?"; then
+                    chmod +x "$cron_script"
+                    # 追加 cron 项(先去重)
+                    ( crontab -l 2>/dev/null | grep -v -F "$cron_script"; \
+                      echo "*/5 * * * * $cron_script" ) | crontab -
+                    if crontab -l 2>/dev/null | grep -F "$cron_script" >/dev/null; then
+                        info "已启用后台定时自愈(每 5 分钟)"
+                        mkdir -p "$PROJECT_DIR/logs"
+                        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 已通过 canteen 菜单启用定时自愈" >> "$PROJECT_DIR/logs/self_heal.log"
+                    else
+                        error "启用失败,请检查 crontab 是否可用"
+                    fi
+                else
+                    info "已取消"
+                fi
+            fi
+            ;;
+        3)
+            echo ""
+            if [ "$installed" != "yes" ]; then
+                info "定时自愈未启用"
+            else
+                if confirm "确认停用后台定时自愈?"; then
+                    ( crontab -l 2>/dev/null | grep -v -F "$cron_script" ) | crontab -
+                    info "已停用后台定时自愈"
+                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 已通过 canteen 菜单停用定时自愈" >> "$PROJECT_DIR/logs/self_heal.log"
+                else
+                    info "已取消"
+                fi
+            fi
+            ;;
+        4)
+            echo ""
+            info "立即执行一次定时自愈(检测+自动修复)..."
+            bash "$cron_script"
+            echo ""
+            echo -e "${BLUE}---------- 自愈日志(最近 30 行) ----------${NC}"
+            tail -30 "$PROJECT_DIR/logs/self_heal.log" 2>/dev/null || echo "暂无日志"
+            ;;
+        5)
+            echo ""
+            if [ -f "$PROJECT_DIR/logs/self_heal.log" ]; then
+                echo -e "${BLUE}---------- 自愈历史日志(最近 50 行) ----------${NC}"
+                tail -50 "$PROJECT_DIR/logs/self_heal.log"
+            else
+                warn "暂无自愈日志"
+            fi
+            ;;
+        0) return ;;
+        *) warn "无效选择"; return ;;
+    esac
+    pause
+}
+
+#==============================================================
 # 15. 清理 Docker 镜像(新增)
 #==============================================================
 menu_clean_images() {
@@ -1214,6 +1380,8 @@ show_menu() {
     echo -e "${BLUE}║${NC}  14) 系统诊断 ${YELLOW}(OS/CPU/内存/端口/权限)${NC}              ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  15) 清理 Docker 镜像 ${YELLOW}(释放磁盘空间)${NC}               ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  16) 查看配置信息 ${YELLOW}(.env脱敏+访问地址)${NC}              ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  17) 数据库/项目自检自愈 ${YELLOW}(崩溃自动修复)${NC}             ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  18) 后台定时自愈监控 ${YELLOW}(每5分钟自动检测+修复)${NC}          ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}   0) 退出                                               ${BLUE}║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
@@ -1223,7 +1391,7 @@ show_menu() {
 main_loop() {
     while true; do
         show_menu
-        read -p "$(echo -e "${CYAN}请选择 [0-16]: ${NC}")" choice
+        read -p "$(echo -e "${CYAN}请选择 [0-18]: ${NC}")" choice
 
         case "$choice" in
             1) menu_upgrade_all ;;
@@ -1242,6 +1410,8 @@ main_loop() {
             14) menu_diagnostics ;;
             15) menu_clean_images ;;
             16) menu_config ;;
+            17) menu_self_heal ;;
+            18) menu_self_heal_schedule ;;
             0|q|quit|exit)
                 echo ""
                 info "再见!"
@@ -1306,6 +1476,43 @@ if [ $# -gt 0 ]; then
             menu_diagnostics
             exit $?
             ;;
+        selfheal|self-heal)
+            shift
+            python3 "$PROJECT_DIR/scripts/self_heal.py" "${1:-check}"
+            exit $?
+            ;;
+        heal-monitor|heal-schedule)
+            # 后台定时自愈监控管理:enable/disable/status/run/log
+            action="${2:-status}"
+            cron_script="$PROJECT_DIR/scripts/cron_self_heal.sh"
+            case "$action" in
+                enable)
+                    chmod +x "$cron_script"
+                    ( crontab -l 2>/dev/null | grep -v -F "$cron_script"; \
+                      echo "*/5 * * * * $cron_script" ) | crontab -
+                    info "已启用后台定时自愈(每5分钟)"
+                    ;;
+                disable)
+                    ( crontab -l 2>/dev/null | grep -v -F "$cron_script" ) | crontab -
+                    info "已停用后台定时自愈"
+                    ;;
+                run)
+                    bash "$cron_script"
+                    ;;
+                log)
+                    tail -50 "$PROJECT_DIR/logs/self_heal.log" 2>/dev/null || echo "暂无日志"
+                    ;;
+                status|*)
+                    if crontab -l 2>/dev/null | grep -F "$cron_script" >/dev/null 2>&1; then
+                        info "后台定时自愈: 已启用"
+                        crontab -l 2>/dev/null | grep -F "$cron_script" | sed 's/^/    /'
+                    else
+                        warn "后台定时自愈: 未启用"
+                    fi
+                    ;;
+            esac
+            exit $?
+            ;;
         help|-h|--help)
             echo "企业智慧食堂系统管理面板 V2"
             echo ""
@@ -1319,6 +1526,8 @@ if [ $# -gt 0 ]; then
             echo "  canteen restore <ID>    # 恢复快照"
             echo "  canteen logs [服务]     # 查看日志"
             echo "  canteen diagnose        # 系统诊断"
+            echo "  canteen selfheal [check|fix]  # 数据库/项目自检自愈"
+            echo "  canteen heal-monitor [enable|disable|status|run|log]  # 后台定时自愈监控"
             echo ""
             exit 0
             ;;
