@@ -2,9 +2,12 @@
  * 下载中心 composable(纯前端)
  *
  * 设计:
- *   - 从浏览器侧 fetch GitHub Releases API,自动获取最新版本号和下载链接(跟随文件更新)
- *   - API 失败时降级到写死的备用链接,保证弹窗永远有内容可下载
- *   - 下载用 <a> 跳转,不 fetch blob,简单可靠,不会被浏览器拦截
+ *   - 主路径:从 jsdelivr/gitmirror 加速拉取仓库根目录 VERSIONS.json,读取 terminal.version,
+ *             拼接 GitHub Releases 下载 URL。VERSIONS.json 每次发版都会更新,实现自动跟随。
+ *             此路径不依赖 api.github.com(国内浏览器基本不通),走 jsdelivr CDN 稳定可达。
+ *   - 备路径:fetch GitHub Releases API(外网环境可用时获取更完整信息:发布时间/说明等)。
+ *   - 降级:API 与 raw 都失败时,回退到写死的备用链接,保证弹窗永远有内容可下载。
+ *   - 下载用 <a> 跳转,不 fetch blob,简单可靠,不会被浏览器拦截。
  *
  * 说明:fetch 由浏览器发起,用的是打开页面者的网络(代理/加速器均生效)。
  */
@@ -15,11 +18,18 @@ import { ElMessage } from 'element-plus'
 // GitHub 仓库
 const REPO = 'MingTu01/canteen'
 
-// GitHub API 地址(直连优先,加速器兜底)
+// VERSIONS.json 的 raw 加速地址(主路径,按优先级)
+// jsdelivr 全球 CDN 最稳定;gh-proxy 代理 raw 兜底;直连最后
+const RAW_VERSIONS_URLS = [
+  `https://cdn.jsdelivr.net/gh/${REPO}@main/VERSIONS.json`,
+  `https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/VERSIONS.json`,
+  `https://raw.githubusercontent.com/${REPO}/main/VERSIONS.json`,
+]
+
+// GitHub API 地址(备路径,外网环境可用)
 const RELEASES_API_URLS = [
   `https://api.github.com/repos/${REPO}/releases`,
   `https://gh-proxy.com/https://api.github.com/repos/${REPO}/releases`,
-  `https://ghfast.top/https://api.github.com/repos/${REPO}/releases`,
 ]
 
 // GitHub 下载加速器前缀(按优先级,最后为空 = 直连)
@@ -36,7 +46,7 @@ const CARD_HELPER_RE = /CanteenCardHelper-Setup-[\d.]+\.exe/i
 const TERMINAL_RE = /CanteenTerminal-Setup-[\d.]+\.exe/i
 
 export interface DownloadItem {
-  /** 资产名(如 CanteenCardHelper-Setup-1.2.0.exe) */
+  /** 资产名(如 CanteenTerminal-Setup-1.0.18.exe) */
   name: string
   /** 版本号 */
   version: string
@@ -46,27 +56,27 @@ export interface DownloadItem {
   publishedAt: string
   /** 发布说明 */
   notes: string
-  /** 是否来自 API(用于显示"自动获取"还是"备用链接") */
-  fromApi: boolean
+  /** 数据来源:raw=VERSIONS.json / api=GitHub API / fallback=写死备用 */
+  source: 'raw' | 'api' | 'fallback'
 }
 
-// ===== 降级备用链接(API 失败时用,发布新版本时更新这里) =====
+// ===== 降级备用链接(raw 和 API 都失败时用,发布新版本时更新这里) =====
 const FALLBACK_CARD_HELPER: DownloadItem = {
   name: 'CanteenCardHelper-Setup-1.2.0.exe',
   version: '1.2.0',
   url: 'https://github.com/MingTu01/canteen/releases/download/card-helper-v1.2.0/CanteenCardHelper-Setup-1.2.0.exe',
   notes: '用于 CH375/CH372 读卡器刷卡识别,管理员录入员工卡号时需要安装。通用模拟键盘/HID 读卡器无需读卡助手。',
   publishedAt: '',
-  fromApi: false,
+  source: 'fallback',
 }
 
 const FALLBACK_TERMINAL: DownloadItem = {
-  name: 'CanteenTerminal-Setup-1.0.15.exe',
-  version: '1.0.15',
-  url: 'https://github.com/MingTu01/canteen/releases/download/v1.0.15/CanteenTerminal-Setup-1.0.15.exe',
+  name: 'CanteenTerminal-Setup-1.0.18.exe',
+  version: '1.0.18',
+  url: 'https://github.com/MingTu01/canteen/releases/download/1.0.18/CanteenTerminal-Setup-1.0.18.exe',
   notes: '食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。',
   publishedAt: '',
-  fromApi: false,
+  source: 'fallback',
 }
 // =========================================================
 
@@ -81,7 +91,43 @@ export function useDownloadCenter() {
     return m ? m[1] : ''
   }
 
-  /** 从浏览器侧 fetch GitHub API,逐个地址尝试 */
+  /**
+   * 主路径:从 raw 加速拉取 VERSIONS.json,读 terminal.version 拼下载 URL。
+   * 优点:不依赖 api.github.com(国内不通),jsdelivr CDN 稳定;VERSIONS.json 每次发版自动更新。
+   * 局限:只能拿到版本号,拿不到发布时间/说明;cardHelper 不在 VERSIONS.json 里(回退到 API/备用)。
+   */
+  async function fetchFromRaw(): Promise<DownloadItem | null> {
+    for (const rawUrl of RAW_VERSIONS_URLS) {
+      try {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 10000)
+        const res = await fetch(rawUrl, {
+          signal: ctrl.signal,
+          headers: { Accept: 'application/json' },
+        })
+        clearTimeout(timer)
+        if (!res.ok) continue
+        const data = await res.json()
+        const ver = data?.terminal?.version
+        if (!ver) continue
+        // tag 与 version 一致(从 1.0.18 起统一无 v 前缀)
+        const fileName = `CanteenTerminal-Setup-${ver}.exe`
+        return {
+          name: fileName,
+          version: ver,
+          url: `https://github.com/${REPO}/releases/download/${ver}/${fileName}`,
+          publishedAt: '',
+          notes: '食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。',
+          source: 'raw',
+        }
+      } catch {
+        // 当前地址失败,尝试下一个
+      }
+    }
+    return null
+  }
+
+  /** 备路径:从 GitHub Releases API 获取(外网环境可用,能拿到发布时间/说明) */
   async function fetchReleases(): Promise<any[]> {
     for (const apiUrl of RELEASES_API_URLS) {
       try {
@@ -121,7 +167,7 @@ export function useDownloadCenter() {
             url: asset.browser_download_url,
             publishedAt,
             notes,
-            fromApi: true,
+            source: 'api',
           }
         }
       }
@@ -135,7 +181,7 @@ export function useDownloadCenter() {
             url: asset.browser_download_url,
             publishedAt,
             notes,
-            fromApi: true,
+            source: 'api',
           }
         }
       }
@@ -146,20 +192,28 @@ export function useDownloadCenter() {
     return { cardHelperItem, terminalItem }
   }
 
-  /** 加载最新下载信息(API 失败时降级到备用链接) */
+  /** 加载最新下载信息(raw 主路径 → API 备路径 → 备用链接降级) */
   async function load() {
     loading.value = true
     try {
+      // 1. 主路径:raw VERSIONS.json 拿终端版本(最可靠,国内可用)
+      const rawTerminal = await fetchFromRaw()
+
+      // 2. 备路径:GitHub API(能同时拿读卡助手 + 发布时间/说明,外网环境可用)
       const releases = await fetchReleases()
-      if (releases.length === 0) {
-        // API 失败:降级到备用链接
-        cardHelper.value = FALLBACK_CARD_HELPER
-        terminal.value = FALLBACK_TERMINAL
-        return
+      let apiCardHelper: DownloadItem | null = null
+      let apiTerminal: DownloadItem | null = null
+      if (releases.length > 0) {
+        const found = findAssets(releases)
+        apiCardHelper = found.cardHelperItem
+        apiTerminal = found.terminalItem
       }
-      const { cardHelperItem, terminalItem } = findAssets(releases)
-      cardHelper.value = cardHelperItem || FALLBACK_CARD_HELPER
-      terminal.value = terminalItem || FALLBACK_TERMINAL
+
+      // 3. 合并:raw 优先(raw 拿到的终端版本最新),API 补充读卡助手和发布时间
+      // 终端:raw 优先(API 可能因缓存延迟),都没有用备用
+      terminal.value = rawTerminal || apiTerminal || FALLBACK_TERMINAL
+      // 读卡助手:VERSIONS.json 没有,只能靠 API 或备用
+      cardHelper.value = apiCardHelper || FALLBACK_CARD_HELPER
     } catch {
       // 异常:降级到备用链接
       cardHelper.value = FALLBACK_CARD_HELPER

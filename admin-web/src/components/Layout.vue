@@ -507,7 +507,7 @@ onBeforeUnmount(() => {
                   v{{ downloadCenter.cardHelper.value.version }}
                 </span>
                 <span
-                  v-if="downloadCenter.cardHelper.value && !downloadCenter.cardHelper.value.fromApi"
+                  v-if="downloadCenter.cardHelper.value && downloadCenter.cardHelper.value.source === 'fallback'"
                   class="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning"
                 >备用链接</span>
               </div>
@@ -552,7 +552,7 @@ onBeforeUnmount(() => {
                   v{{ downloadCenter.terminal.value.version }}
                 </span>
                 <span
-                  v-if="downloadCenter.terminal.value && !downloadCenter.terminal.value.fromApi"
+                  v-if="downloadCenter.terminal.value && downloadCenter.terminal.value.source === 'fallback'"
                   class="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning"
                 >备用链接</span>
               </div>
