@@ -1287,10 +1287,13 @@ menu_reset_db() {
         return
     fi
 
-    # 读取密码
+    # 读取密码(去除引号、Windows换行符\r、尾部空格)
     local mysql_pass redis_pass
     mysql_pass=$(grep -E "^MYSQL_ROOT_PASSWORD=" "$envfile" 2>/dev/null | head -1 | cut -d'=' -f2-)
+    # 去除首尾引号和\r
+    mysql_pass=$(echo "$mysql_pass" | sed 's/^["'"'"']//;s/["'"'"']$//' | tr -d '\r' | tr -d '[:space:]')
     redis_pass=$(grep -E "^REDIS_PASSWORD=" "$envfile" 2>/dev/null | head -1 | cut -d'=' -f2-)
+    redis_pass=$(echo "$redis_pass" | sed 's/^["'"'"']//;s/["'"'"']$//' | tr -d '\r' | tr -d '[:space:]')
 
     if [[ -z "$mysql_pass" ]]; then
         error "无法读取 MYSQL_ROOT_PASSWORD"
@@ -1303,14 +1306,23 @@ menu_reset_db() {
     info "步骤 1/4:自动备份当前数据..."
     local backup_prefix="pre_reset_$(date +%Y%m%d_%H%M%S)"
     local backup_dir="$PROJECT_DIR/backup"
-    local backup_file="${backup_dir}/${backup_prefix}.sql.gz"
+    local backup_raw="${backup_dir}/${backup_prefix}.sql"
     mkdir -p "$backup_dir" 2>/dev/null
-    if docker exec canteen-mysql mysqldump -uroot -p"$mysql_pass" --single-transaction canteen 2>/dev/null | gzip > "$backup_file"; then
+    # 捕获 mysqldump 的 stderr 以检测失败(管道到 gzip 会丢失退出码)
+    local dump_err
+    dump_err=$(docker exec canteen-mysql mysqldump -uroot -p"$mysql_pass" --single-transaction canteen 2>&1 > "$backup_raw")
+    # 检查是否只有密码警告(成功)或含真实错误(失败)
+    local real_dump_err
+    real_dump_err=$(echo "$dump_err" | grep -v "using a password on the command line" | grep -i "error" || true)
+    if [[ -z "$real_dump_err" ]] && [[ -s "$backup_raw" ]]; then
+        # 成功,压缩备份文件
+        gzip -f "$backup_raw" 2>/dev/null
         local fsize
-        fsize=$(du -h "$backup_file" 2>/dev/null | cut -f1)
-        info "已创建备份: $(basename "$backup_file") ($fsize)"
+        fsize=$(du -h "${backup_raw}.gz" 2>/dev/null | cut -f1)
+        info "已创建备份: $(basename "${backup_raw}.gz") ($fsize)"
     else
-        warn "自动备份失败!继续重置将无法回滚。"
+        warn "自动备份失败!错误: ${real_dump_err:-备份文件为空}"
+        rm -f "$backup_raw"
         if ! confirm "备份失败,是否仍然继续重置?"; then
             info "已取消"
             pause
@@ -1363,7 +1375,7 @@ SQLEOF
     if [[ -n "$real_err" ]]; then
         error "MySQL 清空失败!"
         echo "  错误信息: $real_err"
-        echo "  可用备份恢复: $backup_prefix"
+        echo "  可用备份恢复: $backup_prefix.sql.gz"
         pause
         return
     fi
@@ -1410,7 +1422,7 @@ SQLEOF
     echo "    3. 指派食堂管理员"
     echo "    4. 配置菜品、员工等数据"
     echo ""
-    echo -e "  备份文件: ${CYAN}$backup_prefix${NC}"
+    echo -e "  备份文件: ${CYAN}$backup_prefix.sql.gz${NC}"
     echo -e "  如需回滚:可通过菜单 5)恢复备份 还原"
     echo ""
     pause
