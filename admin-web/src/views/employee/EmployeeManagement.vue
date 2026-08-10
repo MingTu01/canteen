@@ -18,7 +18,7 @@ import {
   ElMessageBox,
 } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
-import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, X, Info } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Wallet, UserCircle2, Power, PowerOff, Upload, Download, ClipboardList, AlertTriangle, FileSpreadsheet, ImagePlus, Info } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -573,13 +573,6 @@ const handlePhotoFileChange = async (e: Event) => {
   ElMessage.info(`已选择 ${photoImportItems.value.length} 张照片`)
 }
 
-/** 移除单项 */
-const removePhotoItem = (index: number) => {
-  const item = photoImportItems.value[index]
-  if (item?.preview) URL.revokeObjectURL(item.preview)
-  photoImportItems.value.splice(index, 1)
-}
-
 /** 批量上传照片 */
 const startPhotoUpload = async () => {
   const pending = photoImportItems.value.filter((it) => it.status === 'pending')
@@ -604,8 +597,9 @@ const startPhotoUpload = async () => {
   photoImportLoading.value = true
   let success = 0
   let failed = 0
-  // 串行上传(避免并发过大冲击服务器)
+  // 串行上传(避免并发过大冲击服务器),跟踪当前索引以驱动三状态头像 UI
   for (const item of pending) {
+    currentUploadIdx.value = photoImportItems.value.indexOf(item)
     item.status = 'uploading'
     item.progress = 30
     try {
@@ -623,6 +617,7 @@ const startPhotoUpload = async () => {
       failed++
     }
   }
+  currentUploadIdx.value = -1
   photoImportLoading.value = false
 
   if (failed === 0) {
@@ -641,7 +636,45 @@ const onPhotoImportClose = () => {
     if (item.preview) URL.revokeObjectURL(item.preview)
   }
   photoImportItems.value = []
+  currentUploadIdx.value = -1
 }
+
+/** 当前正在上传的索引(-1 表示未开始) */
+const currentUploadIdx = ref(-1)
+
+/** 上一个已完成的项(已上传) */
+const lastDoneItem = computed<PhotoImportItem | null>(() => {
+  if (currentUploadIdx.value < 1) return null
+  for (let i = currentUploadIdx.value - 1; i >= 0; i--) {
+    const it = photoImportItems.value[i]
+    if (it.status === 'success' || it.status === 'error') return it
+  }
+  return null
+})
+
+/** 当前正在上传的项 */
+const uploadingItem = computed<PhotoImportItem | null>(() => {
+  if (currentUploadIdx.value < 0 || currentUploadIdx.value >= photoImportItems.value.length) return null
+  return photoImportItems.value[currentUploadIdx.value]
+})
+
+/** 下一个待上传的项(准备上传) */
+const nextItem = computed<PhotoImportItem | null>(() => {
+  if (currentUploadIdx.value < 0) return null
+  const next = currentUploadIdx.value + 1
+  if (next >= photoImportItems.value.length) return null
+  return photoImportItems.value[next]
+})
+
+/** 统计 */
+const photoStats = computed(() => {
+  const total = photoImportItems.value.length
+  const success = photoImportItems.value.filter((it) => it.status === 'success').length
+  const failed = photoImportItems.value.filter((it) => it.status === 'error').length
+  const pending = photoImportItems.value.filter((it) => it.status === 'pending').length
+  const uploading = photoImportItems.value.filter((it) => it.status === 'uploading').length
+  return { total, success, failed, pending, uploading }
+})
 </script>
 
 <template>
@@ -1124,7 +1157,7 @@ const onPhotoImportClose = () => {
       <ElDialog
         v-model="photoImportVisible"
         title="批量导入员工照片"
-        width="720px"
+        width="520px"
         :close-on-click-modal="false"
         @close="onPhotoImportClose"
       >
@@ -1136,53 +1169,156 @@ const onPhotoImportClose = () => {
           style="display: none"
           @change="handlePhotoFileChange"
         />
-        <div class="mb-4 flex items-center justify-between">
-          <div class="text-sm text-gray-500">
-            文件名(去扩展名)作为匹配标识符自动识别员工:支持<b>卡号</b> / <b>手机号</b> / <b>姓名</b> 自动适配(优先卡号,再手机号,后姓名)。如 CARD001.jpg → 卡号 CARD001、13800000001.jpg → 手机号、张三.jpg → 姓名。同名多次选择,后选的覆盖先选的。
+
+        <!-- 说明 -->
+        <div class="mb-5 text-sm text-gray-500 leading-relaxed">
+          文件名(去扩展名)作为匹配标识符自动识别员工:支持<b>卡号</b> / <b>手机号</b> / <b>姓名</b> 自动适配(优先卡号,再手机号,后姓名)。同名多次选择,后选的覆盖先选的。
+        </div>
+
+        <!-- 空状态 -->
+        <div v-if="photoImportItems.length === 0" class="py-10 text-center">
+          <div class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
+            <ImagePlus class="h-9 w-9 text-gray-400" />
           </div>
-          <ElButton type="primary" :icon="ImagePlus" @click="triggerPhotoFileInput">选择照片</ElButton>
+          <p class="text-gray-400 mb-4">点击下方按钮选择员工照片(支持多选)</p>
+          <ElButton type="primary" :icon="ImagePlus" round @click="triggerPhotoFileInput">选择照片</ElButton>
         </div>
 
-        <div v-if="photoImportItems.length === 0" class="py-12 text-center text-gray-400">
-          点击"选择照片"按钮,选择员工照片文件(支持多选)
-        </div>
-
-        <div v-else class="space-y-2">
-          <div
-            v-for="(item, idx) in photoImportItems"
-            :key="idx"
-            class="flex items-center gap-3 rounded-lg border border-gray-200 p-3"
-          >
-            <img :src="item.preview" :alt="item.cardNo" class="h-12 w-12 rounded object-cover" />
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-800">{{ item.cardNo }}</span>
-                <ElTag v-if="item.existingAvatar" type="warning" size="small">已存在,将替换</ElTag>
-                <ElTag v-if="item.status === 'success'" type="success" size="small">成功</ElTag>
-                <ElTag v-else-if="item.status === 'error'" type="danger" size="small">失败: {{ item.error }}</ElTag>
-                <ElTag v-else-if="item.status === 'uploading'" type="primary" size="small">上传中...</ElTag>
-              </div>
-              <div class="mt-1 text-xs text-gray-500 truncate">{{ item.file.name }}</div>
-            </div>
-            <ElButton
-              v-if="item.status === 'pending' || item.status === 'error'"
-              :icon="X"
-              circle
-              size="small"
-              @click="removePhotoItem(idx)"
+        <!-- 已选择:圆圈头像 + 数量(未上传时) -->
+        <div v-else-if="!photoImportLoading && currentUploadIdx < 0 && photoStats.pending > 0" class="py-4 text-center">
+          <!-- 圆圈头像(显示第一张) -->
+          <div class="relative mx-auto mb-4 h-28 w-28">
+            <img
+              :src="photoImportItems[0].preview"
+              :alt="photoImportItems[0].cardNo"
+              class="h-28 w-28 rounded-full object-cover ring-4 ring-primary/30"
             />
+            <div class="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white text-sm font-bold shadow-lg">
+              {{ photoStats.total }}
+            </div>
+          </div>
+          <p class="text-base font-medium text-gray-700">已选择 {{ photoStats.total }} 张照片</p>
+          <p class="mt-1 text-xs text-gray-400">点击"确认上传"开始批量导入</p>
+          <div class="mt-4 flex justify-center gap-3">
+            <ElButton :icon="ImagePlus" @click="triggerPhotoFileInput">重新选择</ElButton>
+          </div>
+        </div>
+
+        <!-- 上传中:三状态头像(已上传 / 正在上传 / 下一个) -->
+        <div v-else-if="photoImportLoading || currentUploadIdx >= 0" class="py-6">
+          <!-- 三状态头像 -->
+          <div class="flex items-end justify-center gap-8">
+            <!-- 1. 已上传(上一个完成的) -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="relative h-20 w-20">
+                <img
+                  v-if="lastDoneItem"
+                  :src="lastDoneItem.preview"
+                  :alt="lastDoneItem.cardNo"
+                  class="h-20 w-20 rounded-full object-cover ring-4 ring-green-400"
+                />
+                <div v-else class="h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
+                  <ImagePlus class="h-7 w-7 text-gray-300" />
+                </div>
+                <!-- 完成勾 -->
+                <div
+                  v-if="lastDoneItem"
+                  class="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full shadow-lg"
+                  :class="lastDoneItem.status === 'success' ? 'bg-green-500' : 'bg-red-500'"
+                >
+                  <svg v-if="lastDoneItem.status === 'success'" class="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span v-else class="text-white text-xs font-bold">!</span>
+                </div>
+              </div>
+              <span class="text-xs text-gray-500">已上传</span>
+            </div>
+
+            <!-- 2. 正在上传(绿色圈圈代表进度) -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="relative h-28 w-28">
+                <!-- SVG 进度圈 -->
+                <svg class="absolute inset-0 -rotate-90" width="112" height="112" viewBox="0 0 112 112">
+                  <circle cx="56" cy="56" r="52" stroke="#e5e7eb" stroke-width="6" fill="none" />
+                  <circle
+                    cx="56" cy="56" r="52" stroke="#22c55e" stroke-width="6" fill="none"
+                    stroke-linecap="round"
+                    :stroke-dasharray="2 * Math.PI * 52"
+                    :stroke-dashoffset="2 * Math.PI * 52 * (1 - (uploadingItem?.progress || 0) / 100)"
+                    style="transition: stroke-dashoffset 0.3s ease;"
+                  />
+                </svg>
+                <!-- 头像 -->
+                <img
+                  v-if="uploadingItem"
+                  :src="uploadingItem.preview"
+                  :alt="uploadingItem.cardNo"
+                  class="absolute inset-2 h-24 w-24 rounded-full object-cover"
+                />
+                <div v-else class="absolute inset-2 h-24 w-24 rounded-full bg-gray-100 flex items-center justify-center">
+                  <ImagePlus class="h-8 w-8 text-gray-300" />
+                </div>
+              </div>
+              <span class="text-xs font-medium text-green-600">正在上传</span>
+              <span v-if="uploadingItem" class="text-xs text-gray-400 truncate max-w-[100px]">{{ uploadingItem.cardNo }}</span>
+            </div>
+
+            <!-- 3. 下一个(准备上传) -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="relative h-20 w-20">
+                <img
+                  v-if="nextItem"
+                  :src="nextItem.preview"
+                  :alt="nextItem.cardNo"
+                  class="h-20 w-20 rounded-full object-cover opacity-50 ring-4 ring-gray-200"
+                />
+                <div v-else class="h-20 w-20 rounded-full bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center">
+                  <span class="text-gray-300 text-2xl">—</span>
+                </div>
+              </div>
+              <span class="text-xs text-gray-400">下一个</span>
+            </div>
+          </div>
+
+          <!-- 进度数字 -->
+          <div class="mt-6 text-center">
+            <div class="text-2xl font-bold text-gray-800">
+              {{ photoStats.success + photoStats.failed }} <span class="text-base font-normal text-gray-400">/ {{ photoStats.total }}</span>
+            </div>
+            <div class="mt-1 flex justify-center gap-4 text-xs">
+              <span class="text-green-600">成功 {{ photoStats.success }}</span>
+              <span v-if="photoStats.failed > 0" class="text-red-500">失败 {{ photoStats.failed }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 上传完成(有失败项时显示) -->
+        <div v-else-if="!photoImportLoading && currentUploadIdx < 0 && photoStats.pending === 0 && photoStats.failed > 0" class="py-4 text-center">
+          <div class="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+            <AlertTriangle class="h-8 w-8 text-amber-500" />
+          </div>
+          <p class="text-base font-medium text-gray-700">上传完成</p>
+          <p class="mt-1 text-sm text-gray-500">
+            成功 {{ photoStats.success }} 张,失败 {{ photoStats.failed }} 张
+          </p>
+          <div class="mt-4 max-h-32 overflow-y-auto rounded-lg bg-red-50 p-3 text-left">
+            <div v-for="(it, i) in photoImportItems.filter(x => x.status === 'error')" :key="i" class="text-xs text-red-600">
+              {{ it.cardNo }}: {{ it.error }}
+            </div>
           </div>
         </div>
 
         <template #footer>
-          <ElButton @click="photoImportVisible = false">关闭</ElButton>
+          <ElButton @click="photoImportVisible = false">取消</ElButton>
           <ElButton
+            v-if="photoStats.pending > 0"
             type="primary"
             :loading="photoImportLoading"
-            :disabled="photoImportItems.filter((it) => it.status === 'pending').length === 0"
+            :disabled="photoImportLoading"
             @click="startPhotoUpload"
           >
-            开始上传 ({{ photoImportItems.filter((it) => it.status === 'pending').length }})
+            确认上传 ({{ photoStats.pending }})
           </ElButton>
         </template>
       </ElDialog>
