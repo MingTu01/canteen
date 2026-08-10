@@ -205,49 +205,8 @@ const confirmRecharge = async () => {
   }
 }
 
-// ===== 批量充值 =====
-const batchRechargeVisible = ref(false)
+// ===== 批量充值(已集成到余额充值弹窗) =====
 const batchRechargeLoading = ref(false)
-const batchRechargeAmount = ref<number>(DEFAULT_RECHARGE_AMOUNT)
-
-const openBatchRecharge = () => {
-  batchRechargeAmount.value = DEFAULT_RECHARGE_AMOUNT
-  batchRechargeVisible.value = true
-}
-
-const confirmBatchRecharge = async () => {
-  if (!batchRechargeAmount.value || batchRechargeAmount.value <= 0) {
-    ElMessage.warning('请输入有效的充值金额')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确定要给本食堂所有在职员工每人充值 ${batchRechargeAmount.value.toFixed(2)} 元吗？`,
-      '批量充值确认',
-      {
-        type: 'warning',
-        confirmButtonText: '确认充值',
-        cancelButtonText: '取消',
-      }
-    )
-  } catch {
-    return
-  }
-  batchRechargeLoading.value = true
-  try {
-    const result = await employeeApi.batchRecharge({
-      storeId: sid.value ?? undefined,
-      amount: batchRechargeAmount.value,
-    })
-    ElMessage.success(`成功为 ${result.successCount} 名员工充值`)
-    batchRechargeVisible.value = false
-    fetchList()
-  } catch {
-    /* 错误已由拦截器统一提示 */
-  } finally {
-    batchRechargeLoading.value = false
-  }
-}
 
 // ===== 批量重置密码(勾选) =====
 const employeeTableRef = ref()
@@ -292,6 +251,43 @@ const handleResetPasswords = async () => {
     /* 错误已由拦截器统一提示 */
   } finally {
     resetPasswordsLoading.value = false
+  }
+}
+
+// ===== 批量删除(勾选) =====
+const batchDeleteLoading = ref(false)
+
+const handleBatchDelete = async () => {
+  if (selectedEmployees.value.length === 0) {
+    ElMessage.warning('请先勾选要删除的员工')
+    return
+  }
+  const names = selectedEmployees.value.map((e) => e.name).slice(0, 5).join('、')
+  const extra = selectedEmployees.value.length > 5 ? ` 等 ${selectedEmployees.value.length} 人` : ''
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除所选员工吗？此操作不可恢复。\n选中:${names}${extra}`,
+      '批量删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      }
+    )
+  } catch {
+    return
+  }
+  batchDeleteLoading.value = true
+  try {
+    const ids = selectedEmployees.value.map((e) => e.id!).filter(Boolean)
+    await Promise.all(ids.map((id) => employeeApi.delete(id)))
+    ElMessage.success(`已删除 ${ids.length} 名员工`)
+    clearSelection()
+    fetchList()
+  } catch {
+    /* 错误已由拦截器统一提示 */
+  } finally {
+    batchDeleteLoading.value = false
   }
 }
 
@@ -480,6 +476,49 @@ const handleLowBalancePageChange = (p: number) => {
 const handleLowBalanceRecharge = (row: Employee) => {
   lowBalanceVisible.value = false
   openRecharge(row)
+}
+
+// 批量充值(按阈值,给所有余额低于阈值的员工充值)
+const lowBalanceRechargeAmount = ref<number>(DEFAULT_RECHARGE_AMOUNT)
+
+const confirmLowBalanceRecharge = async () => {
+  if (!lowBalanceRechargeAmount.value || lowBalanceRechargeAmount.value <= 0) {
+    ElMessage.warning('请输入有效的充值金额')
+    return
+  }
+  const count = lowBalanceStats.value?.count ?? 0
+  if (count === 0) {
+    ElMessage.warning('当前无预警员工,无需充值')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要给余额低于 ${lowBalanceThreshold.value} 元的 ${count} 名员工每人充值 ${lowBalanceRechargeAmount.value.toFixed(2)} 元吗？\n合计:${(count * lowBalanceRechargeAmount.value).toFixed(2)} 元`,
+      '批量充值确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认充值',
+        cancelButtonText: '取消',
+      }
+    )
+  } catch {
+    return
+  }
+  batchRechargeLoading.value = true
+  try {
+    const result = await employeeApi.rechargeLowBalance({
+      storeId: sid.value ?? undefined,
+      threshold: lowBalanceThreshold.value,
+      amount: lowBalanceRechargeAmount.value,
+    })
+    ElMessage.success(`成功为 ${result.successCount} 名员工充值,合计 ¥${result.totalAmount.toFixed(2)}`)
+    await fetchLowBalance()
+    fetchList()
+  } catch {
+    /* 错误已由拦截器统一提示 */
+  } finally {
+    batchRechargeLoading.value = false
+  }
 }
 
 // ===== 导出员工 =====
@@ -728,9 +767,8 @@ const photoStats = computed(() => {
       <template #actions>
         <ElButton :icon="Upload" @click="openImportDialog">导入员工</ElButton>
         <ElButton v-if="sid" :icon="ImagePlus" @click="openPhotoImport">批量照片</ElButton>
-        <ElButton v-if="sid" :icon="AlertTriangle" type="danger" @click="openLowBalance">余额预警</ElButton>
+        <ElButton v-if="sid" :icon="Wallet" type="warning" @click="openLowBalance">余额充值</ElButton>
         <ElButton v-if="sid" :icon="FileSpreadsheet" :loading="exportLoading" @click="handleExport">导出</ElButton>
-        <ElButton v-if="sid" type="warning" :icon="Wallet" @click="openBatchRecharge">批量充值</ElButton>
         <ElButton v-if="sid" type="primary" :icon="Plus" @click="openAdd">添加员工</ElButton>
       </template>
 
@@ -765,25 +803,39 @@ const photoStats = computed(() => {
 
       <div class="card overflow-hidden">
         <!-- 选中操作条 -->
-        <div
-          v-if="selectedEmployees.length > 0"
-          class="flex items-center justify-between bg-blue-50 px-4 py-2 text-sm"
-        >
-          <span class="text-blue-700">
-            已选择 <strong>{{ selectedEmployees.length }}</strong> 名员工
-          </span>
-          <div class="flex gap-2">
-            <ElButton
-              size="small"
-              :icon="KeyRound"
-              :loading="resetPasswordsLoading"
-              @click="handleResetPasswords"
-            >
-              重置所选密码为 12345678
-            </ElButton>
-            <ElButton size="small" text @click="clearSelection">取消选择</ElButton>
+        <Transition name="slide-down">
+          <div
+            v-if="selectedEmployees.length > 0"
+            class="flex items-center justify-between gap-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-2.5"
+          >
+            <div class="flex items-center gap-2 text-sm text-blue-700">
+              <span class="flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm">
+                {{ selectedEmployees.length }}
+              </span>
+              <span>名员工已选中</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <ElButton
+                size="small"
+                :icon="KeyRound"
+                :loading="resetPasswordsLoading"
+                @click="handleResetPasswords"
+              >
+                重置密码
+              </ElButton>
+              <ElButton
+                size="small"
+                type="danger"
+                :icon="Trash2"
+                :loading="batchDeleteLoading"
+                @click="handleBatchDelete"
+              >
+                批量删除
+              </ElButton>
+              <ElButton size="small" text @click="clearSelection">取消</ElButton>
+            </div>
           </div>
-        </div>
+        </Transition>
         <ElTable
           ref="employeeTableRef"
           v-loading="loading"
@@ -983,38 +1035,6 @@ const photoStats = computed(() => {
         </template>
       </ElDialog>
 
-      <!-- 批量充值弹窗 -->
-      <ElDialog
-        v-model="batchRechargeVisible"
-        title="批量充值"
-        width="420px"
-        :close-on-click-modal="false"
-        append-to-body
-        destroy-on-close
-      >
-        <div class="mb-4 rounded-lg bg-bg-secondary px-4 py-3 text-sm text-text-secondary">
-          将给本食堂所有在职员工充值指定金额。
-        </div>
-        <ElForm label-width="80px">
-          <ElFormItem label="充值金额">
-            <ElInputNumber
-              v-model="batchRechargeAmount"
-              :min="0.01"
-              :precision="2"
-              :step="50"
-              class="w-full"
-              placeholder="请输入充值金额"
-            />
-          </ElFormItem>
-        </ElForm>
-        <template #footer>
-          <ElButton @click="batchRechargeVisible = false">取消</ElButton>
-          <ElButton type="primary" :loading="batchRechargeLoading" @click="confirmBatchRecharge">
-            确认充值
-          </ElButton>
-        </template>
-      </ElDialog>
-
       <!-- 导入弹窗 -->
       <ElDialog
         v-model="importDialogVisible"
@@ -1120,20 +1140,20 @@ const photoStats = computed(() => {
         </template>
       </ElDialog>
 
-      <!-- 余额预警弹窗 -->
+      <!-- 余额充值弹窗 -->
       <ElDialog
         v-model="lowBalanceVisible"
-        title="余额预警名单"
-        width="780px"
+        title="余额充值"
+        width="820px"
         :close-on-click-modal="false"
         append-to-body
         destroy-on-close
       >
         <div class="space-y-4">
-          <!-- 阈值与统计 -->
-          <div class="rounded-lg border border-border bg-bg-secondary px-4 py-3">
+          <!-- 筛选与统计 -->
+          <div class="rounded-xl border border-border bg-gradient-to-br from-orange-50 to-amber-50 px-4 py-3">
             <div class="mb-3 flex flex-wrap items-center gap-3">
-              <span class="text-sm text-text-secondary">预警阈值：</span>
+              <span class="text-sm font-medium text-text-secondary">余额阈值：</span>
               <ElInputNumber
                 v-model="lowBalanceThreshold"
                 :min="0"
@@ -1141,16 +1161,16 @@ const photoStats = computed(() => {
                 :step="10"
                 size="small"
                 style="width: 140px"
-                aria-label="预警阈值"
+                aria-label="余额阈值"
               />
-              <span class="text-xs text-text-muted">元（余额低于此值的员工将列入预警）</span>
-              <ElButton size="small" type="primary" @click="handleLowBalanceThresholdChange">
-                查询
+              <span class="text-xs text-text-muted">元（筛选余额低于此值的员工）</span>
+              <ElButton size="small" type="primary" :icon="AlertTriangle" @click="handleLowBalanceThresholdChange">
+                筛选
               </ElButton>
             </div>
             <div class="grid grid-cols-3 gap-3" v-if="lowBalanceStats">
               <StatCard
-                title="预警人数"
+                title="筛选人数"
                 :value="lowBalanceStats.count"
                 :icon="AlertTriangle"
                 color="danger"
@@ -1170,14 +1190,45 @@ const photoStats = computed(() => {
             </div>
           </div>
 
-          <!-- 预警名单表格 -->
+          <!-- 批量充值操作条 -->
+          <div
+            v-if="lowBalanceStats && lowBalanceStats.count > 0"
+            class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3"
+          >
+            <div class="text-sm text-text-secondary">
+              给筛选出的 <strong class="text-amber-700">{{ lowBalanceStats.count }}</strong> 名员工每人充值
+            </div>
+            <div class="flex items-center gap-2">
+              <ElInputNumber
+                v-model="lowBalanceRechargeAmount"
+                :min="0.01"
+                :precision="2"
+                :step="50"
+                size="small"
+                style="width: 150px"
+                aria-label="批量充值金额"
+              />
+              <span class="text-xs text-text-muted">元</span>
+              <ElButton
+                size="small"
+                type="warning"
+                :icon="Wallet"
+                :loading="batchRechargeLoading"
+                @click="confirmLowBalanceRecharge"
+              >
+                批量充值
+              </ElButton>
+            </div>
+          </div>
+
+          <!-- 名单表格 -->
           <ElTable
             v-loading="lowBalanceLoading"
             :data="lowBalanceList"
             style="width: 100%"
             :show-overflow-tooltip="true"
-            max-height="360"
-            aria-label="余额预警名单"
+            max-height="340"
+            aria-label="余额充值名单"
           >
             <ElTableColumn prop="name" label="姓名" min-width="120" align="left" />
             <ElTableColumn prop="cardNo" label="卡号" min-width="140" align="left" />
@@ -1191,15 +1242,15 @@ const photoStats = computed(() => {
                 <span class="font-medium tabular-nums text-danger">¥{{ row.balance ?? 0 }}</span>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="操作" width="140" align="left" fixed="right">
+            <ElTableColumn label="操作" width="120" align="left" fixed="right">
               <template #default="{ row }">
-                <ElButton size="small" type="warning" :icon="Wallet" @click="handleLowBalanceRecharge(row as Employee)">
-                  一键充值
+                <ElButton size="small" text type="warning" :icon="Wallet" @click="handleLowBalanceRecharge(row as Employee)">
+                  充值
                 </ElButton>
               </template>
             </ElTableColumn>
             <template #empty>
-              <EmptyState description="暂无预警员工,所有员工余额充足" />
+              <EmptyState description="暂无低余额员工,所有员工余额充足" />
             </template>
           </ElTable>
 
@@ -1403,5 +1454,24 @@ const photoStats = computed(() => {
   padding: 2px;
   color: var(--el-text-color-secondary);
   cursor: help;
+}
+
+/* 选中操作条滑入动画 */
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.slide-down-enter-to,
+.slide-down-leave-from {
+  opacity: 1;
+  max-height: 60px;
 }
 </style>

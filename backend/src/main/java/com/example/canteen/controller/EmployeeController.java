@@ -319,6 +319,37 @@ public class EmployeeController {
     }
 
     /**
+     * 按阈值批量充值:给余额低于阈值的员工充值指定金额。
+     * 请求体:{ "storeId": 1, "threshold": 20, "amount": 100.00 }
+     * 返回:{ "successCount": N, "totalAmount": M }
+     */
+    @OperationLog(value = "余额充值", detail = "'门店ID ' + #body['storeId'] + ' 阈值 ' + #body['threshold'] + ' 金额 ' + #body['amount']")
+    @PostMapping("/low-balance/recharge")
+    public ApiResponse<Map<String, Object>> rechargeLowBalance(@RequestBody Map<String, Object> body) {
+        if (!SecurityContext.canViewFinance()) {
+            throw new com.example.canteen.exception.SecurityException("仅财务相关角色可充值");
+        }
+        Object storeIdObj = body.get("storeId");
+        Long storeId = storeIdObj != null
+                ? Long.valueOf(storeIdObj.toString())
+                : SecurityContext.currentStoreId();
+        if (storeId == null) {
+            throw new com.example.canteen.exception.BusinessException("缺少 storeId");
+        }
+        Object thresholdObj = body.get("threshold");
+        if (thresholdObj == null) {
+            throw new com.example.canteen.exception.BusinessException("缺少 threshold");
+        }
+        Object amountObj = body.get("amount");
+        if (amountObj == null) {
+            throw new com.example.canteen.exception.BusinessException("缺少 amount");
+        }
+        BigDecimal threshold = new BigDecimal(thresholdObj.toString());
+        BigDecimal amount = new BigDecimal(amountObj.toString());
+        return ApiResponse.success(employeeService.rechargeLowBalance(storeId, threshold, amount));
+    }
+
+    /**
      * 导出员工列表为 CSV(UTF-8 BOM,Excel 兼容)。
      * GET /api/employee/export?storeId=&keyword=&department=
      * 导出字段:姓名、卡号、部门、余额、状态、创建时间

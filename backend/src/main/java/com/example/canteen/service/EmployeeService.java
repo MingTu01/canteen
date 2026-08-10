@@ -346,6 +346,50 @@ public class EmployeeService {
     }
 
     /**
+     * 按阈值批量充值:给指定门店余额低于阈值的员工充值指定金额。
+     * 用于余额预警名单的批量充值。
+     */
+    @Transactional
+    public Map<String, Object> rechargeLowBalance(Long storeId, BigDecimal threshold, BigDecimal amount) {
+        SecurityContext.checkStoreAccess(storeId);
+        if (threshold == null) {
+            throw new BusinessException("阈值不能为空");
+        }
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException("充值金额必须大于0");
+        }
+        List<Employee> employees = employeeMapper.selectList(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getStoreId, storeId)
+                .eq(Employee::getIsDeleted, 0)
+                .lt(Employee::getBalance, threshold));
+        Long adminId = SecurityContext.currentAdminId();
+        String operatorLabel = adminId != null ? "余额充值(admin#" + adminId + ")" : "余额充值";
+        int successCount = 0;
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        for (Employee e : employees) {
+            BigDecimal balanceBefore = e.getBalance() == null ? BigDecimal.ZERO : e.getBalance();
+            employeeMapper.addBalance(e.getId(), amount);
+            Employee updated = employeeMapper.selectById(e.getId());
+            BigDecimal balanceAfter = updated != null && updated.getBalance() != null
+                    ? updated.getBalance() : balanceBefore.add(amount);
+            RechargeRecord record = new RechargeRecord();
+            record.setStoreId(storeId);
+            record.setEmployeeId(e.getId());
+            record.setAmount(amount);
+            record.setBalanceBefore(balanceBefore);
+            record.setBalanceAfter(balanceAfter);
+            record.setOperator(operatorLabel);
+            rechargeRecordMapper.insert(record);
+            successCount++;
+            totalAmount = totalAmount.add(amount);
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("successCount", successCount);
+        result.put("totalAmount", totalAmount);
+        return result;
+    }
+
+    /**
      * 批量重置密码:把指定员工 ID 列表的密码重置为默认密码 12345678,
      * 并标记 must_change_password=1(首次登录强制修改),同时刷新 password_updated_at 使旧 token 失效。
      * 会校验所有员工归属当前门店,防止跨门店越权。
