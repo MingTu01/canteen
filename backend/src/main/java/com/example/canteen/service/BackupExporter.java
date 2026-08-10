@@ -64,7 +64,7 @@ public class BackupExporter {
         return data;
     }
 
-    /** 按门店导出单表数据。menu_item/order_item 通过关联表过滤。 */
+    /** 按门店导出单表数据。子表(menu_item/order_item/purchase_item/group_order_item)通过关联表过滤。 */
     public List<Map<String, Object>> exportStoreTable(String table, Long storeId) {
         String sql;
         List<Map<String, Object>> rows;
@@ -79,6 +79,14 @@ public class BackupExporter {
                 break;
             case "order_item":
                 sql = "SELECT oi.* FROM order_item oi INNER JOIN `order` o ON oi.order_id = o.id WHERE o.store_id = ?";
+                rows = jdbcTemplate.queryForList(sql, storeId);
+                break;
+            case "purchase_item":
+                sql = "SELECT pi.* FROM purchase_item pi INNER JOIN purchase p ON pi.purchase_id = p.id WHERE p.store_id = ?";
+                rows = jdbcTemplate.queryForList(sql, storeId);
+                break;
+            case "group_order_item":
+                sql = "SELECT goi.* FROM group_order_item goi INNER JOIN group_order go ON goi.group_order_id = go.id WHERE go.store_id = ?";
                 rows = jdbcTemplate.queryForList(sql, storeId);
                 break;
             default:

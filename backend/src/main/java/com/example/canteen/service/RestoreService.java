@@ -106,21 +106,17 @@ public class RestoreService {
 
         // 按顺序插入
         int restoredRows = 0;
-        int redactedAdminsSkipped = 0;
         List<String> restoredTables = new ArrayList<>();
         for (String table : BackupConstants.TABLES_IN_ORDER) {
             List<Map<String, Object>> rows = data.get(table);
             if (rows == null || rows.isEmpty()) continue;
-            // P0-5 门店备份恢复时跳过 store 表插入(store 记录不删除,直接插入会主键冲突)
-            if (!"full".equals(type) && "store".equals(table)) continue;
-            int[] counts = insertRows(table, rows);
-            restoredRows += counts[0];
-            redactedAdminsSkipped += counts[1];
+            int inserted = insertRows(table, rows);
+            restoredRows += inserted;
             restoredTables.add(table);
         }
 
         // 恢复后只读校验:关键表行数应与备份声明一致(不一致则抛异常回滚事务)
-        verifyRestoredData(document, data, redactedAdminsSkipped);
+        verifyRestoredData(document, data);
 
         // 恢复成功后清理 Redis 缓存(dish/menu),避免前端读到旧数据
         // 全库恢复清理所有门店缓存;门店恢复只清理该门店缓存
@@ -133,7 +129,6 @@ public class RestoreService {
         result.put("storeName", document.get("storeName"));
         result.put("restoredTables", restoredTables);
         result.put("restoredRows", restoredRows);
-        result.put("redactedAdminsSkipped", redactedAdminsSkipped);
         result.put("preRestoreSnapshot", snapshotName);
         return result;
     }
@@ -170,22 +165,24 @@ public class RestoreService {
     }
 
     /**
-     * 恢复后只读校验:对每个表执行 COUNT(*),应与备份声明行数一致。
-     * 不一致则抛异常,触发事务回滚。
+     * 恢复后只读校验。
+     *
+     * 全库恢复:对 TABLES_IN_ORDER 中每个表执行 COUNT(*),应与备份声明行数一致。
+     * 门店恢复:多门店场景下全表 COUNT 不等于备份行数(其他门店数据仍在),
+     *          仅依赖 insertRows 返回的插入行数校验(插入失败会抛异常触发回滚)。
+     *
+     * 仅校验当前版本备份的表(TABLES_IN_ORDER),旧版备份中可能包含 admin 等已移除的表,
+     * 这些表不会被恢复也不会被校验,确保向后兼容。
      */
     private void verifyRestoredData(Map<String, Object> document,
-                                    Map<String, List<Map<String, Object>>> data,
-                                    int redactedAdminsSkipped) {
+                                    Map<String, List<Map<String, Object>>> data) {
         String type = (String) document.getOrDefault("type", "full");
-        for (Map.Entry<String, List<Map<String, Object>>> e : data.entrySet()) {
-            String table = e.getKey();
-            int expected = e.getValue().size();
-            // 脱敏 admin 行被跳过,admin 表预期行数相应减少
-            if ("admin".equals(table)) {
-                expected -= redactedAdminsSkipped;
-            }
-            // P0-5 门店备份恢复时跳过 store 表校验(store 记录不删除,全表总数不匹配)
-            if (!"full".equals(type) && "store".equals(table)) continue;
+        // 门店恢复跳过 COUNT 校验:多门店场景下全表总数不等于该门店备份行数
+        if (!"full".equals(type)) return;
+        for (String table : BackupConstants.TABLES_IN_ORDER) {
+            List<Map<String, Object>> rows = data.get(table);
+            if (rows == null) continue;
+            int expected = rows.size();
             int actual;
             try {
                 Integer count = jdbcTemplate.queryForObject(
@@ -208,37 +205,46 @@ public class RestoreService {
         }
     }
 
-    /** 删除指定门店的业务数据(含级联子表)。 */
+    /** 删除指定门店的业务数据(含级联子表 + store 记录)。
+     *  store 记录一并删除,以便从备份还原门店配置(名称/logo/安全码等)。 */
     private void deleteStoreData(Long storeId) {
-        // 子表先删
+        // 子表先删(通过 JOIN 过滤的子表)
         jdbcTemplate.update("DELETE oi FROM order_item oi INNER JOIN `order` o ON oi.order_id = o.id WHERE o.store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM `order` WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM recharge_record WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE mi FROM menu_item mi INNER JOIN menu m ON mi.menu_id = m.id WHERE m.store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM menu WHERE store_id = ?", storeId);
+        jdbcTemplate.update("DELETE pi FROM purchase_item pi INNER JOIN purchase p ON pi.purchase_id = p.id WHERE p.store_id = ?", storeId);
+        jdbcTemplate.update("DELETE FROM purchase WHERE store_id = ?", storeId);
+        jdbcTemplate.update("DELETE goi FROM group_order_item goi INNER JOIN group_order go ON goi.group_order_id = go.id WHERE go.store_id = ?", storeId);
+        jdbcTemplate.update("DELETE FROM group_order WHERE store_id = ?", storeId);
+        // 带_store_id_的表直接按 store_id 删
+        jdbcTemplate.update("DELETE FROM stock_count WHERE store_id = ?", storeId);
+        jdbcTemplate.update("DELETE FROM daily_close WHERE store_id = ?", storeId);
+        jdbcTemplate.update("DELETE FROM daily_settlement WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM notification WHERE store_id = ?", storeId);
+        jdbcTemplate.update("DELETE FROM feedback WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM dining_time_slot WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM employee WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM dish_category WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM dish WHERE store_id = ?", storeId);
         jdbcTemplate.update("DELETE FROM department WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM admin WHERE store_id = ?", storeId);
-        // store 表本身不删(门店记录保留)
+        jdbcTemplate.update("DELETE FROM supplier WHERE store_id = ?", storeId);
+        jdbcTemplate.update("DELETE FROM material WHERE store_id = ?", storeId);
+        // admin 表不删除:管理员账号不参与备份/恢复,保持现状
+        // store 表最后删:门店配置随备份还原
+        jdbcTemplate.update("DELETE FROM store WHERE id = ?", storeId);
     }
 
     /**
      * 批量插入行。动态构建 INSERT,保留备份中的原始值(含 id)。
-     * 返回 [插入行数, 因敏感脱敏跳过的 admin 行数]。
+     * 返回插入行数。
      */
-    private int[] insertRows(String table, List<Map<String, Object>> rows) {
-        if (rows.isEmpty()) return new int[]{0, 0};
+    private int insertRows(String table, List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) return 0;
         // 取列名(以第一行为准)
         Map<String, Object> first = rows.get(0);
         List<String> columns = new ArrayList<>(first.keySet());
-
-        // P0-3 防提权:恢复 admin 表时,门店管理员(role>=2)不能创建比自己角色更高的账号(如超管 role=1)
-        Integer callerRole = SecurityContext.currentRole();
-        boolean clampAdminRole = "admin".equals(table) && callerRole != null && callerRole >= 2;
 
         StringBuilder sql = new StringBuilder("INSERT INTO ");
         sql.append(backupService.quoteTable(table)).append(" (");
@@ -254,29 +260,7 @@ public class RestoreService {
         sql.append(")");
 
         List<Object[]> batchArgs = new ArrayList<>();
-        int skipped = 0;
         for (Map<String, Object> row : rows) {
-            // 脱敏 admin 行跳过:password 为占位符时说明该账号密码未随备份导出,
-            // 直接写入会得到无效密码导致无法登录。跳过该行,由部署脚本(INIT_ADMIN_*)或
-            // 后续管理员重置密码重建,避免恢复出不可登录账号。
-            if ("admin".equals(table)
-                    && BackupConstants.REDACTED_PLACEHOLDER.equals(row.get("password"))) {
-                skipped++;
-                continue;
-            }
-            // P0-3 对 admin 表的 role 字段做 clamp:不低于调用者角色(防注入超管)
-            if (clampAdminRole && row.containsKey("role")) {
-                Object roleObj = row.get("role");
-                Integer rowRole = null;
-                if (roleObj instanceof Number) {
-                    rowRole = ((Number) roleObj).intValue();
-                } else if (roleObj != null) {
-                    try { rowRole = Integer.parseInt(roleObj.toString()); } catch (Exception ignore) {}
-                }
-                if (rowRole != null && rowRole < callerRole) {
-                    row.put("role", callerRole); // clamp to caller's role
-                }
-            }
             Object[] args = new Object[columns.size()];
             for (int i = 0; i < columns.size(); i++) {
                 args[i] = backupService.convertValue(row.get(columns.get(i)));
@@ -288,7 +272,7 @@ public class RestoreService {
             int[] counts = jdbcTemplate.batchUpdate(sql.toString(), batchArgs);
             for (int c : counts) inserted += c;
         }
-        return new int[]{inserted, skipped};
+        return inserted;
     }
 
     /**
