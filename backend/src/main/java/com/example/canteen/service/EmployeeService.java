@@ -141,11 +141,12 @@ public class EmployeeService {
                 && employeeMapper.countByCardNoExcludeId(employee.getCardNo(), employee.getId()) > 0) {
             throw new BusinessException("卡号已存在: " + employee.getCardNo());
         }
-        // P0-1 禁止通过 update 修改敏感字段:余额(只能走 recharge)/密码新鲜度/删除标记
+        // P0-1 禁止通过 update 修改敏感字段:余额(只能走 recharge)/密码新鲜度/删除标记/强制改密标记
         // 设为 null 后,MyBatis Plus 默认 NOT_NULL 策略会跳过这些字段不更新
         employee.setBalance(null);
         employee.setPasswordUpdatedAt(null);
         employee.setIsDeleted(null);
+        employee.setMustChangePassword(null);
         // 密码为空表示不修改;非空且非 BCrypt 才加密
         String pwd = employee.getPassword();
         if (pwd != null && !pwd.isBlank()
