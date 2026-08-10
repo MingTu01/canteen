@@ -1246,6 +1246,169 @@ menu_clean_images() {
 }
 
 #==============================================================
+# 19. 重置数据库(清空业务数据,保留超管账号)
+#==============================================================
+menu_reset_db() {
+    echo ""
+    echo -e "${RED}========== 重置数据库 ==========${NC}"
+    echo ""
+    echo -e "  ${YELLOW}⚠️  危险操作:将清空所有业务数据!${NC}"
+    echo ""
+    echo "  将执行以下操作:"
+    echo "    1. 自动备份当前数据(以防万一)"
+    echo "    2. 清空 MySQL 所有业务表数据(食堂数据/订单/菜品等)"
+    echo "    3. 清空 Redis 所有缓存"
+    echo "    4. 保留超级管理员账号(role=1),删除其他管理员"
+    echo "    5. 重启后端服务"
+    echo ""
+    echo -e "  ${RED}此操作不可逆!清空后需要重新创建食堂、配置数据。${NC}"
+    echo ""
+
+    # 读取 .env 中的密码
+    local envfile="$PROJECT_DIR/.env"
+    if [[ ! -f "$envfile" ]]; then
+        error ".env 文件不存在,无法读取数据库密码"
+        pause
+        return
+    fi
+
+    # 三次确认
+    if ! confirm "确定要清空所有业务数据吗?"; then
+        info "已取消"
+        pause
+        return
+    fi
+    echo ""
+    echo -e "${RED}请输入 YES 确认(全大写):${NC}"
+    read -r confirm_text
+    if [[ "$confirm_text" != "YES" ]]; then
+        info "确认失败,已取消"
+        pause
+        return
+    fi
+
+    # 读取密码
+    local mysql_pass redis_pass
+    mysql_pass=$(grep -E "^MYSQL_ROOT_PASSWORD=" "$envfile" 2>/dev/null | head -1 | cut -d'=' -f2-)
+    redis_pass=$(grep -E "^REDIS_PASSWORD=" "$envfile" 2>/dev/null | head -1 | cut -d'=' -f2-)
+
+    if [[ -z "$mysql_pass" ]]; then
+        error "无法读取 MYSQL_ROOT_PASSWORD"
+        pause
+        return
+    fi
+
+    # 步骤 1:自动备份
+    echo ""
+    info "步骤 1/4:自动备份当前数据..."
+    local backup_prefix="pre_reset_$(date +%Y%m%d_%H%M%S)"
+    if docker exec canteen-backend java -jar app.jar --backup="$backup_prefix" 2>/dev/null; then
+        info "已创建备份: $backup_prefix"
+    else
+        # 后端不支持 --backup 参数时,用 mysqldump 直接备份
+        local backup_file="$PROJECT_DIR/backup/${backup_prefix}.sql.gz"
+        mkdir -p "$PROJECT_DIR/backup" 2>/dev/null
+        if docker exec canteen-mysql mysqldump -uroot -p"$mysql_pass" canteen 2>/dev/null | gzip > "$backup_file"; then
+            info "已创建备份: $(basename "$backup_file")"
+        else
+            warn "自动备份失败!继续重置将无法回滚。"
+            if ! confirm "备份失败,是否仍然继续重置?"; then
+                info "已取消"
+                pause
+                return
+            fi
+        fi
+    fi
+
+    # 步骤 2:清空 MySQL 业务表
+    echo ""
+    info "步骤 2/4:清空 MySQL 业务数据..."
+    local sql
+    sql="SET FOREIGN_KEY_CHECKS=0;"
+    sql="${sql} DELETE FROM canteen.dining_time_slot;"
+    sql="${sql} DELETE FROM canteen.group_order_item;"
+    sql="${sql} DELETE FROM canteen.group_order;"
+    sql="${sql} DELETE FROM canteen.order_item;"
+    sql="${sql} DELETE FROM canteen.\`order\`;"
+    sql="${sql} DELETE FROM canteen.daily_settlement;"
+    sql="${sql} DELETE FROM canteen.daily_close;"
+    sql="${sql} DELETE FROM canteen.recharge_record;"
+    sql="${sql} DELETE FROM canteen.feedback;"
+    sql="${sql} DELETE FROM canteen.notification;"
+    sql="${sql} DELETE FROM canteen.menu_item;"
+    sql="${sql} DELETE FROM canteen.menu;"
+    sql="${sql} DELETE FROM canteen.dish;"
+    sql="${sql} DELETE FROM canteen.dish_category;"
+    sql="${sql} DELETE FROM canteen.employee;"
+    sql="${sql} DELETE FROM canteen.department;"
+    sql="${sql} DELETE FROM canteen.stock_count;"
+    sql="${sql} DELETE FROM canteen.purchase_item;"
+    sql="${sql} DELETE FROM canteen.purchase;"
+    sql="${sql} DELETE FROM canteen.material;"
+    sql="${sql} DELETE FROM canteen.supplier;"
+    sql="${sql} DELETE FROM canteen.store;"
+    # 保留超管(role=1),删除其他管理员
+    sql="${sql} DELETE FROM canteen.admin WHERE role != 1;"
+    # 重置超管的 store_id 为 0(全局)
+    sql="${sql} UPDATE canteen.admin SET store_id=0 WHERE role=1;"
+    sql="${sql} SET FOREIGN_KEY_CHECKS=1;"
+
+    if ! docker exec canteen-mysql mysql -uroot -p"$mysql_pass" -e "$sql" 2>/dev/null; then
+        error "MySQL 清空失败!请检查数据库状态。"
+        echo "  可用备份恢复: $backup_prefix"
+        pause
+        return
+    fi
+    info "MySQL 业务数据已清空(超管账号已保留)"
+
+    # 步骤 3:清空 Redis
+    echo ""
+    info "步骤 3/4:清空 Redis 缓存..."
+    if [[ -n "$redis_pass" ]]; then
+        docker exec canteen-redis redis-cli -a "$redis_pass" FLUSHALL 2>/dev/null
+    else
+        docker exec canteen-redis redis-cli FLUSHALL 2>/dev/null
+    fi
+    info "Redis 缓存已清空"
+
+    # 步骤 4:重启后端
+    echo ""
+    info "步骤 4/4:重启后端服务..."
+    docker compose restart backend 2>/dev/null
+    if [[ $? -eq 0 ]]; then
+        info "后端服务已重启"
+    else
+        warn "后端重启失败,请手动执行: docker compose restart backend"
+    fi
+
+    # 校验结果
+    echo ""
+    info "校验清理结果..."
+    local check_sql
+    check_sql="SELECT CONCAT('store=',(SELECT COUNT(*) FROM canteen.store),"
+    check_sql="${check_sql} ' admin=',(SELECT COUNT(*) FROM canteen.admin),"
+    check_sql="${check_sql} ' employee=',(SELECT COUNT(*) FROM canteen.employee),"
+    check_sql="${check_sql} ' dish=',(SELECT COUNT(*) FROM canteen.dish));"
+    docker exec canteen-mysql mysql -uroot -p"$mysql_pass" -N -e "$check_sql" 2>/dev/null
+
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN} 数据库重置完成!${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+    echo "  接下来请:"
+    echo "    1. 登录管理后台(超管账号不变)"
+    echo "    2. 创建食堂"
+    echo "    3. 指派食堂管理员"
+    echo "    4. 配置菜品、员工等数据"
+    echo ""
+    echo -e "  备份文件: ${CYAN}$backup_prefix${NC}"
+    echo -e "  如需回滚:可通过菜单 5)恢复备份 还原"
+    echo ""
+    pause
+}
+
+#==============================================================
 # 16. 查看配置信息(新增,密码脱敏)
 #==============================================================
 menu_config() {
@@ -1382,6 +1545,7 @@ show_menu() {
     echo -e "${BLUE}║${NC}  16) 查看配置信息 ${YELLOW}(.env脱敏+访问地址)${NC}              ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  17) 数据库/项目自检自愈 ${YELLOW}(崩溃自动修复)${NC}             ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  18) 后台定时自愈监控 ${YELLOW}(每5分钟自动检测+修复)${NC}          ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  19) 重置数据库 ${RED}(清空业务数据,保留超管)${NC}              ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}   0) 退出                                               ${BLUE}║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
@@ -1391,7 +1555,7 @@ show_menu() {
 main_loop() {
     while true; do
         show_menu
-        read -p "$(echo -e "${CYAN}请选择 [0-18]: ${NC}")" choice
+        read -p "$(echo -e "${CYAN}请选择 [0-19]: ${NC}")" choice
 
         case "$choice" in
             1) menu_upgrade_all ;;
@@ -1412,6 +1576,7 @@ main_loop() {
             16) menu_config ;;
             17) menu_self_heal ;;
             18) menu_self_heal_schedule ;;
+            19) menu_reset_db ;;
             0|q|quit|exit)
                 echo ""
                 info "再见!"
