@@ -1,0 +1,6 @@
+import{d,o as m,c as p,a,ad as t,b as o,e as r,n as i,w as n,p as l}from"./index-DwF-f_qf.js";import{c as f}from"./createLucideIcon-Cdkm0xGo.js";import{R as u}from"./rotate-ccw-BGPjSgGX.js";/**
+ * @license lucide-vue-next v0.323.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const b=f("SearchIcon",[["circle",{cx:"11",cy:"11",r:"8",key:"4ej97u"}],["path",{d:"m21 21-4.3-4.3",key:"1qie3q"}]]),x={class:"mb-5 rounded-xl border border-border bg-card p-4 shadow-sm",role:"search","aria-label":"搜索"},h={class:"flex flex-wrap items-center gap-3"},k={class:"flex flex-1 flex-wrap items-center gap-3 min-w-0"},w={class:"flex shrink-0 items-center gap-2"},B=d({__name:"SearchBar",emits:["search","reset"],setup(_){return(s,e)=>(m(),p("div",x,[a("div",h,[a("div",k,[t(s.$slots,"default")]),a("div",w,[t(s.$slots,"actions"),o(r(i),{type:"primary",icon:r(b),"aria-label":"搜索",onClick:e[0]||(e[0]=c=>s.$emit("search"))},{default:n(()=>[...e[2]||(e[2]=[l(" 搜索 ",-1)])]),_:1},8,["icon"]),o(r(i),{icon:r(u),"aria-label":"重置",onClick:e[1]||(e[1]=c=>s.$emit("reset"))},{default:n(()=>[...e[3]||(e[3]=[l(" 重置 ",-1)])]),_:1},8,["icon"])])])]))}});export{B as _};

@@ -22,6 +22,8 @@ import os
 import re
 import sys
 import glob
+import gzip
+import json
 import shutil
 import subprocess
 import argparse
@@ -61,6 +63,20 @@ CORRUPT_KEYWORDS = [
     "data dictionary",
     "table does not exist",
 ]
+
+# 管理后台备份(JSON+GZIP 格式)的业务表清单,与 backend BackupConstants 保持一致。
+# 用于 MySQL 自愈时从管理后台全库备份(full_*.json.gz)恢复。
+JAVA_TABLES_IN_ORDER = [
+    "store", "admin", "department", "dish", "dish_category",
+    "employee", "menu", "menu_item", "dining_time_slot",
+    "notification", "order", "order_item", "recharge_record",
+]
+JAVA_TABLES_DELETE_ORDER = [
+    "order_item", "order", "recharge_record", "menu_item", "menu",
+    "notification", "dining_time_slot", "employee", "dish_category",
+    "dish", "department", "admin", "store",
+]
+JAVA_FORMAT_VERSION = "2.0"
 
 # GitHub 加速器(国内服务器直连 GitHub 会超时)
 GITHUB_PROXIES = [
@@ -451,6 +467,105 @@ def restore_from_backup_file(backup_file, db_pass, db_name, enc_key):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _qt(table):
+    """引用表名(order 是 MySQL 保留字)。"""
+    if table == "order":
+        return "`order`"
+    return table
+
+
+def _qc(col):
+    """引用列名:仅允许字母/数字/下划线,防 SQL 注入。"""
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", str(col)):
+        raise ValueError("非法列名: %s" % col)
+    return "`" + str(col) + "`"
+
+
+def _sql_literal(v):
+    """把 JSON 反序列化后的值转成安全的 SQL 字面量。
+    处理:null/bool/数值/日期(ISO T 转空格)/字符串转义。"""
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "1" if v else "0"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, dict) or isinstance(v, list):
+        s = json.dumps(v, ensure_ascii=False)
+    else:
+        s = str(v)
+        # LocalDateTime 序列化为 ISO 格式(含 T),MySQL DATETIME 需空格分隔
+        if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", s):
+            s = s.replace("T", " ", 1)
+    return _shq(s)
+
+
+def find_latest_java_full_backup():
+    """返回最新管理后台全库备份(full_*.json.gz),无则 None。
+    仅接受全库备份;门店级备份不适用于物理全库重建(门店隔离由应用层保障)。"""
+    backup_dir = os.path.join(PROJECT_DIR, "backup")
+    if not os.path.isdir(backup_dir):
+        return None
+    files = glob.glob(os.path.join(backup_dir, "full_*.json.gz"))
+    if not files:
+        return None
+    return max(files, key=os.path.getmtime)
+
+
+def restore_from_java_backup(backup_file, db_pass, db_name):
+    """从管理后台全库备份(JSON+GZIP)恢复数据库。
+    仅支持 type=full 的全库备份;作为 snapshot/tar.gz 缺失时的最后兜底。
+    返回 bool。"""
+    info("从管理后台全库备份恢复: %s" % os.path.basename(backup_file))
+    try:
+        with gzip.open(backup_file, "rt", encoding="utf-8") as f:
+            doc = json.load(f)
+    except Exception as e:
+        warn("解析 JSON 备份失败: %s" % e)
+        return False
+
+    if str(doc.get("version")) != JAVA_FORMAT_VERSION:
+        warn("JSON 备份版本不兼容: %s(期望 %s)" % (doc.get("version"), JAVA_FORMAT_VERSION))
+        return False
+    if str(doc.get("type")) != "full":
+        warn("仅支持全库 JSON 备份恢复(当前 type=%s)" % doc.get("type"))
+        return False
+    data = doc.get("data") or {}
+    if not isinstance(data, dict):
+        warn("JSON 备份缺少 data 字段")
+        return False
+
+    # 生成 SQL:先清空(子表在前),再按依赖顺序插入
+    sql = []
+    for table in JAVA_TABLES_DELETE_ORDER:
+        sql.append("DELETE FROM %s;" % _qt(table))
+    for table in JAVA_TABLES_IN_ORDER:
+        rows = data.get(table)
+        if not rows:
+            continue
+        cols = list(rows[0].keys())
+        col_list = ", ".join(_qc(c) for c in cols)
+        for row in rows:
+            vals = ", ".join(_sql_literal(row.get(c)) for c in cols)
+            sql.append("INSERT INTO %s (%s) VALUES (%s);" % (_qt(table), col_list, vals))
+
+    # 写入临时 SQL 文件,经 stdin 交给容器内 mysql 导入(避免命令行长度/转义问题)
+    tmp = subprocess.check_output(["mktemp", "-d"], universal_newlines=True).strip()
+    sql_file = os.path.join(tmp, "restore.sql")
+    try:
+        with open(sql_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(sql))
+        cmd = "docker exec -i -e MYSQL_PWD=%s mysql -uroot %s < %s" % (
+            _shq(db_pass), db_name, _shq(sql_file))
+        rc, out, err = run(["bash", "-c", cmd], timeout=600)
+        if rc != 0:
+            warn("JSON 备份恢复失败: %s" % (err or out).strip()[:500])
+            return False
+        return True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def repair_mysql():
     """修复 MySQL:备份损坏数据 → 备份优先恢复 → 无备份重建空库。"""
     title("修复 MySQL")
@@ -522,7 +637,7 @@ def repair_mysql():
         return False
     info("MySQL 已健康")
 
-    # 5. 恢复数据:先快照,再独立备份;都没有则重建空库
+    # 5. 恢复数据:先快照,再 shell 独立备份,再管理后台全库备份(JSON+GZIP);都没有则重建空库
     db_name = read_env("MYSQL_DATABASE") or "canteen"
     restored = False
     if snap:
@@ -531,6 +646,13 @@ def repair_mysql():
             restored = restore_from_backup_file(backup_file, db_pass, db_name, enc_key)
     elif backup_file:
         restored = restore_from_backup_file(backup_file, db_pass, db_name, enc_key)
+
+    # 兜底:脚本层备份缺失时,尝试从管理后台全库备份恢复(避免静默重建空库丢数据)
+    if not restored:
+        java_full = find_latest_java_full_backup()
+        if java_full:
+            info("脚本层无可用备份,尝试从管理后台全库备份恢复...")
+            restored = restore_from_java_backup(java_full, db_pass, db_name)
 
     if restored:
         info("数据已从备份/快照恢复")
