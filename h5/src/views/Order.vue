@@ -877,8 +877,8 @@ const resetToTodayAndLoad = async (): Promise<void> => {
 }
 
 onMounted(async () => {
-  // 加载后端订餐配置(截止时间、提前天数等),供 isOrderableByDeadline 使用
-  await loadConfig()
+  // 加载后端订餐配置(按门店,截止时间、提前天数等),供 isOrderableByDeadline 使用
+  await loadConfig(authStore.storeId)
   await Promise.all([loadDiningTimes(), fetchOrderedOrders()])
   await resetToTodayAndLoad()
 })

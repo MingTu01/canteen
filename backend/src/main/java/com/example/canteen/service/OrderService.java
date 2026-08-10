@@ -85,49 +85,67 @@ public class OrderService {
     }
 
     /**
-     * 读取 sys_config 中的时间配置(HH:mm),默认 15:00。
-     * @param key 配置键,如 order_deadline_time / cancel_deadline_time
-     */
-    private LocalTime getDeadlineTime(String key) {
+ * 读取时间配置(HH:mm),默认 15:00。
+ * 读取顺序:store_config(按门店) → sys_config(全局) → 默认 15:00
+ * @param storeId 门店 ID(可空,空则只读全局)
+ * @param key 配置键,如 order_deadline_time / cancel_deadline_time
+ */
+private LocalTime getDeadlineTime(Long storeId, String key) {
+    // 1. 门店级配置
+    if (storeId != null) {
         try {
             String v = jdbcTemplate.queryForObject(
-                    "SELECT config_value FROM sys_config WHERE config_key = ?",
-                    String.class, key);
+                    "SELECT config_value FROM store_config WHERE store_id = ? AND config_key = ?",
+                    String.class, storeId, key);
             if (v != null && !v.isBlank()) {
                 String[] parts = v.trim().split(":");
                 return LocalTime.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
             }
         } catch (Exception ignored) {
         }
-        return LocalTime.of(15, 0);
+    }
+    // 2. 全局配置
+    try {
+        String v = jdbcTemplate.queryForObject(
+                "SELECT config_value FROM sys_config WHERE config_key = ?",
+                String.class, key);
+        if (v != null && !v.isBlank()) {
+            String[] parts = v.trim().split(":");
+            return LocalTime.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+        }
+    } catch (Exception ignored) {
+    }
+    return LocalTime.of(15, 0);
+}
+
+/**
+ * 校验订单时间窗(下单/取消共用):
+ * 业务规则:订单日期 X 的截止时间是 (X-1) deadlineTime,即"前一天 15:00 前可操作"。
+ * - 今天及之前:截止时间(昨天15:00)已过 → 拒绝
+ * - 明天:截止时间是今天15:00 → 今天15:00前允许
+ * - 后天及以后:截止时间在未来 → 允许
+ * @param storeId 门店 ID(用于按门店读取截止时间)
+ * @param orderDate 订单日期
+ * @param action "下单" 或 "取消",用于决定读哪个配置键
+ */
+private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String action) {
+    LocalDate today = LocalDate.now(ZONE_SHANGHAI);
+    if (orderDate == null) return;
+    String key = "取消".equals(action) ? "cancel_deadline_time" : "order_deadline_time";
+    LocalTime deadline = getDeadlineTime(storeId, key);
+    LocalDateTime now = LocalDateTime.now(ZONE_SHANGHAI);
+
+    if (!orderDate.isAfter(today)) {
+        // 今天及之前:截止时间(前一天15:00)已过
+        throw new BusinessException("订单需在前一天 " + deadline + " 之前" + action + ",已截止");
     }
 
-    /**
-     * 校验订单时间窗(下单/取消共用):
-     * 业务规则:订单日期 X 的截止时间是 (X-1) deadlineTime,即"前一天 15:00 前可操作"。
-     * - 今天及之前:截止时间(昨天15:00)已过 → 拒绝
-     * - 明天:截止时间是今天15:00 → 今天15:00前允许
-     * - 后天及以后:截止时间在未来 → 允许
-     * @param action "下单" 或 "取消",用于决定读哪个配置键
-     */
-    private void checkAdvanceOrderDeadline(LocalDate orderDate, String action) {
-        LocalDate today = LocalDate.now(ZONE_SHANGHAI);
-        if (orderDate == null) return;
-        String key = "取消".equals(action) ? "cancel_deadline_time" : "order_deadline_time";
-        LocalTime deadline = getDeadlineTime(key);
-        LocalDateTime now = LocalDateTime.now(ZONE_SHANGHAI);
-
-        if (!orderDate.isAfter(today)) {
-            // 今天及之前:截止时间(前一天15:00)已过
-            throw new BusinessException("订单需在前一天 " + deadline + " 之前" + action + ",已截止");
-        }
-
-        // 未来订单:检查是否已过前一天截止时间
-        LocalDateTime deadlineAt = LocalDateTime.of(orderDate.minusDays(1), deadline);
-        if (now.isAfter(deadlineAt)) {
-            throw new BusinessException("次日订单需在前一天 " + deadline + " 之前" + action + ",已截止");
-        }
+    // 未来订单:检查是否已过前一天截止时间
+    LocalDateTime deadlineAt = LocalDateTime.of(orderDate.minusDays(1), deadline);
+    if (now.isAfter(deadlineAt)) {
+        throw new BusinessException("次日订单需在前一天 " + deadline + " 之前" + action + ",已截止");
     }
+}
 
     // 已降级为默认隔离级别(REPEATABLE_READ),防重复下单由 selectByEmployeeDateMeal + 余额原子扣减保证
     @Transactional
@@ -171,7 +189,7 @@ public class OrderService {
 
         // 次日订单截止校验:未订餐用餐(现场加餐)绕过此校验
         if (!isUnsolicited) {
-            checkAdvanceOrderDeadline(orderDate, "下单");
+            checkAdvanceOrderDeadline(storeId, orderDate, "下单");
         }
 
         Employee employee = employeeMapper.selectById(employeeId);
@@ -351,7 +369,7 @@ public class OrderService {
             throw new BusinessException("订单状态不允许取消");
         }
         // 次日订单取消截止校验:前一天 15:00 之后不可取消次日
-        checkAdvanceOrderDeadline(order.getDate(), "取消");
+        checkAdvanceOrderDeadline(order.getStoreId(), order.getDate(), "取消");
 
         // 预检员工账户:退款需要员工账户有效(软删除后 selectById 返回 null)
         // 提前抛异常,避免状态更新后再因退款失败回滚事务,导致提示与实际状态不符

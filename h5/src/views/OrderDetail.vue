@@ -88,7 +88,7 @@ const loadDetail = async (): Promise<void> => {
 }
 
 onMounted(() => {
-  loadConfig()
+  loadConfig(authStore.storeId)
   loadDetail()
 })
 

@@ -14,7 +14,7 @@
  */
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '@/api'
+import api, { loadConfig as loadTerminalConfig } from '@/api'
 import {
   orderStore,
   resetOrderFlow,
@@ -366,8 +366,8 @@ onMounted(async () => {
     router.replace('/order')
     return
   }
-  // 先加载订餐截止配置(驱动可订餐日期范围)
-  await loadConfig()
+  // 先加载订餐截止配置(按门店,驱动可订餐日期范围)
+  await loadConfig(loadTerminalConfig()?.storeId ?? null)
   // 默认选中可订餐起始日期
   if (!orderStore.selectedDate || !allDates.value.includes(orderStore.selectedDate)) {
     orderStore.selectedDate = startDateKey.value

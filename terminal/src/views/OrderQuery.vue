@@ -20,7 +20,7 @@
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '@/api'
+import api, { loadConfig as loadTerminalConfig } from '@/api'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
 import { useOrderConfig } from '@/composables/useOrderConfig'
@@ -215,8 +215,8 @@ onMounted(async () => {
     router.replace('/order')
     return
   }
-  // 先加载订餐截止配置(驱动取消按钮可见性)
-  await loadConfig()
+  // 先加载订餐截止配置(按门店,驱动取消按钮可见性)
+  await loadConfig(loadTerminalConfig()?.storeId ?? null)
   selectedDate.value = today
   await fetchOrders()
   // 今日无订单,自动选中默认窗口内最近的有订单日期

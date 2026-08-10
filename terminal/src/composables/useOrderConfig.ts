@@ -24,12 +24,15 @@ const config = ref<OrderConfig>({
   allow_cross_day_order: true,
 })
 let loaded = false
+let loadedStoreId: number | null = null
 
 export function useOrderConfig() {
-  const loadConfig = async () => {
-    if (loaded) return config.value
+  const loadConfig = async (storeId?: number | null) => {
+    // 门店切换后重新加载
+    if (loaded && loadedStoreId === (storeId ?? null)) return config.value
     try {
-      const res = await api.get('/system/order-config')
+      const params = storeId ? { storeId } : undefined
+      const res = await api.get('/system/order-config', { params })
       if (res.data?.data) {
         const d = res.data.data
         config.value = {
@@ -40,6 +43,7 @@ export function useOrderConfig() {
           allow_cross_day_order: d.allow_cross_day_order === 'true',
         }
         loaded = true
+        loadedStoreId = storeId ?? null
       }
     } catch {
       /* 使用默认值 */

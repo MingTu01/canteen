@@ -5,7 +5,7 @@ import PageContainer from '@/components/PageContainer.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { menuApi, dishApi, systemApi } from '@/api'
-import type { Dish, MenuWithItems, SystemConfig } from '@/api'
+import type { Dish, MenuWithItems } from '@/api'
 import { MEAL_TYPE } from '@/constants/dict'
 import {
   ElButton,
@@ -32,7 +32,6 @@ import { normalizeList } from '@/utils/list'
 const authStore = useAuthStore()
 // 超管未选择食堂时返回 null,不再静默回退到 storeId=1
 const storeId = computed(() => authStore.storeId || null)
-const isSuperAdmin = computed(() => authStore.isSuperAdmin)
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
@@ -487,7 +486,7 @@ const confirmConflicts = async () => {
   }
 }
 
-// ===== 订餐配置弹窗 =====
+// ===== 订餐配置弹窗(按门店) =====
 const orderConfigVisible = ref(false)
 const orderConfigSaving = ref(false)
 const orderForm = ref({
@@ -498,31 +497,17 @@ const orderForm = ref({
   allow_cross_day_order: true,
 })
 
-const getStr = (list: SystemConfig[], key: string, def = ''): string => {
-  const item = list.find((c) => c.config_key === key)
-  return item?.config_value ?? def
-}
-const getNum = (list: SystemConfig[], key: string, def = 0): number => {
-  const v = getStr(list, key)
-  const n = Number(v)
-  return isNaN(n) ? def : n
-}
-const getBool = (list: SystemConfig[], key: string, def = false): boolean => {
-  const v = getStr(list, key).toLowerCase()
-  if (v === 'true' || v === '1') return true
-  if (v === 'false' || v === '0') return false
-  return def
-}
-
 const fetchOrderConfig = async () => {
+  const sidVal = storeId.value
+  if (!sidVal) return
   try {
-    const list = await systemApi.config()
+    const cfg = await systemApi.getOrderConfig(sidVal)
     orderForm.value = {
-      order_advance_days: getNum(list, 'order_advance_days', 7),
-      order_deadline_time: getStr(list, 'order_deadline_time', '15:00'),
-      cancel_deadline_time: getStr(list, 'cancel_deadline_time', '15:00'),
-      max_order_quantity: getNum(list, 'max_order_quantity', 10),
-      allow_cross_day_order: getBool(list, 'allow_cross_day_order', true),
+      order_advance_days: Number(cfg.order_advance_days) || 7,
+      order_deadline_time: cfg.order_deadline_time || '15:00',
+      cancel_deadline_time: cfg.cancel_deadline_time || '15:00',
+      max_order_quantity: Number(cfg.max_order_quantity) || 10,
+      allow_cross_day_order: cfg.allow_cross_day_order === true || cfg.allow_cross_day_order === 'true',
     }
   } catch {
     /* 拦截器提示 */
@@ -535,9 +520,14 @@ const openOrderConfig = () => {
 }
 
 const saveOrderConfig = async () => {
+  const sidVal = storeId.value
+  if (!sidVal) {
+    ElMessage.warning('请先选择食堂')
+    return
+  }
   orderConfigSaving.value = true
   try {
-    await systemApi.batchUpdateConfig([
+    await systemApi.updateOrderConfig(sidVal, [
       { key: 'order_advance_days', value: String(orderForm.value.order_advance_days) },
       { key: 'order_deadline_time', value: orderForm.value.order_deadline_time },
       { key: 'cancel_deadline_time', value: orderForm.value.cancel_deadline_time },
@@ -648,7 +638,7 @@ onMounted(() => {
   <Layout>
     <PageContainer title="菜单管理" description="按日期编排每日早、中、晚三餐菜品,支持月历快速切换与菜单复制。">
       <template #actions>
-        <ElButton v-if="isSuperAdmin" :icon="Settings" @click="openOrderConfig">订餐配置</ElButton>
+        <ElButton v-if="storeId" :icon="Settings" @click="openOrderConfig">订餐配置</ElButton>
         <ElButton type="primary" :icon="Send" @click="openBatchPublish">批量发布</ElButton>
       </template>
 

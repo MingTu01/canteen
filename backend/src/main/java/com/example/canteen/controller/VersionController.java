@@ -220,9 +220,10 @@ public class VersionController {
     /**
      * 公开接口(免登录):返回订餐配置,供 H5/terminal 前端读取截止时间等规则。
      * 只返回订餐相关的 5 个 key,不暴露其他敏感配置。
+     * 支持按门店读取:传 storeId 时优先读 store_config,未传或读不到回退 sys_config 全局配置。
      */
     @GetMapping("/order-config")
-    public ApiResponse<Map<String, Object>> getOrderConfig() {
+    public ApiResponse<Map<String, Object>> getOrderConfig(@RequestParam(required = false) Long storeId) {
         Map<String, Object> result = new HashMap<>();
         // 订餐配置的 5 个 key
         String[] orderKeys = {
@@ -231,21 +232,41 @@ public class VersionController {
         };
         try {
             for (String key : orderKeys) {
-                List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT config_value FROM sys_config WHERE config_key = ?", key);
-                if (!rows.isEmpty()) {
-                    Object v = rows.get(0).get("config_value");
-                    result.put(key, v != null ? v.toString() : "");
-                } else {
-                    // 默认值
-                    result.put(key, switch (key) {
+                String value = null;
+                // 1. 门店级配置(若传了 storeId)
+                if (storeId != null) {
+                    List<Map<String, Object>> storeRows = jdbcTemplate.queryForList(
+                        "SELECT config_value FROM store_config WHERE store_id = ? AND config_key = ?",
+                        storeId, key);
+                    if (!storeRows.isEmpty()) {
+                        Object v = storeRows.get(0).get("config_value");
+                        if (v != null && !String.valueOf(v).isBlank()) {
+                            value = String.valueOf(v);
+                        }
+                    }
+                }
+                // 2. 全局配置(sys_config)
+                if (value == null) {
+                    List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                        "SELECT config_value FROM sys_config WHERE config_key = ?", key);
+                    if (!rows.isEmpty()) {
+                        Object v = rows.get(0).get("config_value");
+                        if (v != null && !String.valueOf(v).isBlank()) {
+                            value = v.toString();
+                        }
+                    }
+                }
+                // 3. 默认值
+                if (value == null) {
+                    value = switch (key) {
                         case "order_advance_days" -> "7";
                         case "order_deadline_time", "cancel_deadline_time" -> "15:00";
                         case "max_order_quantity" -> "10";
                         case "allow_cross_day_order" -> "true";
                         default -> "";
-                    });
+                    };
                 }
+                result.put(key, value);
             }
         } catch (Exception e) {
             // DB 异常时返回默认值

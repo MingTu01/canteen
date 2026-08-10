@@ -183,6 +183,19 @@ CREATE TABLE IF NOT EXISTS sys_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 门店级配置(订餐截止时间等,按门店独立)
+CREATE TABLE IF NOT EXISTS store_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    store_id BIGINT NOT NULL,
+    config_key VARCHAR(100) NOT NULL,
+    config_value TEXT,
+    description VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_store_config UNIQUE (store_id, config_key)
+);
+CREATE INDEX IF NOT EXISTS idx_store_config_store ON store_config(store_id);
+
 CREATE TABLE IF NOT EXISTS sys_operation_log (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     admin_id BIGINT,

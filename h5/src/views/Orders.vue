@@ -632,8 +632,8 @@ const onCalendarSelect = (key: string): void => {
 // Orders 未启用 keep-alive,每次进入都是全新挂载,保证每次进入都重新加载 + 滚到今天
 onMounted(() => {
   canRefresh.value = true
-  // 加载后端订餐配置(取消截止时间等),供 isCancellableByDeadline 使用
-  loadConfig()
+  // 加载后端订餐配置(按门店,取消截止时间等),供 isCancellableByDeadline 使用
+  loadConfig(authStore.storeId)
   // 入口:加载订单后,右侧内容区滚到今天(左侧栏默认即"今天+未来",今天置顶)
   loadOrders().then(async () => {
     await scrollToToday()
