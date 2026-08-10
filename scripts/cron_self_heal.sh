@@ -16,6 +16,8 @@
 #   - flock 互斥锁:同一时刻只跑一个实例,避免重复触发修复互相打架
 #   - 冷却时间:修复动作(尤其 MySQL 重建)后 10 分钟内不再重复修复,
 #     防止"边修边崩"时 cron 反复破坏性重建拖垮服务
+#   - 自动修复以 --auto 模式运行:默认禁止删除 MySQL 数据卷重建(防手滑/误判删库),
+#     仅做"温和重启→备份优先恢复";确需自动重建须在 .env 设置 SELF_HEAL_MYSQL_REBUILD=on
 #   - 所有输出写入 logs/self_heal.log,不往终端刷屏
 #==============================================================
 
@@ -83,7 +85,7 @@ fi
 log "[定时自愈] 检测到严重问题,开始自动修复..."
 echo "$CHECK_OUTPUT" | sed 's/^/[自检] /' >> "$LOG_FILE"
 
-FIX_OUTPUT=$(python3 "$HEAL_SCRIPT" fix --yes 2>&1)
+FIX_OUTPUT=$(python3 "$HEAL_SCRIPT" fix --yes --auto 2>&1)
 FIX_RC=$?
 log "[定时自愈] 自动修复完成(exit=$FIX_RC)"
 echo "$FIX_OUTPUT" | sed 's/^/[修复] /' >> "$LOG_FILE"

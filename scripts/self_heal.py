@@ -75,6 +75,9 @@ RED = "\033[0;31m"
 CYAN = "\033[0;36m"
 NC = "\033[0m"
 
+# 是否处于自动(cron)模式:自动模式默认禁止"删数据卷重建",防手滑删库/AUTO_MODE=True
+AUTO_MODE = False
+
 
 # ==============================================================
 # 工具函数
@@ -227,16 +230,22 @@ def check_mysql():
     health = state["health"]
     restart = state["restart_count"]
 
-    # crash-loop:状态是 restarting,或重启次数异常高
+    # crash-loop:状态是 restarting
     if status == "restarting":
         logs = container_logs(MYSQL_CONTAINER)
         for kw in CORRUPT_KEYWORDS:
             if re.search(kw, logs, re.IGNORECASE):
                 return ("MySQL 疯狂重启且日志含数据损坏特征(%s)" % kw, "critical")
-        return ("MySQL 容器处于 restarting 状态(可能数据损坏)", "critical")
+        # 无损坏特征(如配置错误):先温和重启恢复,不直接触发破坏性重建
+        return ("MySQL 处于 restarting 状态(无损坏特征,先尝试重启)", "medium")
 
     if status == "exited":
-        return ("MySQL 容器已退出(exit)", "critical")
+        logs = container_logs(MYSQL_CONTAINER)
+        for kw in CORRUPT_KEYWORDS:
+            if re.search(kw, logs, re.IGNORECASE):
+                return ("MySQL 已退出且日志含数据损坏特征(%s)" % kw, "critical")
+        # 无损坏特征(如手动 docker compose stop 维护):仅提示重启,禁止自动删库
+        return ("MySQL 已停止(exit,无损坏特征,可尝试重启)", "medium")
 
     if status == "running" and health == "unhealthy":
         logs = container_logs(MYSQL_CONTAINER)
@@ -354,6 +363,36 @@ def find_latest_backup():
     return max(files, key=os.path.getmtime)
 
 
+def _shq(s):
+    """shell 单引号转义,用于安全嵌入命令字符串。"""
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def _mysql_corrupted():
+    """判断 MySQL 容器日志是否含数据损坏特征。返回关键词或 None。"""
+    logs = container_logs(MYSQL_CONTAINER)
+    for kw in CORRUPT_KEYWORDS:
+        if re.search(kw, logs, re.IGNORECASE):
+            return kw
+    return None
+
+
+def _rebuild_allowed():
+    """是否允许删除数据卷重建(破坏性操作)。
+
+    由 .env 的 SELF_HEAL_MYSQL_REBUILD 控制:
+      on/1/true/yes  → 始终允许
+      off/0/false/no → 始终禁止(只抢救数据,不删卷)
+      未配置         → 手动模式允许,自动(cron)模式默认禁止,防手滑删库
+    """
+    cfg = (read_env("SELF_HEAL_MYSQL_REBUILD") or "").strip().lower()
+    if cfg in ("1", "on", "true", "yes"):
+        return True
+    if cfg in ("0", "off", "false", "no"):
+        return False
+    return not AUTO_MODE
+
+
 def restore_from_snapshot(snap_path, db_pass, db_name):
     """从快照恢复数据库。返回 bool。"""
     info("从快照恢复数据库: %s" % os.path.basename(snap_path))
@@ -365,8 +404,9 @@ def restore_from_snapshot(snap_path, db_pass, db_name):
     if rc != 0:
         warn("快照 gzip 校验失败,跳过")
         return False
-    cmd = "gunzip -c %s | docker exec -i %s mysql -uroot -p%s %s" % (
-        gz, MYSQL_CONTAINER, db_pass, db_name)
+    # 用 MYSQL_PWD 环境变量传密码,避免 -p 明文出现在 mysql 命令行
+    cmd = "gunzip -c %s | docker exec -i -e MYSQL_PWD=%s mysql -uroot %s" % (
+        gz, _shq(db_pass), db_name)
     rc, out, err = run(["bash", "-c", cmd])
     if rc != 0:
         warn("快照恢复失败: %s" % err.strip())
@@ -400,8 +440,8 @@ def restore_from_backup_file(backup_file, db_pass, db_name, enc_key):
             warn("备份中未找到 database.sql")
             return False
         sql_file = sql_files[0]
-        cmd = "docker exec -i %s mysql -uroot -p%s %s < %s" % (
-            MYSQL_CONTAINER, db_pass, db_name, sql_file)
+        cmd = "docker exec -i -e MYSQL_PWD=%s mysql -uroot %s < %s" % (
+            _shq(db_pass), db_name, sql_file)
         rc, _, err = run(["bash", "-c", cmd])
         if rc != 0:
             warn("备份恢复失败: %s" % err.strip())
@@ -421,6 +461,16 @@ def repair_mysql():
     if not db_pass:
         error("数据库密码未配置,无法修复")
         return False
+
+    # 0. 温和优先:容器存在但停止/restarting 且无损坏特征 → 先尝试拉起,不删数据
+    st = container_state(MYSQL_CONTAINER)
+    if st and st["status"] in ("exited", "restarting") and not _mysql_corrupted():
+        info("MySQL 未运行(可能临时停止/配置问题),先温和重启,不删数据...")
+        run(["docker", "compose", "start", "mysql"], cwd=PROJECT_DIR)
+        if wait_mysql_healthy(timeout=120):
+            info("MySQL 已温和重启恢复,无需重建")
+            return True
+        warn("温和重启未成功,继续走备份/恢复流程")
 
     # 1. 停止所有服务(避免后端写入新数据)
     info("停止所有服务...")
@@ -447,6 +497,13 @@ def repair_mysql():
             warn("抢救数据失败(可能已无法读取),继续重建流程")
         else:
             info("损坏数据已抢救备份")
+
+    # 3. 删除数据卷前,先确认是否允许破坏性重建(自动模式默认禁止,防手滑删库)
+    if not _rebuild_allowed():
+        warn("当前为自动模式且未开启 SELF_HEAL_MYSQL_REBUILD,禁止删除数据卷重建")
+        warn("已抢救损坏数据到 backup/,原数据卷予以保留,请手动处理")
+        error("或设置 .env 的 SELF_HEAL_MYSQL_REBUILD=on 后再手动重试")
+        return False
 
     # 3. 删除数据卷,让 MySQL 重新初始化
     if vol:
@@ -561,6 +618,13 @@ def repair_files():
         error("git reset 失败: %s" % err.strip())
         return False
     info("已从远程恢复项目文件")
+
+    # 清理加速器 insteadOf 配置,避免永久劫持 git 远程源(仅本次修复生效)
+    for proxy in GITHUB_PROXIES:
+        run(["git", "-C", PROJECT_DIR, "config", "--unset-all",
+             "url.%s.insteadOf" % proxy])
+    run(["git", "-C", PROJECT_DIR, "config", "--unset-all",
+         "url.https://github.com/.insteadOf"])
 
     # 3. 恢复脚本可执行权限 + 运行时目录
     for pattern in (os.path.join(PROJECT_DIR, "*.sh"),
@@ -717,7 +781,12 @@ def main():
                         choices=["check", "fix", "fix-mysql", "fix-files"],
                         help="check=仅自检; fix=自检+修复; fix-mysql=仅修复MySQL; fix-files=仅修复项目文件")
     parser.add_argument("--yes", action="store_true", help="跳过交互确认")
+    parser.add_argument("--auto", action="store_true",
+                        help="自动(cron)模式:默认禁止删数据卷重建,防手滑删库")
     args = parser.parse_args()
+
+    global AUTO_MODE
+    AUTO_MODE = args.auto
 
     if not os.path.isdir(PROJECT_DIR):
         print("项目目录不存在: %s" % PROJECT_DIR)
