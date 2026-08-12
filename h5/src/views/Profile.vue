@@ -10,6 +10,7 @@ import QRCode from 'qrcode'
 import {
   ClipboardList,
   MessageSquare,
+  PenSquare,
   Users,
   QrCode as QrCodeIcon,
   Lock,
@@ -186,6 +187,10 @@ const goOrders = (): void => {
 
 const goFeedback = (): void => {
   router.push('/feedback/list')
+}
+
+const goCreateFeedback = (): void => {
+  router.push('/feedback/create')
 }
 
 const goGroupOrder = (): void => {
@@ -365,6 +370,7 @@ interface MenuItem {
 const menuItems: MenuItem[] = [
   { label: '我的订单', icon: ClipboardList, handler: goOrders },
   { label: '未订餐用餐', icon: UtensilsCrossed, handler: goUnsolicitedOrder },
+  { label: '提交反馈', icon: PenSquare, handler: goCreateFeedback },
   { label: '我的反馈', icon: MessageSquare, handler: goFeedback },
   { label: '团体订餐', icon: Users, handler: goGroupOrder },
   { label: '我的取餐码', icon: QrCodeIcon, handler: openQrcodeZoom },

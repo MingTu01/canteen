@@ -6,8 +6,6 @@ import { showImagePreview } from 'vant'
 import {
   Megaphone,
   UtensilsCrossed,
-  ClipboardList,
-  MessageSquare,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useBrandingStore } from '@/stores/branding'
@@ -216,19 +214,6 @@ const previewImage = (url: string): void => {
   showImagePreview([url])
 }
 
-/** 快捷入口配置(对齐模板 Lucide 图标) */
-interface ShortcutItem {
-  key: string
-  icon: typeof UtensilsCrossed
-  text: string
-  path: string
-}
-const shortcuts: ShortcutItem[] = [
-  { key: 'order', icon: UtensilsCrossed, text: '去订餐', path: '/order' },
-  { key: 'orders', icon: ClipboardList, text: '我的订单', path: '/orders' },
-  { key: 'feedback', icon: MessageSquare, text: '提交反馈', path: '/feedback/create' },
-]
-
 /** 通知类型标签:根据 type 字段返回文案与配色变体;无 type 默认"公告" */
 interface NoticeTag {
   label: string
@@ -378,22 +363,6 @@ onUnmounted(() => {
 
     <!-- 内容区 -->
     <div class="home__content">
-      <!-- 快捷入口网格 -->
-      <section class="home__quick card">
-        <div class="home__quick-grid">
-          <button
-            v-for="item in shortcuts"
-            :key="item.key"
-            type="button"
-            class="home__quick-item"
-            @click="go(item.path)"
-          >
-            <component :is="item.icon" :size="28" :stroke-width="2" class="home__quick-icon" />
-            <span class="home__quick-text">{{ item.text }}</span>
-          </button>
-        </div>
-      </section>
-
       <!-- 公告活动卡牌轮播(中间放大凸显,左右半隐藏,可滑动切换) -->
       <section v-if="carouselList.length > 0" class="home__section">
         <div class="home__section-header">
@@ -625,43 +594,6 @@ onUnmounted(() => {
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-  }
-
-  // ============ 快捷入口 ============
-  &__quick {
-    margin-bottom: 24px;
-  }
-
-  &__quick-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-  }
-
-  &__quick-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 12px 8px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-
-    &:active {
-      opacity: 0.6;
-    }
-  }
-
-  &__quick-icon {
-    color: $brand-primary;
-  }
-
-  &__quick-text {
-    font-size: 12px;
-    color: $brand-foreground;
   }
 
   // ============ section 通用 ============
