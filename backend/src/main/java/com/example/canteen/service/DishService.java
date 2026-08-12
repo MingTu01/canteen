@@ -146,6 +146,16 @@ public class DishService {
 
     public Dish createDish(Dish dish) {
         SecurityContext.checkStoreAccess(dish.getStoreId());
+        // 同名菜品查重(同门店内不允许重名)
+        if (dish.getName() != null && !dish.getName().isBlank()) {
+            Long count = dishMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Dish>()
+                    .eq(Dish::getStoreId, dish.getStoreId())
+                    .eq(Dish::getName, dish.getName().trim())
+                    .eq(Dish::getIsDeleted, 0));
+            if (count != null && count > 0) {
+                throw new BusinessException("菜品\"" + dish.getName() + "\"已存在,请勿重复添加");
+            }
+        }
         if (dish.getIsDeleted() == null) {
             dish.setIsDeleted(0);
         }

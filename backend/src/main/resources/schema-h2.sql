@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS recharge_record (
     balance_before DECIMAL(10,2),
     balance_after DECIMAL(10,2),
     operator VARCHAR(50),
+    remark VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_recharge_created ON recharge_record (created_at);

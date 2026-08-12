@@ -4,7 +4,6 @@ import type {
   ReportParams,
   FinanceReport,
   EmployeeConsumptionReport,
-  DailyCloseReport,
   ComparisonReport,
   HourlyDistributionReport,
   PeakHoursReport,
@@ -21,9 +20,6 @@ export const reportApi = {
     api.get<FinanceReport>('/report/finance', { params }).then((r) => r.data),
   employeeConsumption: (params: { storeId: number; startDate: string; endDate: string }) =>
     api.get<EmployeeConsumptionReport>('/report/employee-consumption', { params }).then((r) => r.data),
-  /** 日终对账 */
-  dailyClose: (params: { storeId: number; date: string }) =>
-    api.get<DailyCloseReport>('/report/daily-close', { params }).then((r) => r.data),
   /** 同比分析(对比去年同期) */
   yoy: (params: { storeId: number; startDate: string; endDate: string }) =>
     api.get<ComparisonReport>('/report/yoy', { params }).then((r) => r.data),

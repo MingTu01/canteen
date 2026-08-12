@@ -88,16 +88,10 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, title: '报表统计', icon: 'BarChart3', roles: [1, 2, 4, 6] },
   },
   {
-    path: '/daily-close',
-    name: 'DailyCloseManagement',
-    component: () => import('@/views/daily-close/DailyCloseManagement.vue'),
-    meta: { requiresAuth: true, title: '日终对账', icon: 'ClipboardCheck', roles: [1, 2, 4, 6] },
-  },
-  {
     path: '/settlement',
     name: 'SettlementManagement',
     component: () => import('@/views/settlement/SettlementManagement.vue'),
-    meta: { requiresAuth: true, title: '关店对账', icon: 'CalendarCheck', roles: [1, 2, 4, 6] },
+    meta: { requiresAuth: true, title: '日终对账', icon: 'CalendarCheck', roles: [1, 2, 4, 6] },
   },
   {
     path: '/recharge',

@@ -1,8 +1,9 @@
 {
-  "version": "0.0.38",
+  "version": "0.0.39",
   "buildTime": "2026-08-12",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.39 admin-web 5项问题修复:①备份设置权限:前端axios 403不再清登录态踢出(仅401踢出),备份配置按钮仅超管可见(v-if=isSuperAdmin);②充值记录字段错位修复:recharge_record表新增remark列(V21迁移),实体新增remark字段,RechargeRecordService.recharge修正setOperator(adminName)+setRemark(remark)(原setOperator(remark)导致备注显示在操作人列),EmployeeService.batchRecharge/rechargeLowBalance修正setOperator(管理员姓名)+setRemark(批量充值/余额充值)(原把\"余额充值(admin#4)\"塞进operator列),通过AdminMapper.selectById查询管理员姓名替代admin#id拼接;③菜品查重:DishService.createDish新增同名菜品查重(同门店内不允许重名),前端handleSave也加前端快速查重;④菜品库存/限购默认值:defaultDish stock/maxPerOrder从null改为0;⑤菜单管理添加菜品交互:ElTransfer穿梭框替换为双栏点击式交互(左栏搜索+点击添加,右栏已选+点击移除);⑥对账合并:删除日终对账页(路由/菜单/API/视图),关店对账页改名\"日终对账\"合并两者功能,清理report.ts中dailyClose死代码",
     "V0.0.38 修复编辑已发布菜单后H5看不到新增菜品的BUG:cacheEvictMenu只删除了管理端缓存key(menu:store:{id}:date:{date}),遗漏了点菜端已发布菜单缓存key(menu:store:{id}:date:{date}:published),导致H5/终端查询已发布菜单时命中旧Redis缓存返回旧菜品列表;现cacheEvictMenu同时删除baseKey和baseKey+:published两个key,确保菜单变更后点菜端立即看到最新菜品",
     "V0.0.37 H5菜单实时更新+菜单清空功能:①SSE菜单变更推送扩展到H5员工端(SseService新增employeeEmittersByStore按门店索引H5连接,broadcastMenuChanged同时推终端和H5;SseTicketService支持employeeId+storeId双绑定,SseController.getEmployeeTicket绑定storeId,subscribeByEmployee注册到门店H5集合);②H5 auth.ts新增menu_changed事件监听,Order.vue watch menuChangedAt清缓存并增量刷新受影响日期菜单(不打断用户滚动位置,失活时onActivated全量重载兜底);③编辑已发布菜单后保持已发布状态(createMenu继承existing.published,避免H5看不到菜品);④新增菜单清空功能(MenuService.clearMenusByDate删除某日所有餐次菜单+失效缓存+广播SSE;MenuController新增DELETE /menu/store/{id}/date/{date}和GET /menu/store/{id}/date/{date}/orders-check订单检查接口);⑤OrderMapper新增countByStoreDateMeal统计某日某餐次订单数,MenuService.countOrdersByDate提供修改/清空前订单提示(方案A:有订单弹警告但不阻止);⑥admin-web MenuManagement.vue发布按钮旁新增清空按钮(仅未发布日期显示,有订单时弹error级确认框提示订单数)",
     "V0.0.36 统一通知类型type值与admin-web一致:WechatNotifyService.notificationTypeLabel修正为type=2公告、type=3活动(原type=3公告、type=4活动与admin-web的NOTIFICATION_TYPE字典type=2公告、type=3活动不一致,导致H5按type=3/4过滤公告活动时查不到数据)",

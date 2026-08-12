@@ -19,5 +19,7 @@ public class RechargeRecord {
     private BigDecimal balanceBefore;
     private BigDecimal balanceAfter;
     private String operator;
+    /** 备注(如"批量充值"/"余额充值"/用户输入的自定义备注) */
+    private String remark;
     private LocalDateTime createdAt;
 }

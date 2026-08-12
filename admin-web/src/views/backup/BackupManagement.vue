@@ -360,7 +360,7 @@ const saveBackupConfig = async () => {
     <PageContainer title="数据库备份与恢复" description="企业级备份管理:支持全库/门店级备份、定时备份、导入导出与恢复。">
       <template #actions>
         <ElButton :icon="RefreshCw" :loading="loading" @click="fetchBackups">刷新</ElButton>
-        <ElButton :icon="Settings" @click="openConfigDialog">备份配置</ElButton>
+        <ElButton v-if="isSuperAdmin" :icon="Settings" @click="openConfigDialog">备份配置</ElButton>
         <ElButton :icon="Upload" @click="openImportDialog">导入备份</ElButton>
         <ElButton type="primary" :icon="DatabaseBackup" @click="openCreateDialog">立即备份</ElButton>
       </template>

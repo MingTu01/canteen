@@ -15,7 +15,7 @@ import {
   ElDatePicker,
   ElSelect,
   ElOption,
-  ElTransfer,
+  ElInput,
   ElMessage,
   ElMessageBox,
   ElSwitch,
@@ -25,7 +25,7 @@ import {
   ElRadioGroup,
   ElRadioButton,
 } from 'element-plus'
-import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Send } from 'lucide-vue-next'
+import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Send, Search, X } from 'lucide-vue-next'
 import { todayStr } from '@/utils/date'
 import { normalizeList } from '@/utils/list'
 
@@ -131,14 +131,29 @@ const dishMealTypes = (d: Dish): number[] => {
   return d.mealTypes.split(',').map((x) => Number(x)).filter((x) => !isNaN(x))
 }
 
-const transferData = computed(() =>
+// ===== 添加菜品弹窗:双栏点击式选择 =====
+const dishSearchKey = ref('')
+/** 可选菜品:过滤上架+适用餐次+排除已选+搜索关键词 */
+const availableDishes = computed(() =>
   dishes.value
     .filter((d) => d.status === 1 && dishMealTypes(d).includes(form.value.mealType))
-    .map((d) => ({
-      key: d.id as number,
-      label: `${d.name}  ¥${Number(d.price).toFixed(2)}`,
-    }))
+    .filter((d) => !form.value.dishIds.includes(d.id!))
+    .filter((d) => !dishSearchKey.value || d.name.toLowerCase().includes(dishSearchKey.value.toLowerCase()))
 )
+/** 已选菜品详情列表 */
+const selectedDishes = computed(() =>
+  form.value.dishIds
+    .map((id) => dishes.value.find((d) => d.id === id))
+    .filter((d): d is Dish => !!d)
+)
+const addDish = (id: number) => {
+  if (!form.value.dishIds.includes(id)) {
+    form.value.dishIds.push(id)
+  }
+}
+const removeDish = (id: number) => {
+  form.value.dishIds = form.value.dishIds.filter((d) => d !== id)
+}
 
 // ===== 新增/编辑菜单弹窗 =====
 const dialogVisible = ref(false)
@@ -977,15 +992,55 @@ onMounted(() => {
             </ElSelect>
           </ElFormItem>
           <ElFormItem label="菜品" required>
-            <ElTransfer
-              v-model="form.dishIds"
-              :data="transferData"
-              :titles="['可选菜品', '已选菜品']"
-              filterable
-              filter-placeholder="搜索菜品"
-              :props="{ key: 'key', label: 'label' }"
-              style="width: 100%"
-            />
+            <div class="flex gap-3 w-full" style="height: 360px;">
+              <!-- 左栏:可选菜品 -->
+              <div class="flex-1 flex flex-col border rounded-lg overflow-hidden">
+                <div class="p-2 border-b bg-gray-50">
+                  <ElInput v-model="dishSearchKey" placeholder="搜索菜品名称" :prefix-icon="Search" size="small" clearable />
+                </div>
+                <div class="flex-1 overflow-y-auto">
+                  <div v-if="availableDishes.length === 0" class="p-4 text-center text-gray-400 text-sm">
+                    {{ dishSearchKey ? '未找到匹配菜品' : '暂无可选菜品' }}
+                  </div>
+                  <div
+                    v-for="d in availableDishes"
+                    :key="d.id"
+                    class="flex items-center justify-between px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 transition-colors"
+                    @click="addDish(d.id!)"
+                  >
+                    <div class="flex-1 min-w-0">
+                      <span class="text-sm font-medium">{{ d.name }}</span>
+                      <span class="ml-2 text-xs text-gray-500">¥{{ Number(d.price).toFixed(2) }}</span>
+                    </div>
+                    <ElButton type="primary" size="small" circle :icon="Plus" @click.stop="addDish(d.id!)" />
+                  </div>
+                </div>
+              </div>
+              <!-- 右栏:已选菜品 -->
+              <div class="flex-1 flex flex-col border rounded-lg overflow-hidden">
+                <div class="px-3 py-2 border-b bg-gray-50 flex items-center justify-between">
+                  <span class="text-sm font-medium">已选 {{ selectedDishes.length }} 道</span>
+                  <ElButton v-if="selectedDishes.length > 0" type="danger" size="small" text @click="form.dishIds = []">清空</ElButton>
+                </div>
+                <div class="flex-1 overflow-y-auto">
+                  <div v-if="selectedDishes.length === 0" class="p-4 text-center text-gray-400 text-sm">
+                    点击左侧菜品添加
+                  </div>
+                  <div
+                    v-for="d in selectedDishes"
+                    :key="d.id"
+                    class="flex items-center justify-between px-3 py-2 hover:bg-red-50 cursor-pointer border-b border-gray-100 transition-colors"
+                    @click="removeDish(d.id!)"
+                  >
+                    <div class="flex-1 min-w-0">
+                      <span class="text-sm font-medium">{{ d.name }}</span>
+                      <span class="ml-2 text-xs text-gray-500">¥{{ Number(d.price).toFixed(2) }}</span>
+                    </div>
+                    <ElButton type="danger" size="small" circle :icon="X" @click.stop="removeDish(d.id!)" />
+                  </div>
+                </div>
+              </div>
+            </div>
           </ElFormItem>
         </ElForm>
         <template #footer>

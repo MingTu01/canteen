@@ -3,10 +3,12 @@ package com.example.canteen.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.canteen.entity.Admin;
 import com.example.canteen.entity.Department;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.entity.RechargeRecord;
 import com.example.canteen.exception.BusinessException;
+import com.example.canteen.mapper.AdminMapper;
 import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.RechargeRecordMapper;
@@ -29,15 +31,26 @@ public class EmployeeService {
     private final EmployeeMapper employeeMapper;
     private final DepartmentMapper departmentMapper;
     private final RechargeRecordMapper rechargeRecordMapper;
+    private final AdminMapper adminMapper;
     private final PasswordEncoder passwordEncoder;
 
     public EmployeeService(EmployeeMapper employeeMapper, DepartmentMapper departmentMapper,
                            RechargeRecordMapper rechargeRecordMapper,
+                           AdminMapper adminMapper,
                            PasswordEncoder passwordEncoder) {
         this.employeeMapper = employeeMapper;
         this.departmentMapper = departmentMapper;
         this.rechargeRecordMapper = rechargeRecordMapper;
+        this.adminMapper = adminMapper;
         this.passwordEncoder = passwordEncoder;
+    }
+
+    /** 获取当前操作管理员姓名,用于充值记录的 operator 字段 */
+    private String currentOperatorName() {
+        Long adminId = SecurityContext.currentAdminId();
+        if (adminId == null) return null;
+        Admin admin = adminMapper.selectById(adminId);
+        return admin != null ? admin.getName() : ("admin#" + adminId);
     }
 
     /** 查询时手动加 is_deleted=0 过滤(MyBatis Plus 逻辑删除配置后续会加) */
@@ -317,8 +330,7 @@ public class EmployeeService {
                 .eq(Employee::getStoreId, storeId)
                 .eq(Employee::getStatus, 1)
                 .eq(Employee::getIsDeleted, 0));
-        Long adminId = SecurityContext.currentAdminId();
-        String operatorLabel = adminId != null ? "批量充值(admin#" + adminId + ")" : "批量充值";
+        String operatorName = currentOperatorName();
         int successCount = 0;
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (Employee e : employees) {
@@ -328,14 +340,15 @@ public class EmployeeService {
             Employee updated = employeeMapper.selectById(e.getId());
             BigDecimal balanceAfter = updated != null && updated.getBalance() != null
                     ? updated.getBalance() : balanceBefore.add(amount);
-            // 写入充值记录
+            // 写入充值记录:operator=管理员姓名,remark="批量充值"
             RechargeRecord record = new RechargeRecord();
             record.setStoreId(storeId);
             record.setEmployeeId(e.getId());
             record.setAmount(amount);
             record.setBalanceBefore(balanceBefore);
             record.setBalanceAfter(balanceAfter);
-            record.setOperator(operatorLabel);
+            record.setOperator(operatorName);
+            record.setRemark("批量充值");
             rechargeRecordMapper.insert(record);
             successCount++;
             totalAmount = totalAmount.add(amount);
@@ -363,8 +376,7 @@ public class EmployeeService {
                 .eq(Employee::getStoreId, storeId)
                 .eq(Employee::getIsDeleted, 0)
                 .lt(Employee::getBalance, threshold));
-        Long adminId = SecurityContext.currentAdminId();
-        String operatorLabel = adminId != null ? "余额充值(admin#" + adminId + ")" : "余额充值";
+        String operatorName = currentOperatorName();
         int successCount = 0;
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (Employee e : employees) {
@@ -379,7 +391,8 @@ public class EmployeeService {
             record.setAmount(amount);
             record.setBalanceBefore(balanceBefore);
             record.setBalanceAfter(balanceAfter);
-            record.setOperator(operatorLabel);
+            record.setOperator(operatorName);
+            record.setRemark("余额充值");
             rechargeRecordMapper.insert(record);
             successCount++;
             totalAmount = totalAmount.add(amount);

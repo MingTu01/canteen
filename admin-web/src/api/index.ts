@@ -63,12 +63,8 @@ api.interceptors.response.use(
         .catch(() => {})
     }
     if (data.code === 200) return data
-    // 401/403 不弹重复消息(下面会跳转登录页)
-    if (data.code !== 401 && data.code !== 403) {
-      ElMessage.error(data.message || '请求失败')
-    }
-    // 401 未登录 / 403 无权限(token 失效或被覆盖):清登录态并跳转登录页
-    if ((data.code === 401 || data.code === 403) && !isLoginRequest(res.config.url)) {
+    // 401 未登录:清登录态并跳转登录页
+    if (data.code === 401 && !isLoginRequest(res.config.url)) {
       if (!isRedirecting) {
         isRedirecting = true
         clearAuth()
@@ -78,13 +74,20 @@ api.interceptors.response.use(
             isRedirecting = false
           })
       }
+      return Promise.reject(data)
     }
+    // 403 无权限(角色不足):仅提示,不踢出登录(用户仍在其他页面操作)
+    if (data.code === 403) {
+      ElMessage.error(data.message || '无权限执行此操作')
+      return Promise.reject(data)
+    }
+    ElMessage.error(data.message || '请求失败')
     return Promise.reject(data)
   },
   (err) => {
     const status = err.response?.status
-    // 401 未登录 / 403 无权限:清登录态并跳转登录页
-    if ((status === 401 || status === 403) && !isLoginRequest(err.config?.url)) {
+    // 401 未登录:清登录态并跳转登录页
+    if (status === 401 && !isLoginRequest(err.config?.url)) {
       if (!isRedirecting) {
         isRedirecting = true
         clearAuth()
@@ -94,6 +97,12 @@ api.interceptors.response.use(
             isRedirecting = false
           })
       }
+      return Promise.reject(err)
+    }
+    // 403 无权限:仅提示,不踢出登录
+    if (status === 403) {
+      const msg = err.response?.data?.message || '无权限执行此操作'
+      ElMessage.error(msg)
       return Promise.reject(err)
     }
     const msg = err.response?.data?.message || err.message || '网络错误'
@@ -124,7 +133,6 @@ export * from './purchase'
 export * from './material'
 export * from './feedback'
 export * from './groupOrder'
-export * from './dailyClose'
 export * from './settlement'
 
 export default api

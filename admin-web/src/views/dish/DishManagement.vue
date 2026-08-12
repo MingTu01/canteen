@@ -96,8 +96,8 @@ const defaultDish = (): Dish => ({
   price: 0,
   mealTypes: '1,2,3',
   image: '',
-  stock: null,
-  maxPerOrder: null,
+  stock: 0,
+  maxPerOrder: 0,
   status: 1,
 })
 const form = ref<Dish>(defaultDish())
@@ -142,6 +142,15 @@ const handleSave = async () => {
   if (!valid) return
   if (formMealTypes.value.length === 0) {
     ElMessage.warning('请至少选择一个适用餐次')
+    return
+  }
+  // 按菜名查重(前端快速检查,后端也会校验)
+  const trimmedName = form.value.name.trim()
+  const duplicate = dishes.value.find(
+    (d) => d.name.trim() === trimmedName && d.id !== form.value.id,
+  )
+  if (duplicate) {
+    ElMessage.warning(`菜品"${trimmedName}"已存在,请勿重复添加`)
     return
   }
   form.value.mealTypes = formMealTypes.value.join(',')

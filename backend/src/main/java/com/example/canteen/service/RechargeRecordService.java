@@ -1,8 +1,10 @@
 package com.example.canteen.service;
 
+import com.example.canteen.entity.Admin;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.entity.RechargeRecord;
 import com.example.canteen.exception.BusinessException;
+import com.example.canteen.mapper.AdminMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.RechargeRecordMapper;
 import com.example.canteen.security.SecurityContext;
@@ -18,10 +20,21 @@ public class RechargeRecordService {
 
     private final RechargeRecordMapper rechargeRecordMapper;
     private final EmployeeMapper employeeMapper;
+    private final AdminMapper adminMapper;
 
-    public RechargeRecordService(RechargeRecordMapper rechargeRecordMapper, EmployeeMapper employeeMapper) {
+    public RechargeRecordService(RechargeRecordMapper rechargeRecordMapper, EmployeeMapper employeeMapper,
+                                 AdminMapper adminMapper) {
         this.rechargeRecordMapper = rechargeRecordMapper;
         this.employeeMapper = employeeMapper;
+        this.adminMapper = adminMapper;
+    }
+
+    /** 获取当前操作管理员姓名,用于充值记录的 operator 字段 */
+    private String currentOperatorName() {
+        Long adminId = SecurityContext.currentAdminId();
+        if (adminId == null) return null;
+        Admin admin = adminMapper.selectById(adminId);
+        return admin != null ? admin.getName() : ("admin#" + adminId);
     }
 
     @Transactional
@@ -63,7 +76,8 @@ public class RechargeRecordService {
         record.setAmount(amount);
         record.setBalanceBefore(balanceBefore);
         record.setBalanceAfter(balanceAfter);
-        record.setOperator(remark);
+        record.setOperator(currentOperatorName());
+        record.setRemark(remark);
         rechargeRecordMapper.insert(record);
 
         return record;
