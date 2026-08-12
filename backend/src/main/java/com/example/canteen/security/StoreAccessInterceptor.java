@@ -19,6 +19,9 @@ import java.util.regex.Pattern;
  * - 超管不受限制;门店管理员仅能访问本门店;员工 token 通常不访问这些管理端点,
  *   若误访问则由 SecurityContext.checkStoreAccess 抛 403。
  *
+ * 白名单接口(如 /api/system/order-config)免登录,本拦截器直接放行,
+ * 避免从查询参数提取 storeId 后因无登录信息而误拒(返回 403)。
+ *
  * 启用方式:在 WebMvcConfigurer 中注册到 /api/**(排除白名单)。
  */
 @Component
@@ -29,6 +32,12 @@ public class StoreAccessInterceptor implements HandlerInterceptor {
     /** 路径中 /stores/{数字} 形式的门店 id 提取 */
     private static final Pattern STORES_PATH_PATTERN = Pattern.compile("/stores/(\\d+)");
 
+    private final WhitelistMatcher whitelistMatcher;
+
+    public StoreAccessInterceptor(WhitelistMatcher whitelistMatcher) {
+        this.whitelistMatcher = whitelistMatcher;
+    }
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         // CORS 预检请求(OPTIONS)直接放行:预检无认证信息,无法做门店权限校验,
@@ -37,6 +46,12 @@ public class StoreAccessInterceptor implements HandlerInterceptor {
             return true;
         }
         String path = request.getRequestURI();
+
+        // 白名单接口(公开接口)直接放行:这些接口免登录(如 /api/system/order-config),
+        // 若从查询参数提取到 storeId 后执行 checkStoreAccess 会因无登录信息误拒 403。
+        if (whitelistMatcher.isWhitelisted(path)) {
+            return true;
+        }
 
         Long targetStoreId = extractStoreId(path, request);
         if (targetStoreId == null) {
