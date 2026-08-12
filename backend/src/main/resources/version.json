@@ -1,8 +1,9 @@
 {
-  "version": "0.0.41",
+  "version": "0.0.42",
   "buildTime": "2026-08-12",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.42 辣椒图标+订餐页样式优化:①ChiliIcon重画为红彤彤辣椒SVG(红色弯曲锥形主体fill currentColor继承红色+绿色茎部#22c55e+白色高光),替换原简笔线条版;②修复菜品卡片辣椒角标不显示问题(.dish-card缺少position:relative导致absolute定位失效,现已补上);③订餐页日期胶囊(day-section__date-num/date-rel)与餐标名称(meal-section__name)及餐别图标放大30%(font-size 14→18px,padding/min-width/icon size同步放大)",
     "V0.0.41 辣椒图标优化:①新建自定义ChiliIcon组件(admin-web+h5各一个,SVG辣椒形状:红色主体+绿色茎,lucide-vue-next当前版本无Pepper图标故自绘);②admin-web DishManagement.vue表单与列表Flame火焰图标全部替换为ChiliIcon辣椒图标;③H5 Order.vue菜品卡片辣椒图标从菜名旁移至卡片右上角角标(半透明白底+红色辣椒),购物车弹层与确认弹层同步替换ChiliIcon;④H5 OrderDetail.vue与Orders.vue Flame替换为ChiliIcon",
     "V0.0.40 菜品辣度设置(1-3级):①后端Dish实体新增spiceLevel字段(0=不辣,1=微辣,2=中辣,3=重辣)+V22迁移加spice_level列+schema-h2同步;②OrderItem实体新增spiceLevel瞬态字段(@TableField(exist=false)),OrderItemMapper.xml的selectByOrderId/selectByOrderIds JOIN dish表查询d.spice_level AS spice_level,订单列表/详情返回辣度;③admin-web DishManagement.vue表单新增辣度单选(ElRadioGroup+Flame火焰图标4档),列表新增辣度列(Flame图标按级别显示1-3个);④H5 Dish/OrderItem类型新增spiceLevel字段,Order.vue菜品卡片/购物车弹层/确认弹层菜名旁显示Flame辣椒图标(按spiceLevel渲染1-3个),OrderDetail.vue菜品明细菜名旁显示辣椒图标,Orders.vue订单列表菜名旁显示辣椒图标(DishRow新增spiceLevel字段,从OrderItem.spiceLevel填充)",
     "V0.0.39 admin-web 5项问题修复:①备份设置权限:前端axios 403不再清登录态踢出(仅401踢出),备份配置按钮仅超管可见(v-if=isSuperAdmin);②充值记录字段错位修复:recharge_record表新增remark列(V21迁移),实体新增remark字段,RechargeRecordService.recharge修正setOperator(adminName)+setRemark(remark)(原setOperator(remark)导致备注显示在操作人列),EmployeeService.batchRecharge/rechargeLowBalance修正setOperator(管理员姓名)+setRemark(批量充值/余额充值)(原把\"余额充值(admin#4)\"塞进operator列),通过AdminMapper.selectById查询管理员姓名替代admin#id拼接;③菜品查重:DishService.createDish新增同名菜品查重(同门店内不允许重名),前端handleSave也加前端快速查重;④菜品库存/限购默认值:defaultDish stock/maxPerOrder从null改为0;⑤菜单管理添加菜品交互:ElTransfer穿梭框替换为双栏点击式交互(左栏搜索+点击添加,右栏已选+点击移除);⑥对账合并:删除日终对账页(路由/菜单/API/视图),关店对账页改名\"日终对账\"合并两者功能,清理report.ts中dailyClose死代码",

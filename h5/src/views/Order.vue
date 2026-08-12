@@ -1058,7 +1058,7 @@ onBeforeUnmount(() => {
                 <div class="meal-section__pill">
                   <component
                     :is="mealIconMap[section.type]"
-                    :size="14"
+                    :size="18"
                     :stroke-width="2.5"
                     class="meal-section__icon"
                     :color="mealIconColor(section.type)"
@@ -1620,8 +1620,8 @@ onBeforeUnmount(() => {
   &__date-num {
     display: inline-flex;
     align-items: center;
-    padding: 6px 14px;
-    font-size: 14px;
+    padding: 8px 18px;
+    font-size: 18px;
     font-weight: 600;
     color: $brand-secondary-foreground;
     background: $brand-card;
@@ -1635,8 +1635,8 @@ onBeforeUnmount(() => {
   &__date-rel {
     display: inline-flex;
     align-items: center;
-    padding: 6px 14px;
-    font-size: 14px;
+    padding: 8px 18px;
+    font-size: 18px;
     font-weight: 600;
     color: $brand-primary;
     background: rgba(0, 101, 253, 0.08);
@@ -1689,7 +1689,7 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin: 0 0 12px;
   }
 
@@ -1702,13 +1702,13 @@ onBeforeUnmount(() => {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 110px;
-    padding: 6px 28px;
-    font-size: 14px;
+    min-width: 143px;
+    padding: 8px 36px;
+    font-size: 18px;
     font-weight: 700;
     border-radius: 999px;
     /* background / color / border-color / box-shadow 由内联样式动态控制 */
-    letter-spacing: 1px;
+    letter-spacing: 1.3px;
   }
 
   &__grid {
@@ -1720,6 +1720,7 @@ onBeforeUnmount(() => {
 
 /* ============ 菜品卡片 ============ */
 .dish-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
