@@ -1,1 +1,0 @@
-import{Y as r}from"./index-Df5n_VzG.js";const o={list:e=>r.get(`/recharge/store/${e.storeId}`,{params:e}).then(t=>t.data),listByEmployee:e=>r.get(`/recharge/employee/${e}`).then(t=>t.data),create:e=>r.post("/recharge",e).then(t=>t.data)};export{o as r};
