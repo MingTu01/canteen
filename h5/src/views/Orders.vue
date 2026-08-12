@@ -3,7 +3,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showSuccessToast, showFailToast, showToast, showConfirmDialog } from 'vant'
 import { Popup as VanPopup } from 'vant'
-import { Flame } from 'lucide-vue-next'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getMyOrders, cancelOrder } from '@/api/order'
@@ -846,11 +846,10 @@ onMounted(() => {
                       v-if="row.spiceLevel && row.spiceLevel > 0"
                       class="orders-page__dish-spice"
                     >
-                      <Flame
+                      <ChiliIcon
                         v-for="n in row.spiceLevel"
                         :key="n"
                         :size="12"
-                        class="orders-page__dish-spice-icon"
                       />
                     </span>
                   </span>

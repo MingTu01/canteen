@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showSuccessToast, showToast, showConfirmDialog } from 'vant'
-import { Flame } from 'lucide-vue-next'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 import QRCode from 'qrcode'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -258,11 +258,10 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
                   v-if="it.spiceLevel && it.spiceLevel > 0"
                   class="order-detail__item-spice"
                 >
-                  <Flame
+                  <ChiliIcon
                     v-for="n in it.spiceLevel"
                     :key="n"
                     :size="13"
-                    class="order-detail__item-spice-icon"
                   />
                 </span>
               </div>

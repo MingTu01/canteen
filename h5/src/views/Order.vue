@@ -8,7 +8,8 @@ import {
   closeToast,
   showConfirmDialog,
 } from 'vant'
-import { ShoppingCart, Plus, Minus, Check, Flame } from 'lucide-vue-next'
+import { ShoppingCart, Plus, Minus, Check } from 'lucide-vue-next'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import * as menuApi from '@/api/menu'
@@ -1079,6 +1080,17 @@ onBeforeUnmount(() => {
                       'dish-card--locked': isMealLocked(d.date, section.type) && !orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                     }"
                   >
+                    <!-- 辣度角标(卡片右上角,按级别显示1-3个辣椒) -->
+                    <div
+                      v-if="iv.dish?.spiceLevel && iv.dish.spiceLevel > 0"
+                      class="dish-card__spice-badge"
+                    >
+                      <ChiliIcon
+                        v-for="n in iv.dish.spiceLevel"
+                        :key="n"
+                        :size="11"
+                      />
+                    </div>
                     <!-- 图片区(智能加载:section 进入视口前 1 屏才渲染 <img> 发请求,否则 emoji 占位) -->
                     <div class="dish-card__img-wrap">
                       <img
@@ -1101,20 +1113,7 @@ onBeforeUnmount(() => {
                     <!-- 底部:菜名+价格 + 操作按钮 -->
                     <div class="dish-card__bottom">
                       <div class="dish-card__info">
-                        <div class="dish-card__name-row">
-                          <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
-                          <span
-                            v-if="iv.dish?.spiceLevel && iv.dish.spiceLevel > 0"
-                            class="dish-card__spice"
-                          >
-                            <Flame
-                              v-for="n in iv.dish.spiceLevel"
-                              :key="n"
-                              :size="12"
-                              class="dish-card__spice-icon"
-                            />
-                          </span>
-                        </div>
+                        <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
                         <p class="dish-card__price">¥{{ formatMoney(iv.dish?.price) }}</p>
                       </div>
                       <!-- 已订菜品:绿色 ✅ 标记(突出显示已订状态) -->
@@ -1270,11 +1269,10 @@ onBeforeUnmount(() => {
                     v-if="entry.dish.spiceLevel && entry.dish.spiceLevel > 0"
                     class="cart-popup__item-spice"
                   >
-                    <Flame
+                    <ChiliIcon
                       v-for="n in entry.dish.spiceLevel"
                       :key="n"
                       :size="12"
-                      class="cart-popup__item-spice-icon"
                     />
                   </span>
                 </div>
@@ -1370,11 +1368,10 @@ onBeforeUnmount(() => {
                     v-if="entry.dish.spiceLevel && entry.dish.spiceLevel > 0"
                     class="confirm-popup__row-spice"
                   >
-                    <Flame
+                    <ChiliIcon
                       v-for="n in entry.dish.spiceLevel"
                       :key="n"
                       :size="12"
-                      class="confirm-popup__row-spice-icon"
                     />
                   </span>
                 </span>
@@ -1834,24 +1831,21 @@ onBeforeUnmount(() => {
     line-height: 1.3;
   }
 
-  &__name-row {
+  /* 辣度角标(卡片右上角,半透明白底 + 红色辣椒图标) */
+  &__spice-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 3;
     display: flex;
-    align-items: flex-start;
-    gap: 3px;
-    flex-wrap: wrap;
-  }
-
-  &__spice {
-    display: inline-flex;
     align-items: center;
     gap: 1px;
-    flex-shrink: 0;
-    line-height: 1;
-    margin-top: 1px;
-  }
-
-  &__spice-icon {
+    padding: 2px 4px;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 6px;
     color: #ef4444;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    line-height: 1;
   }
 
   &__price {

@@ -32,12 +32,12 @@ import {
   ArrowDownCircle,
   Archive,
   RotateCcw,
-  Flame,
 } from 'lucide-vue-next'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import StatusTag from '@/components/StatusTag.vue'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { useCrud } from '@/composables/useCrud'
@@ -463,11 +463,11 @@ onMounted(() => {
           </ElTableColumn>
           <ElTableColumn label="辣度" width="110" align="center">
             <template #default="{ row }">
-              <div v-if="row.spiceLevel && row.spiceLevel > 0" class="flex items-center justify-center gap-0.5">
-                <Flame
+              <div v-if="row.spiceLevel && row.spiceLevel > 0" class="flex items-center justify-center gap-0.5 text-red-500">
+                <ChiliIcon
                   v-for="n in row.spiceLevel"
                   :key="n"
-                  class="w-4 h-4 text-red-500"
+                  :size="16"
                 />
               </div>
               <span v-else class="text-text-muted text-xs">不辣</span>
@@ -547,23 +547,23 @@ onMounted(() => {
             <ElRadioGroup v-model="form.spiceLevel">
               <ElRadioButton :value="0">不辣</ElRadioButton>
               <ElRadioButton :value="1">
-                <span class="inline-flex items-center gap-1">
-                  <Flame class="w-4 h-4 text-red-400" />
+                <span class="inline-flex items-center gap-1 text-red-400">
+                  <ChiliIcon :size="16" />
                   <span>微辣</span>
                 </span>
               </ElRadioButton>
               <ElRadioButton :value="2">
-                <span class="inline-flex items-center gap-1">
-                  <Flame class="w-4 h-4 text-red-400" />
-                  <Flame class="w-4 h-4 text-red-500" />
+                <span class="inline-flex items-center gap-1 text-red-500">
+                  <ChiliIcon :size="16" />
+                  <ChiliIcon :size="16" />
                   <span>中辣</span>
                 </span>
               </ElRadioButton>
               <ElRadioButton :value="3">
-                <span class="inline-flex items-center gap-1">
-                  <Flame class="w-4 h-4 text-red-400" />
-                  <Flame class="w-4 h-4 text-red-500" />
-                  <Flame class="w-4 h-4 text-red-600" />
+                <span class="inline-flex items-center gap-1 text-red-600">
+                  <ChiliIcon :size="16" />
+                  <ChiliIcon :size="16" />
+                  <ChiliIcon :size="16" />
                   <span>重辣</span>
                 </span>
               </ElRadioButton>
