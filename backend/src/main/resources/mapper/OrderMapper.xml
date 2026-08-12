@@ -30,4 +30,11 @@
         </if>
         LIMIT 1
     </select>
+
+    <!-- 统计门店某日某餐次已下单(未取消)订单数 -->
+    <select id="countByStoreDateMeal" resultType="int">
+        SELECT COUNT(*) FROM `order`
+        WHERE store_id = #{storeId} AND date = #{date} AND meal_type = #{mealType}
+          AND status IN (1, 2)
+    </select>
 </mapper>

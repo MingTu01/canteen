@@ -24,32 +24,59 @@ public class SseTicketService {
 
     private static class TicketEntry {
         final Long storeId;
+        final Long employeeId; // H5 员工订阅时非空,终端订阅时为 null
         final long expireAt;
-        TicketEntry(Long storeId, long expireAt) {
+        TicketEntry(Long storeId, Long employeeId, long expireAt) {
             this.storeId = storeId;
+            this.employeeId = employeeId;
             this.expireAt = expireAt;
         }
     }
 
-    /** 创建一次性 ticket,绑定 storeId,30 秒过期 */
+    /** ticket 校验结果(包含 storeId 和 employeeId) */
+    public static class TicketResult {
+        public final Long storeId;
+        public final Long employeeId;
+        TicketResult(Long storeId, Long employeeId) {
+            this.storeId = storeId;
+            this.employeeId = employeeId;
+        }
+    }
+
+    /** 创建一次性 ticket,绑定 storeId(终端用),30 秒过期 */
     public String createTicket(Long storeId) {
+        return createTicketInternal(storeId, null);
+    }
+
+    /** 创建一次性 ticket,绑定 employeeId + storeId(H5 员工用),30 秒过期 */
+    public String createEmployeeTicket(Long employeeId, Long storeId) {
+        return createTicketInternal(storeId, employeeId);
+    }
+
+    private String createTicketInternal(Long storeId, Long employeeId) {
         cleanupExpired();
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         StringBuilder sb = new StringBuilder(64);
         for (byte b : bytes) sb.append(String.format("%02x", b));
         String ticket = sb.toString();
-        tickets.put(ticket, new TicketEntry(storeId, System.currentTimeMillis() + TICKET_TTL_MS));
+        tickets.put(ticket, new TicketEntry(storeId, employeeId, System.currentTimeMillis() + TICKET_TTL_MS));
         return ticket;
     }
 
-    /** 校验并消费 ticket(一次性,校验后立即删除)。返回 storeId,无效返回 null */
+    /** 校验并消费 ticket(一次性,校验后立即删除)。返回 storeId,无效返回 null(终端用) */
     public Long validateAndConsume(String ticket) {
+        TicketResult r = validateAndConsumeFull(ticket);
+        return r == null ? null : r.storeId;
+    }
+
+    /** 校验并消费 ticket,返回完整结果(含 storeId + employeeId)。H5 员工订阅用 */
+    public TicketResult validateAndConsumeFull(String ticket) {
         if (ticket == null || ticket.isBlank()) return null;
         TicketEntry entry = tickets.remove(ticket);
         if (entry == null) return null;
         if (System.currentTimeMillis() > entry.expireAt) return null;
-        return entry.storeId;
+        return new TicketResult(entry.storeId, entry.employeeId);
     }
 
     /** 懒清理过期 ticket(在 createTicket 时触发) */

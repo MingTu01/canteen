@@ -255,6 +255,58 @@ const handlePublish = async () => {
   }
 }
 
+// ===== 清空当天菜单(二次确认,有订单时额外提示) =====
+const clearing = ref(false)
+
+const MEAL_TYPE_LABELS: Record<string, string> = { '1': '早餐', '2': '午餐', '3': '晚餐' }
+
+const handleClearDay = async () => {
+  const sid = storeId.value
+  if (!sid || !selectedDate.value) {
+    ElMessage.warning('请先选择日期')
+    return
+  }
+  if (dayMenus.value.length === 0) {
+    ElMessage.warning('当天无菜单可清空')
+    return
+  }
+  // 先查询订单情况
+  let orderInfo: { mealOrders: Record<string, number>; total: number } | null = null
+  try {
+    orderInfo = await menuApi.checkOrders(sid, selectedDate.value)
+  } catch {
+    /* 查询失败不阻断,后续正常清空 */
+  }
+  let promptMsg = `确定要清空 ${selectedDate.value} 的所有菜单吗？此操作不可恢复。`
+  if (orderInfo && orderInfo.total > 0) {
+    const mealDetails = Object.entries(orderInfo.mealOrders)
+      .map(([mt, cnt]) => `${MEAL_TYPE_LABELS[mt] || mt}餐 ${cnt} 单`)
+      .join('，')
+    promptMsg = `⚠️ ${selectedDate.value} 已有 ${orderInfo.total} 个订单（${mealDetails}）。\n\n清空菜单不会删除已有订单（订单保存了菜品快照），但员工将无法再下单该日菜品。\n\n确定要继续清空吗？`
+  }
+  try {
+    await ElMessageBox.confirm(promptMsg, '清空菜单确认', {
+      type: orderInfo && orderInfo.total > 0 ? 'error' : 'warning',
+      confirmButtonText: '确认清空',
+      cancelButtonText: '取消',
+      dangerouslyUseHTMLString: false,
+    })
+  } catch {
+    return
+  }
+  clearing.value = true
+  try {
+    const res = await menuApi.clearByDate(sid, selectedDate.value)
+    ElMessage.success(`已清空 ${res?.cleared ?? 0} 个餐次菜单`)
+    await fetchDayMenus()
+    await fetchMenuDates()
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    clearing.value = false
+  }
+}
+
 // ===== 批量发布菜单 =====
 const openBatchPublish = async () => {
   const sid = storeId.value
@@ -671,6 +723,15 @@ onMounted(() => {
                 size="small"
                 @click="handlePublish"
               >发布</ElButton>
+              <ElButton
+                v-if="dayMenus.length > 0 && !isDayPublished"
+                type="danger"
+                :icon="Trash2"
+                :loading="clearing"
+                size="small"
+                plain
+                @click="handleClearDay"
+              >清空</ElButton>
             </div>
           </div>
 

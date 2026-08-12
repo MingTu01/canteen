@@ -74,16 +74,18 @@ public class SseController {
 
     /**
      * 获取一次性 SSE ticket(需员工 Bearer token)。
-     * 用于 H5 端订阅员工维度事件(如支付码核销通知)。
+     * 用于 H5 端订阅员工维度事件(支付码核销 + 菜单变更)。
+     * 同时绑定 employeeId 和 storeId,便于按门店广播菜单变更。
      * 返回:{ ticket: "xxx", expiresIn: 30 }
      */
     @GetMapping("/employee-ticket")
     public ApiResponse<Map<String, Object>> getEmployeeTicket() {
         Long employeeId = SecurityContext.currentEmployeeId();
+        Long storeId = SecurityContext.currentStoreId();
         if (employeeId == null) {
             throw new SecurityException("未登录");
         }
-        String ticket = sseTicketService.createTicket(employeeId);
+        String ticket = sseTicketService.createEmployeeTicket(employeeId, storeId);
         Map<String, Object> result = new HashMap<>();
         result.put("ticket", ticket);
         result.put("expiresIn", 30);
@@ -96,15 +98,15 @@ public class SseController {
      * 返回:text/event-stream
      *
      * ticket 为 GET /api/sse/employee-ticket 返回的一次性凭证,30 秒内有效。
-     * 校验通过后从 ticket 中取出 employeeId,隔离到对应员工的事件流。
+     * 校验通过后从 ticket 中取出 employeeId + storeId,注册到员工维度和门店维度事件流。
      */
     @GetMapping(value = "/subscribe-employee", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeEmployee(@RequestParam String ticket) {
-        Long employeeId = sseTicketService.validateAndConsume(ticket);
-        if (employeeId == null) {
+        SseTicketService.TicketResult result = sseTicketService.validateAndConsumeFull(ticket);
+        if (result == null || result.employeeId == null) {
             throw new SecurityException("ticket 无效或已过期");
         }
-        return sseService.subscribeByEmployee(employeeId);
+        return sseService.subscribeByEmployee(result.employeeId, result.storeId);
     }
 
     /** 监控接口:当前 SSE 连接总数(仅管理员) */

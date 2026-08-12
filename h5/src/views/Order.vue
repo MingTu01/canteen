@@ -63,6 +63,8 @@ const erroredImages = ref<Set<number>>(new Set())
 let firstMount = true
 /** 下单成功后跳转订单页的定时器,组件失活时需清理避免意外导航 */
 let navTimer: ReturnType<typeof setTimeout> | null = null
+/** 组件是否处于 keep-alive 激活状态(SSE 菜单刷新仅在激活时执行) */
+let isComponentActive = false
 
 /** 已配置菜单的日期集合(yyyy-MM-dd) */
 const menuDates = ref<Set<string>>(new Set())
@@ -876,6 +878,7 @@ const resetToTodayAndLoad = async (): Promise<void> => {
 }
 
 onMounted(async () => {
+  isComponentActive = true
   // 加载后端订餐配置(按门店,截止时间、提前天数等),供 isOrderableByDeadline 使用
   await loadConfig(authStore.storeId)
   await Promise.all([loadDiningTimes(), fetchOrderedOrders()])
@@ -883,6 +886,7 @@ onMounted(async () => {
 })
 
 onActivated(async () => {
+  isComponentActive = true
   // keep-alive 首次挂载时 onMounted + onActivated 均触发,跳过首次避免重复
   if (firstMount) {
     firstMount = false
@@ -892,6 +896,48 @@ onActivated(async () => {
   void fetchOrderedOrders()
   await resetToTodayAndLoad()
 })
+
+/**
+ * SSE 菜单变更监听:管理端修改/发布菜单后实时刷新。
+ * - 仅在组件激活时执行(失活时 onActivated 会全量重载,无需增量刷新)
+ * - 指定日期:清缓存并重新加载该日期菜单
+ * - 未指定日期(发布全部等):全量重置
+ */
+watch(
+  () => authStore.menuChangedAt,
+  async () => {
+    if (!isComponentActive || authStore.menuChangedAt === 0) return
+    const changedDate = authStore.menuChangedDate
+    if (!changedDate) {
+      // 未指定日期:全量重置(菜单日期列表可能变化)
+      await resetToTodayAndLoad()
+      return
+    }
+    // 指定日期:清缓存 + 重新加载该日期菜单 + 刷新日期列表(可能有新增日期)
+    menuCache.value.delete(changedDate)
+    const storeId = authStore.storeId
+    if (!storeId) return
+    // 刷新日期列表(菜单可能新增/删除了某天)
+    await loadMenuDates()
+    // 该日期在当前窗口内且可订餐 → 重新加载菜单
+    if (dateList.value.some((d) => d.date === changedDate)) {
+      try {
+        const data = await menuApi.getMenuByDate(storeId, changedDate)
+        const arr = data || []
+        menuCache.value.set(changedDate, arr)
+        menusByDate.value.set(changedDate, arr)
+        // 重置图片激活状态,让新菜品图片重新懒加载
+        imageActivatedDates.value.delete(changedDate)
+      } catch {
+        /* 单日加载失败不影响其他日期 */
+      }
+    } else {
+      // 该日期不再可订餐(可能被删除或过点),从当前数据中移除
+      menusByDate.value.delete(changedDate)
+      menuCache.value.delete(changedDate)
+    }
+  },
+)
 
 /** 清理跳转定时器与图片懒加载观察器,避免离开页面后被意外触发 */
 const cleanupNavAndObserver = () => {
@@ -908,10 +954,12 @@ const cleanupNavAndObserver = () => {
 }
 
 onDeactivated(() => {
+  isComponentActive = false
   cleanupNavAndObserver()
 })
 
 onBeforeUnmount(() => {
+  isComponentActive = false
   cleanupNavAndObserver()
 })
 </script>

@@ -126,4 +126,47 @@ public class MenuController {
         menuService.deleteMenu(id);
         return ApiResponse.success(null);
     }
+
+    /**
+     * 查询某日菜单的订单情况(修改/清空前提示用)。
+     * GET /api/menu/store/{storeId}/date/{date}/orders-check
+     * 返回:{ mealOrders: { "1": 3, "2": 5 }, total: 8 }
+     * 仅包含订单数 > 0 的餐次。前端据此决定是否弹出二次确认。
+     */
+    @GetMapping("/store/{storeId}/date/{date}/orders-check")
+    public ApiResponse<Map<String, Object>> checkOrdersBeforeModify(
+            @PathVariable Long storeId, @PathVariable String date) {
+        SecurityContext.checkStoreAccess(storeId);
+        LocalDate localDate = LocalDate.parse(date);
+        Map<Integer, Integer> mealOrders = menuService.countOrdersByDate(storeId, localDate);
+        int total = mealOrders.values().stream().mapToInt(Integer::intValue).sum();
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        // key 转字符串方便前端 JSON 处理
+        Map<String, Integer> mealOrdersStr = new java.util.LinkedHashMap<>();
+        for (Map.Entry<Integer, Integer> e : mealOrders.entrySet()) {
+            mealOrdersStr.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        result.put("mealOrders", mealOrdersStr);
+        result.put("total", total);
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 清空某日所有餐次菜单(草稿+已发布)。
+     * DELETE /api/menu/store/{storeId}/date/{date}
+     * 返回:{ cleared: 删除的菜单数量 }
+     * 注:订单保存菜品快照,清空菜单不影响已有订单。
+     */
+    @OperationLog(value = "清空菜单", detail = "'门店 ' + #storeId + ' 日期 ' + #date")
+    @DeleteMapping("/store/{storeId}/date/{date}")
+    public ApiResponse<Map<String, Object>> clearMenusByDate(
+            @PathVariable Long storeId, @PathVariable String date) {
+        if (SecurityContext.isEmployee()) {
+            throw new com.example.canteen.exception.SecurityException("员工无权执行此操作");
+        }
+        SecurityContext.checkStoreAccess(storeId);
+        LocalDate localDate = LocalDate.parse(date);
+        int cleared = menuService.clearMenusByDate(storeId, localDate);
+        return ApiResponse.success(Map.of("cleared", cleared));
+    }
 }

@@ -35,6 +35,9 @@ public class SseService {
     /** employeeId -> 该员工所有 SSE 连接集合(H5 用,同一员工可能多设备登录) */
     private final Map<Long, Set<SseEmitter>> employeeEmitters = new ConcurrentHashMap<>();
 
+    /** storeId -> 该门店所有 H5 员工 SSE 连接集合(用于向 H5 广播菜单变更) */
+    private final Map<Long, Set<SseEmitter>> employeeEmittersByStore = new ConcurrentHashMap<>();
+
     /** 心beat 定时器(延迟启动,避免容器未就绪) */
     private volatile boolean heartbeatStarted = false;
 
@@ -79,39 +82,54 @@ public class SseService {
 
     /**
      * 创建一个 SSE 连接并注册到指定员工。
-     * 用于 H5 端接收员工维度的事件(如支付码核销通知)。
+     * 同时注册到员工所属门店的 H5 连接集合,用于接收菜单变更广播。
+     *
+     * @param employeeId 员工 ID(用于接收 paycode_used 等员工维度事件)
+     * @param storeId    门店 ID(用于接收 menu_changed 等门店维度事件),可为 null
      */
-    public SseEmitter subscribeByEmployee(Long employeeId) {
+    public SseEmitter subscribeByEmployee(Long employeeId, Long storeId) {
         if (employeeId == null) {
             throw new IllegalArgumentException("employeeId 不能为空");
         }
         SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
 
-        Set<SseEmitter> set = employeeEmitters.computeIfAbsent(employeeId, k -> new CopyOnWriteArraySet<>());
-        set.add(emitter);
+        Set<SseEmitter> empSet = employeeEmitters.computeIfAbsent(employeeId, k -> new CopyOnWriteArraySet<>());
+        empSet.add(emitter);
 
+        // 同时注册到门店维度的 H5 连接集合,使 broadcastMenuChanged 能推送到 H5
+        Set<SseEmitter> storeSet = null;
+        if (storeId != null) {
+            storeSet = employeeEmittersByStore.computeIfAbsent(storeId, k -> new CopyOnWriteArraySet<>());
+            storeSet.add(emitter);
+        }
+
+        final Set<SseEmitter> finalStoreSet = storeSet;
         emitter.onCompletion(() -> {
-            set.remove(emitter);
-            log.debug("SSE 员工连接完成:employeeId={}, 当前连接数={}", employeeId, set.size());
+            empSet.remove(emitter);
+            if (finalStoreSet != null) finalStoreSet.remove(emitter);
+            log.debug("SSE 员工连接完成:employeeId={}, 当前连接数={}", employeeId, empSet.size());
         });
         emitter.onTimeout(() -> {
-            set.remove(emitter);
+            empSet.remove(emitter);
+            if (finalStoreSet != null) finalStoreSet.remove(emitter);
             emitter.complete();
-            log.debug("SSE 员工连接超时:employeeId={}, 当前连接数={}", employeeId, set.size());
+            log.debug("SSE 员工连接超时:employeeId={}, 当前连接数={}", employeeId, empSet.size());
         });
         emitter.onError((e) -> {
-            set.remove(emitter);
+            empSet.remove(emitter);
+            if (finalStoreSet != null) finalStoreSet.remove(emitter);
             log.debug("SSE 员工连接异常:employeeId={}, err={}", employeeId, e.getMessage());
         });
 
         try {
             emitter.send(SseEmitter.event().name("open").data("connected"));
         } catch (IOException e) {
-            set.remove(emitter);
+            empSet.remove(emitter);
+            if (finalStoreSet != null) finalStoreSet.remove(emitter);
         }
 
         ensureHeartbeat();
-        log.debug("SSE 员工新订阅:employeeId={}, 当前连接数={}", employeeId, set.size());
+        log.debug("SSE 员工新订阅:employeeId={}, storeId={}, 当前连接数={}", employeeId, storeId, empSet.size());
         return emitter;
     }
 
@@ -187,15 +205,32 @@ public class SseService {
     }
 
     /**
-     * 向指定门店广播菜单变更(新增/复制/删除菜单)。
+     * 向指定门店广播菜单变更(新增/复制/删除/发布菜单)。
+     * 同时推送到终端(storeEmitters)和 H5 员工(employeeEmittersByStore)。
      */
     public void broadcastMenuChanged(Long storeId, String date, Integer mealType) {
-        broadcast(storeId, "menu_changed", Map.of(
-                "date", date,
+        Object data = Map.of(
+                "date", date == null ? "" : date,
                 "mealType", mealType == null ? 0 : mealType,
                 "action", "refresh",
                 "timestamp", System.currentTimeMillis()
-        ));
+        );
+        // 1. 推送到终端
+        broadcast(storeId, "menu_changed", data);
+        // 2. 推送到 H5 员工(同一门店)
+        Set<SseEmitter> h5Set = employeeEmittersByStore.get(storeId);
+        if (h5Set != null && !h5Set.isEmpty()) {
+            SseEmitter.SseEventBuilder builder = SseEmitter.event().name("menu_changed").data(data);
+            for (SseEmitter emitter : h5Set) {
+                try {
+                    emitter.send(builder);
+                } catch (IOException | IllegalStateException e) {
+                    h5Set.remove(emitter);
+                    log.debug("H5 菜单广播时清理失效连接:storeId={}, err={}", storeId, e.getMessage());
+                }
+            }
+            log.debug("SSE H5 菜单广播:storeId={}, event=menu_changed, H5连接数={}", storeId, h5Set.size());
+        }
     }
 
     /**

@@ -58,6 +58,14 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const payCodeUsedAt = ref<number>(0)
 
+  /**
+   * 菜单变更时间戳:管理端修改/发布菜单后,SSE 推送 menu_changed 事件,
+   * 更新此时间戳 + 变更日期。Order.vue watch 此值,变化时清缓存并刷新菜单。
+   */
+  const menuChangedAt = ref<number>(0)
+  /** 菜单变更影响的日期(yyyy-MM-dd),空字符串表示全部日期 */
+  const menuChangedDate = ref<string>('')
+
   // ============ getters ============
   const balance = computed<number>(() => employee.value?.balance ?? 0)
   const employeeName = computed<string>(() => employee.value?.name ?? '')
@@ -227,6 +235,17 @@ export const useAuthStore = defineStore('auth', () => {
         payCodeUsedAt.value = Date.now()
       })
 
+      // 监听 menu_changed 事件:管理端修改/发布菜单后,更新时间戳 + 日期,Order.vue watch 刷新菜单
+      sseSource.addEventListener('menu_changed', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data)
+          menuChangedDate.value = data?.date || ''
+        } catch {
+          menuChangedDate.value = ''
+        }
+        menuChangedAt.value = Date.now()
+      })
+
       sseSource.onerror = () => {
         cleanupSseSource()
         if (!sseStopped) {
@@ -275,6 +294,8 @@ export const useAuthStore = defineStore('auth', () => {
     employee,
     isLoggedIn,
     payCodeUsedAt,
+    menuChangedAt,
+    menuChangedDate,
     // getters
     balance,
     employeeName,

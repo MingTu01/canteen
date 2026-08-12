@@ -26,4 +26,12 @@ public interface OrderMapper extends BaseMapper<Order> {
     Order selectByStoreDatePickupCode(@Param("storeId") Long storeId,
                                       @Param("date") LocalDate date,
                                       @Param("pickupCode") String pickupCode);
+
+    /**
+     * 统计门店某日某餐次的已下单(未取消)订单数。
+     * 用于菜单修改/删除前的提示。
+     */
+    int countByStoreDateMeal(@Param("storeId") Long storeId,
+                             @Param("date") LocalDate date,
+                             @Param("mealType") Integer mealType);
 }

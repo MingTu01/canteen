@@ -10,6 +10,7 @@ import com.example.canteen.exception.BusinessException;
 import com.example.canteen.mapper.DishMapper;
 import com.example.canteen.mapper.MenuItemMapper;
 import com.example.canteen.mapper.MenuMapper;
+import com.example.canteen.mapper.OrderMapper;
 import com.example.canteen.security.SecurityContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -48,15 +49,18 @@ public class MenuService {
     private final MenuMapper menuMapper;
     private final MenuItemMapper menuItemMapper;
     private final DishMapper dishMapper;
+    private final OrderMapper orderMapper;
     private final ObjectProvider<RedisTemplate<String, Object>> redisTemplateProvider;
     private final ObjectProvider<SseService> sseServiceProvider;
 
     public MenuService(MenuMapper menuMapper, MenuItemMapper menuItemMapper, DishMapper dishMapper,
+                       OrderMapper orderMapper,
                        ObjectProvider<RedisTemplate<String, Object>> redisTemplateProvider,
                        ObjectProvider<SseService> sseServiceProvider) {
         this.menuMapper = menuMapper;
         this.menuItemMapper = menuItemMapper;
         this.dishMapper = dishMapper;
+        this.orderMapper = orderMapper;
         this.redisTemplateProvider = redisTemplateProvider;
         this.sseServiceProvider = sseServiceProvider;
     }
@@ -222,7 +226,10 @@ public class MenuService {
     @Transactional
     public Menu createMenu(Menu menu, List<Long> dishIds) {
         Menu existing = menuMapper.selectByStoreDateType(menu.getStoreId(), menu.getDate(), menu.getMealType());
+        // 保留原菜单的发布状态:编辑已发布菜单后仍保持已发布,避免 H5 端看不到菜品
+        Integer inheritedPublished = null;
         if (existing != null) {
+            inheritedPublished = existing.getPublished();
             deleteMenuInternal(existing.getId());
         }
         if (dishIds != null && !dishIds.isEmpty()) {
@@ -236,9 +243,9 @@ public class MenuService {
                 }
             }
         }
-        // 新建菜单默认未发布(草稿),需手动发布后点菜端才可见
+        // 继承原发布状态;新建菜单默认未发布(草稿),需手动发布后点菜端才可见
         if (menu.getPublished() == null) {
-            menu.setPublished(0);
+            menu.setPublished(inheritedPublished != null ? inheritedPublished : 0);
         }
         menuMapper.insert(menu);
 
@@ -434,5 +441,52 @@ public class MenuService {
         menuItemMapper.delete(new LambdaQueryWrapper<MenuItem>()
                 .eq(MenuItem::getMenuId, id));
         menuMapper.deleteById(id);
+    }
+
+    /* ============ 菜单修改前的订单检查(方案A:提示但不阻止) ============ */
+
+    /**
+     * 检查某日某餐次是否已有订单(用于修改/清空前的提示)。
+     * @return 订单数(0 表示无订单)
+     */
+    public int countOrdersForMeal(Long storeId, LocalDate date, Integer mealType) {
+        if (mealType == null) return 0;
+        Integer cnt = orderMapper.countByStoreDateMeal(storeId, date, mealType);
+        return cnt == null ? 0 : cnt;
+    }
+
+    /**
+     * 检查某日所有餐次的订单情况(用于清空/修改前的批量提示)。
+     * @return Map:mealType -> 订单数(仅包含订单数 > 0 的餐次)
+     */
+    public Map<Integer, Integer> countOrdersByDate(Long storeId, LocalDate date) {
+        Map<Integer, Integer> result = new HashMap<>();
+        for (int mt = 1; mt <= 3; mt++) {
+            int cnt = countOrdersForMeal(storeId, date, mt);
+            if (cnt > 0) {
+                result.put(mt, cnt);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 清空某日所有餐次的菜单(草稿和已发布一并删除)。
+     * 不删订单(订单保存菜品快照,不受菜单影响),仅清菜单本身。
+     * @return 删除的菜单数量
+     */
+    @Transactional
+    public int clearMenusByDate(Long storeId, LocalDate date) {
+        SecurityContext.checkStoreAccess(storeId);
+        List<Menu> menus = menuMapper.selectByStoreDate(storeId, date);
+        if (menus == null || menus.isEmpty()) {
+            return 0;
+        }
+        for (Menu menu : menus) {
+            deleteMenuInternal(menu.getId());
+        }
+        cacheEvictMenu(storeId, date);
+        broadcastMenuChanged(storeId, date, null);
+        return menus.size();
     }
 }

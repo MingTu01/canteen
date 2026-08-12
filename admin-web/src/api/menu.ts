@@ -20,4 +20,10 @@ export const menuApi = {
   batchPublish: (storeId: number) =>
     api.post<{ published: number; daysPublished: number }>('/menu/batch-publish', null, { params: { storeId } }).then((r) => r.data),
   delete: (id: number) => api.delete<void>(`/menu/${id}`).then((r) => r.data),
+  /** 查询某日菜单的订单情况(修改/清空前提示用) */
+  checkOrders: (storeId: number, date: string) =>
+    api.get<{ mealOrders: Record<string, number>; total: number }>(`/menu/store/${storeId}/date/${date}/orders-check`).then((r) => r.data),
+  /** 清空某日所有餐次菜单(草稿+已发布) */
+  clearByDate: (storeId: number, date: string) =>
+    api.delete<{ cleared: number }>(`/menu/store/${storeId}/date/${date}`).then((r) => r.data),
 }
