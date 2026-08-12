@@ -132,6 +132,8 @@ export interface Dish {
   status?: number
   stock?: number | null
   maxPerOrder?: number | null
+  /** 辣度:0=不辣,1=微辣,2=中辣,3=重辣 */
+  spiceLevel?: number
   description?: string
   createdAt?: string
   updatedAt?: string
@@ -230,6 +232,8 @@ export interface OrderItem {
   amount?: number
   /** 菜品图片相对路径(后端关联 dish 表查询填充,订单详情展示用) */
   dishImage?: string
+  /** 辣度(后端关联 dish 表查询填充):0=不辣,1=微辣,2=中辣,3=重辣 */
+  spiceLevel?: number
   createdAt?: string
 }
 

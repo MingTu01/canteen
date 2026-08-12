@@ -8,7 +8,7 @@ import {
   closeToast,
   showConfirmDialog,
 } from 'vant'
-import { ShoppingCart, Plus, Minus, Check } from 'lucide-vue-next'
+import { ShoppingCart, Plus, Minus, Check, Flame } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import * as menuApi from '@/api/menu'
@@ -1101,7 +1101,20 @@ onBeforeUnmount(() => {
                     <!-- 底部:菜名+价格 + 操作按钮 -->
                     <div class="dish-card__bottom">
                       <div class="dish-card__info">
-                        <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
+                        <div class="dish-card__name-row">
+                          <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
+                          <span
+                            v-if="iv.dish?.spiceLevel && iv.dish.spiceLevel > 0"
+                            class="dish-card__spice"
+                          >
+                            <Flame
+                              v-for="n in iv.dish.spiceLevel"
+                              :key="n"
+                              :size="12"
+                              class="dish-card__spice-icon"
+                            />
+                          </span>
+                        </div>
                         <p class="dish-card__price">¥{{ formatMoney(iv.dish?.price) }}</p>
                       </div>
                       <!-- 已订菜品:绿色 ✅ 标记(突出显示已订状态) -->
@@ -1251,7 +1264,20 @@ onBeforeUnmount(() => {
                 :key="entry.dish.id"
                 class="cart-popup__item"
               >
-                <div class="cart-popup__item-name">{{ entry.dish.name }}</div>
+                <div class="cart-popup__item-name">
+                  <span>{{ entry.dish.name }}</span>
+                  <span
+                    v-if="entry.dish.spiceLevel && entry.dish.spiceLevel > 0"
+                    class="cart-popup__item-spice"
+                  >
+                    <Flame
+                      v-for="n in entry.dish.spiceLevel"
+                      :key="n"
+                      :size="12"
+                      class="cart-popup__item-spice-icon"
+                    />
+                  </span>
+                </div>
                 <div class="cart-popup__item-price">¥{{ formatMoney(entry.dish.price) }}</div>
                 <!-- 自定义+/-按钮(避免 van-stepper 受控模式时序 bug:emit minus 后内部 updateValue 用已更新的 currentValue 再减一次,导致 decreaseItem 被调用两次) -->
                 <div class="cart-popup__stepper">
@@ -1338,7 +1364,20 @@ onBeforeUnmount(() => {
                 :key="entry.dish.id"
                 class="confirm-popup__row"
               >
-                <span class="confirm-popup__row-name">{{ entry.dish.name }}</span>
+                <span class="confirm-popup__row-name">
+                  {{ entry.dish.name }}
+                  <span
+                    v-if="entry.dish.spiceLevel && entry.dish.spiceLevel > 0"
+                    class="confirm-popup__row-spice"
+                  >
+                    <Flame
+                      v-for="n in entry.dish.spiceLevel"
+                      :key="n"
+                      :size="12"
+                      class="confirm-popup__row-spice-icon"
+                    />
+                  </span>
+                </span>
                 <span class="confirm-popup__row-qty">x{{ entry.quantity }}</span>
                 <span class="confirm-popup__row-price">¥{{ formatMoney(entry.dish.price * entry.quantity) }}</span>
               </div>
@@ -1795,6 +1834,26 @@ onBeforeUnmount(() => {
     line-height: 1.3;
   }
 
+  &__name-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
+  &__spice {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    flex-shrink: 0;
+    line-height: 1;
+    margin-top: 1px;
+  }
+
+  &__spice-icon {
+    color: #ef4444;
+  }
+
   &__price {
     margin: 2px 0 0;
     font-size: 12px;
@@ -2070,6 +2129,20 @@ onBeforeUnmount(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  &__item-spice {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    flex-shrink: 0;
+  }
+
+  &__item-spice-icon {
+    color: #ef4444;
   }
 
   &__item-price {
@@ -2256,6 +2329,20 @@ onBeforeUnmount(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  &__row-spice {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    flex-shrink: 0;
+  }
+
+  &__row-spice-icon {
+    color: #ef4444;
   }
 
   &__row-qty {

@@ -27,4 +27,11 @@ public class OrderItem {
      */
     @TableField(exist = false)
     private String dishImage;
+
+    /**
+     * 辣度(关联 dish 表查询填充,非 order_item 表字段):0=不辣,1=微辣,2=中辣,3=重辣。
+     * 前端订单列表/详情展示辣椒图标用。
+     */
+    @TableField(exist = false)
+    private Integer spiceLevel;
 }

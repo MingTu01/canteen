@@ -13,6 +13,8 @@ import {
   ElMessageBox,
   ElOption,
   ElPagination,
+  ElRadioGroup,
+  ElRadioButton,
   ElSelect,
   ElSwitch,
   ElTable,
@@ -30,6 +32,7 @@ import {
   ArrowDownCircle,
   Archive,
   RotateCcw,
+  Flame,
 } from 'lucide-vue-next'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -98,6 +101,7 @@ const defaultDish = (): Dish => ({
   image: '',
   stock: 0,
   maxPerOrder: 0,
+  spiceLevel: 0,
   status: 1,
 })
 const form = ref<Dish>(defaultDish())
@@ -457,6 +461,18 @@ onMounted(() => {
               <span v-else class="tabular-nums">{{ row.maxPerOrder }}</span>
             </template>
           </ElTableColumn>
+          <ElTableColumn label="辣度" width="110" align="center">
+            <template #default="{ row }">
+              <div v-if="row.spiceLevel && row.spiceLevel > 0" class="flex items-center justify-center gap-0.5">
+                <Flame
+                  v-for="n in row.spiceLevel"
+                  :key="n"
+                  class="w-4 h-4 text-red-500"
+                />
+              </div>
+              <span v-else class="text-text-muted text-xs">不辣</span>
+            </template>
+          </ElTableColumn>
           <ElTableColumn label="状态" width="100" align="center">
             <template #default="{ row }">
               <StatusTag :value="row.status" :map="COMMON_STATUS" />
@@ -526,6 +542,32 @@ onMounted(() => {
               <ElInputNumber v-model="formMaxPerOrder" :min="0" :step="1" controls-position="right" class="w-full" />
               <p class="mt-1 text-xs text-text-muted">0 或不填表示不限</p>
             </div>
+          </ElFormItem>
+          <ElFormItem label="辣度">
+            <ElRadioGroup v-model="form.spiceLevel">
+              <ElRadioButton :value="0">不辣</ElRadioButton>
+              <ElRadioButton :value="1">
+                <span class="inline-flex items-center gap-1">
+                  <Flame class="w-4 h-4 text-red-400" />
+                  <span>微辣</span>
+                </span>
+              </ElRadioButton>
+              <ElRadioButton :value="2">
+                <span class="inline-flex items-center gap-1">
+                  <Flame class="w-4 h-4 text-red-400" />
+                  <Flame class="w-4 h-4 text-red-500" />
+                  <span>中辣</span>
+                </span>
+              </ElRadioButton>
+              <ElRadioButton :value="3">
+                <span class="inline-flex items-center gap-1">
+                  <Flame class="w-4 h-4 text-red-400" />
+                  <Flame class="w-4 h-4 text-red-500" />
+                  <Flame class="w-4 h-4 text-red-600" />
+                  <span>重辣</span>
+                </span>
+              </ElRadioButton>
+            </ElRadioGroup>
           </ElFormItem>
           <ElFormItem label="适用餐次">
             <ElCheckboxGroup v-model="formMealTypes">

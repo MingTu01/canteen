@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS dish (
     meal_types VARCHAR(20) DEFAULT '1,2,3',
     stock INT DEFAULT -1,
     max_per_order INT DEFAULT 5,
+    spice_level INT DEFAULT 0,
     status INT DEFAULT 1,
     is_deleted INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

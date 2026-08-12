@@ -25,6 +25,8 @@ public class Dish {
     private Integer stock;
     /** 单次限购数量,默认 99 */
     private Integer maxPerOrder;
+    /** 辣度:0=不辣,1=微辣,2=中辣,3=重辣 */
+    private Integer spiceLevel;
     /** 软删除:0=正常,1=已删除 */
     private Integer isDeleted;
     private LocalDateTime createdAt;

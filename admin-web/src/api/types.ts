@@ -78,6 +78,8 @@ export interface Dish {
   status?: number
   stock?: number | null
   maxPerOrder?: number | null
+  /** 辣度:0=不辣,1=微辣,2=中辣,3=重辣 */
+  spiceLevel?: number
   isDeleted?: number
   createdAt?: string
   updatedAt?: string

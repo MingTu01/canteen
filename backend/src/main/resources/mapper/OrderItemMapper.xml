@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.canteen.mapper.OrderItemMapper">
     <select id="selectByOrderId" resultType="com.example.canteen.entity.OrderItem">
-        SELECT oi.*, d.image AS dish_image
+        SELECT oi.*, d.image AS dish_image, d.spice_level AS spice_level
         FROM order_item oi
         LEFT JOIN dish d ON oi.dish_id = d.id
         WHERE oi.order_id = #{orderId}
@@ -11,7 +11,7 @@
 
     <!-- 批量查询多个订单的菜品(避免 N+1,终端订单查询列表用) -->
     <select id="selectByOrderIds" resultType="com.example.canteen.entity.OrderItem">
-        SELECT oi.*, d.image AS dish_image
+        SELECT oi.*, d.image AS dish_image, d.spice_level AS spice_level
         FROM order_item oi
         LEFT JOIN dish d ON oi.dish_id = d.id
         WHERE oi.order_id IN

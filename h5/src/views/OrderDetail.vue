@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showSuccessToast, showToast, showConfirmDialog } from 'vant'
+import { Flame } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -251,7 +252,20 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
               </div>
             </div>
             <div class="order-detail__item-info">
-              <div class="order-detail__item-name">{{ it.dishName || '菜品' }}</div>
+              <div class="order-detail__item-name">
+                <span>{{ it.dishName || '菜品' }}</span>
+                <span
+                  v-if="it.spiceLevel && it.spiceLevel > 0"
+                  class="order-detail__item-spice"
+                >
+                  <Flame
+                    v-for="n in it.spiceLevel"
+                    :key="n"
+                    :size="13"
+                    class="order-detail__item-spice-icon"
+                  />
+                </span>
+              </div>
               <div class="order-detail__item-meta">
                 <span class="order-detail__item-price">¥{{ formatMoney(it.price) }}</span>
                 <span class="order-detail__item-qty">x{{ it.quantity }}</span>
@@ -471,6 +485,20 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    &-spice {
+      display: inline-flex;
+      align-items: center;
+      gap: 1px;
+      flex-shrink: 0;
+    }
+
+    &-spice-icon {
+      color: #ef4444;
     }
 
     &-meta {

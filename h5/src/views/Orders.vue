@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showSuccessToast, showFailToast, showToast, showConfirmDialog } from 'vant'
 import { Popup as VanPopup } from 'vant'
+import { Flame } from 'lucide-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getMyOrders, cancelOrder } from '@/api/order'
@@ -86,6 +87,8 @@ interface DishRow {
   price: number
   status: number
   pickupCode?: string
+  /** 辣度:0=不辣,1=微辣,2=中辣,3=重辣 */
+  spiceLevel?: number
 }
 
 /** 餐别分组(同一餐别的所有订单合并展示) */
@@ -172,6 +175,7 @@ const groupedOrders = computed<DateGroup[]>(() => {
               price: it.price,
               status: o.status,
               pickupCode: o.pickupCode,
+              spiceLevel: it.spiceLevel,
             })
             subtotal += it.price * it.quantity
           }
@@ -836,7 +840,20 @@ onMounted(() => {
                   class="orders-page__dish-row"
                   @click="goDetail(row.orderId)"
                 >
-                  <span class="orders-page__dish-name">{{ row.name }}</span>
+                  <span class="orders-page__dish-name">
+                    {{ row.name }}
+                    <span
+                      v-if="row.spiceLevel && row.spiceLevel > 0"
+                      class="orders-page__dish-spice"
+                    >
+                      <Flame
+                        v-for="n in row.spiceLevel"
+                        :key="n"
+                        :size="12"
+                        class="orders-page__dish-spice-icon"
+                      />
+                    </span>
+                  </span>
                   <span class="orders-page__dish-qty">x{{ row.quantity }}</span>
                   <span class="orders-page__dish-price">¥{{ formatMoney(row.price * row.quantity) }}</span>
                   <span
@@ -1291,6 +1308,20 @@ onMounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  &__dish-spice {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    flex-shrink: 0;
+  }
+
+  &__dish-spice-icon {
+    color: #ef4444;
   }
 
   &__dish-qty {
