@@ -1693,6 +1693,9 @@ onBeforeUnmount(() => {
   border: 1px solid $brand-border;
   border-radius: 12px;
   transition: border-color 0.15s ease;
+  /* grid item 默认 min-width: auto,长菜名(nowrap)会撑大列宽导致左右不等;
+     设为 0 允许 grid item 收缩,确保 repeat(2, 1fr) 等宽分配 */
+  min-width: 0;
 
   &--selected {
     border: 2px solid $brand-primary;
@@ -1783,9 +1786,13 @@ onBeforeUnmount(() => {
     font-size: 12px;
     font-weight: 500;
     color: $brand-card-foreground;
+    /* 最多2行,超出省略号;2行统一卡片高度,菜名显示更完整 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    word-break: break-all;
+    line-height: 1.3;
   }
 
   &__price {
