@@ -1,10 +1,10 @@
 package com.example.canteen.controller;
 
 import com.example.canteen.annotation.OperationLog;
+import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.exception.SecurityException;
 import com.example.canteen.security.SecurityContext;
-import com.example.canteen.util.ApiResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
