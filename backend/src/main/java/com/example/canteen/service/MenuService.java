@@ -98,12 +98,14 @@ public class MenuService {
         }
     }
 
-    /** 失效指定门店某日菜单缓存(以及该日所在月的日期列表缓存) */
+    /** 失效指定门店某日菜单缓存(管理端 + 点菜端 published,以及该日所在月的日期列表缓存) */
     private void cacheEvictMenu(Long storeId, LocalDate date) {
         RedisTemplate<String, Object> tpl = redis();
         if (tpl == null) return;
         try {
-            tpl.delete(String.format(CACHE_KEY_MENU_BY_DATE, storeId, date));
+            String baseKey = String.format(CACHE_KEY_MENU_BY_DATE, storeId, date);
+            tpl.delete(baseKey);                          // 管理端缓存(含未发布)
+            tpl.delete(baseKey + ":published");           // 点菜端缓存(仅已发布,H5/终端用)
             tpl.delete(String.format(CACHE_KEY_MENU_DATES, storeId, date.getYear(), date.getMonthValue()));
         } catch (Exception e) {
             log.warn("Redis 失效失败:{}", e.getMessage());
