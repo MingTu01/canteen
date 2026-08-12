@@ -230,10 +230,9 @@ const orderedItemsFor = (date: string, mealType: number): Map<number, number> =>
 
 /** 拉取当前员工已下单订单(status=1 待取餐,用于锁定已订餐别 + 已订菜品回显) */
 const fetchOrderedOrders = async (): Promise<void> => {
-  const employeeId = authStore.employeeId
-  if (!employeeId) return
+  if (!authStore.isLoggedIn) return
   try {
-    const list = await orderApi.getMyOrders(employeeId)
+    const list = await orderApi.getMyOrders()
     const arr = Array.isArray(list) ? list : []
     // 仅保留 status=1 待取餐
     orderedOrders.value = arr.filter((o) => o.status === 1)

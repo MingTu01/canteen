@@ -16,9 +16,9 @@ export function createOrder(dto: OrderCreateDTO): Promise<Order> {
   return post<Order>('/order', dto)
 }
 
-/** 查询指定员工的订单列表(员工只能查自己) */
-export function getMyOrders(employeeId: number): Promise<Order[]> {
-  return get<Order[]>(`/order/employee/${employeeId}`)
+/** 查询当前登录员工的订单列表(基于 token,不依赖前端传 employeeId) */
+export function getMyOrders(): Promise<Order[]> {
+  return get<Order[]>('/order/my')
 }
 
 /** 查询订单详情(含 items 明细) */

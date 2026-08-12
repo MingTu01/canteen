@@ -66,12 +66,12 @@ const measureTickerViewport = (): void => {
   }
 }
 
-/** 公告列表(type=3):展示标题 + 图片 + 内容 */
+/** 公告列表(type=3):展示标题 + 图片 + 内容,点击弹出详情 */
 const announcementList = computed(() =>
   notifications.value.filter((n) => n.type === 3).slice(0, 10),
 )
 
-/** 活动列表(type=4):列表仅展示标题,点击展开详情 */
+/** 活动列表(type=4):展示标题 + 图片 + 内容,点击弹出详情 */
 const activityList = computed(() =>
   notifications.value.filter((n) => n.type === 4).slice(0, 10),
 )
@@ -80,10 +80,6 @@ const activityList = computed(() =>
 const noticeList = computed(() =>
   notifications.value.filter((n) => n.type !== 3 && n.type !== 4).slice(0, 5),
 )
-
-/** 活动详情弹窗 */
-const activityDetail = ref<Notification | null>(null)
-const showActivityPopup = ref(false)
 
 /** 通知详情弹窗(展示标题 + 图片 + 内容) */
 const noticeDetail = ref<Notification | null>(null)
@@ -117,12 +113,6 @@ const getNoticeImage = (item: Notification): string => {
 const previewImage = (url: string): void => {
   if (!url) return
   showImagePreview([url])
-}
-
-/** 展示活动详情 */
-const showActivityDetail = (item: Notification): void => {
-  activityDetail.value = item
-  showActivityPopup.value = true
 }
 
 /** 快捷入口配置(对齐模板 Lucide 图标) */
@@ -301,7 +291,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- 公告(展示标题 + 图片 + 内容) -->
+      <!-- 公告(展示标题 + 图片 + 内容,点击弹出详情) -->
       <section v-if="announcementList.length > 0" class="home__section">
         <div class="home__section-header">
           <h2 class="home__section-title">公告</h2>
@@ -311,12 +301,16 @@ onUnmounted(() => {
             v-for="item in announcementList"
             :key="item.id"
             class="home__announcement-card"
+            @click="showNoticeDetail(item)"
           >
-            <h3 class="home__announcement-title">{{ item.title }}</h3>
+            <div class="home__announcement-top">
+              <h3 class="home__announcement-title">{{ item.title }}</h3>
+              <span class="home__notice-tag home__notice-tag--muted">公告</span>
+            </div>
             <div
               v-if="getNoticeImage(item)"
               class="home__announcement-image"
-              @click="previewImage(getNoticeImage(item))"
+              @click.stop="previewImage(getNoticeImage(item))"
             >
               <img :src="getNoticeImage(item)" :alt="item.title" loading="lazy" />
             </div>
@@ -325,7 +319,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- 活动(列表仅展示标题,点击展开标题 + 图片 + 内容) -->
+      <!-- 活动(展示标题 + 图片 + 内容,点击弹出详情) -->
       <section v-if="activityList.length > 0" class="home__section">
         <div class="home__section-header">
           <h2 class="home__section-title">活动</h2>
@@ -334,14 +328,21 @@ onUnmounted(() => {
           <div
             v-for="item in activityList"
             :key="item.id"
-            class="home__notice-card"
-            @click="showActivityDetail(item)"
+            class="home__announcement-card"
+            @click="showNoticeDetail(item)"
           >
-            <div class="home__notice-top">
-              <h3 class="home__notice-title">{{ item.title }}</h3>
+            <div class="home__announcement-top">
+              <h3 class="home__announcement-title">{{ item.title }}</h3>
               <span class="home__notice-tag home__notice-tag--accent">活动</span>
             </div>
-            <p class="home__notice-date">{{ formatDate(item.createdAt || item.startDate) }}</p>
+            <div
+              v-if="getNoticeImage(item)"
+              class="home__announcement-image"
+              @click.stop="previewImage(getNoticeImage(item))"
+            >
+              <img :src="getNoticeImage(item)" :alt="item.title" loading="lazy" />
+            </div>
+            <p v-if="item.content" class="home__announcement-content">{{ item.content }}</p>
           </div>
         </div>
       </section>
@@ -596,6 +597,64 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  // ============ 公告/活动卡片(标题 + 图片 + 内容) ============
+  &__announcement-card {
+    padding: 16px;
+    background: $brand-card;
+    border: 1px solid $brand-border;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+
+    &:active {
+      opacity: 0.6;
+    }
+  }
+
+  &__announcement-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  &__announcement-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: $brand-card-foreground;
+  }
+
+  &__announcement-image {
+    margin-top: 8px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: $brand-muted;
+    cursor: zoom-in;
+
+    img {
+      display: block;
+      width: 100%;
+      max-height: 200px;
+      object-fit: cover;
+    }
+  }
+
+  &__announcement-content {
+    margin: 8px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: $brand-muted-foreground;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   &__notice-card {

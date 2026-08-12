@@ -1,8 +1,9 @@
 {
-  "version": "0.0.27",
-  "buildTime": "2026-08-10",
+  "version": "0.0.34",
+  "buildTime": "2026-08-12",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.34 新增/order/my接口修复H5订单页无权限访问:OrderController新增GET/api/order/my从JWT token提取当前员工ID查询订单列表,不依赖前端传employeeId,解决localStorage缓存employeeId与token不一致导致403无权限访问的问题;H5前端getMyOrders改为无参调用该接口",
     "V0.0.27 管理后台7项BUG修复:①员工管理部门筛选不生效——EmployeeController.getEmployeesByStore新增departmentId参数过滤,前端ElSelect补@change=handleSearch;②门店管理员访问账号管理被退出登录——/admin路由与Layout菜单roles改为仅[1]隐藏tab;③超管看不到门店管理员添加的员工——新增/api/employee/all全局视图接口供超管查看所有门店员工,EmployeeManagement.vue超管未选食堂时走全局视图;④员工管理下载模板按钮重复——移除actions槽按钮仅保留导入弹窗内;⑤重复导入用于批量更新——EmployeeService.batchImport按姓名+门店匹配已有员工,有变化才更新卡号/手机号/密码/部门,无变化忽略;⑥菜品回收站无效——MyBatis-Plus逻辑删除拦截器导致查不到is_deleted=1记录,DishMapper.xml新增自定义SQL(selectTrashByStoreId/selectDeletedById/restoreById/purgeById)绕过拦截器,DishService.getTrashList/restoreDish/purgeDish改用自定义SQL;⑦超管权限问题——OperationLogManagement.vue新增超管全局视图查看所有门店日志,OperationLogController超管可不传storeId查看全部;同步修复OrderManagement/NotificationManagement/Recharge/OperationLog的ElSelect筛选器缺@change问题",
     "V0.0.26 修复DailySettlementService.generateSettlement更新分支(已有对账记录刷新场景)遗漏setMissedCount的BUG:此前仅新建记录分支设置missedCount,刷新分支只更新totalRevenue(含未就餐金额)却不更新missedCount,导致后续刷新后营业额已含未就餐金额而未就餐数仍为旧值,订单总数=已完成+已取消+未就餐对不上;现刷新分支同步setMissedCount,数据恢复一致",
     "V0.0.25 修复MISSED(未就餐)订单金额在对账中消失的严重财务问题:①DailyCloseService/DailySettlementService/ReportService的totalRevenue口径从仅status=2改为status=2+4(已完成+未就餐,均已收款未退款,未就餐也是食堂收入),修复前未就餐订单金额既不计入营业额也不计入退款导致对账时钱对不上;②DailyCloseService.summary新增missedCount返回,DailySettlement实体新增missedCount字段+V19迁移加missed_count列+schema-h2同步,ReportService.dailyCloseReport新增missedOrders返回,让财务看清订单总数=已完成+已取消+未就餐;③markExpiredOrdersAsMissed扫描加7天下限(date>=today-7)避免定时任务长期挂掉后恢复时全表扫描大量历史订单",

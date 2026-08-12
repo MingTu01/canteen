@@ -67,10 +67,10 @@ const selectedOrder = ref<Order | null>(null)
 const openOrderPicker = async (): Promise<void> => {
   showOrderPicker.value = true
   if (orders.value.length > 0) return
-  if (!authStore.employeeId) return
+  if (!authStore.isLoggedIn) return
   orderLoading.value = true
   try {
-    orders.value = (await getMyOrders(authStore.employeeId)) ?? []
+    orders.value = (await getMyOrders()) ?? []
   } catch {
     /* 拦截器已提示 */
   } finally {

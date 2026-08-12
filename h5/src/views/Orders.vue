@@ -449,14 +449,14 @@ const scrollToToday = async (): Promise<void> => {
 
 /** 加载订单列表(不自动滚动,由调用方决定是否滚动到今天) */
 const loadOrders = async (): Promise<void> => {
-  if (!authStore.employeeId) {
+  if (!authStore.isLoggedIn) {
     loaded.value = true
     return
   }
   loading.value = true
   try {
     // 后端在无订单时可能返回 null,兜底为空数组
-    orders.value = (await getMyOrders(authStore.employeeId)) ?? []
+    orders.value = (await getMyOrders()) ?? []
   } catch {
     /* 拦截器已 toast */
   } finally {

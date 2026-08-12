@@ -159,6 +159,19 @@ public class OrderController {
         return ApiResponse.success(orderService.getOrdersByEmployee(employeeId));
     }
 
+    /**
+     * 查询当前登录员工的订单列表(基于 token,不依赖前端传 employeeId)。
+     * 解决 localStorage 缓存的 employeeId 与 token 中不一致导致 403 的问题。
+     */
+    @GetMapping("/my")
+    public ApiResponse<List<Order>> getMyOrders() {
+        Long currentEmployeeId = SecurityContext.currentEmployeeId();
+        if (currentEmployeeId == null) {
+            throw new BusinessException("未登录");
+        }
+        return ApiResponse.success(orderService.getOrdersByEmployee(currentEmployeeId));
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<Map<String, Object>> getOrderDetail(@PathVariable Long id) {
         Order order = orderService.getOrderById(id);
