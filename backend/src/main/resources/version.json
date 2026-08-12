@@ -1,8 +1,9 @@
 {
-  "version": "0.0.42",
+  "version": "0.0.43",
   "buildTime": "2026-08-12",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.43 修复超单次限购BUG+辣度角标加辣字+无图透明:①修复下单提示\"超过单次限购\"BUG:OrderService.createOrder校验maxPerOrder时仅判断!=null,当maxPerOrder=0(前端defaultDish默认0表示不限)时1>0恒成立导致所有菜品下单失败,修正为null/0/负数均视为不限(maxPerOrder>0才校验);②H5菜品卡片右上角辣椒角标前增加\"辣\"字(span dish-card__spice-label 11px加粗红色);③H5菜品无图片时不再显示emoji占位,改为透明背景显示卡片底色(移除categoryEmoji函数与__emoji样式,__img-wrap background从$brand-muted改为transparent)",
     "V0.0.42 辣椒图标+订餐页样式优化:①ChiliIcon重画为红彤彤辣椒SVG(红色弯曲锥形主体fill currentColor继承红色+绿色茎部#22c55e+白色高光),替换原简笔线条版;②修复菜品卡片辣椒角标不显示问题(.dish-card缺少position:relative导致absolute定位失效,现已补上);③订餐页日期胶囊(day-section__date-num/date-rel)与餐标名称(meal-section__name)及餐别图标放大30%(font-size 14→18px,padding/min-width/icon size同步放大)",
     "V0.0.41 辣椒图标优化:①新建自定义ChiliIcon组件(admin-web+h5各一个,SVG辣椒形状:红色主体+绿色茎,lucide-vue-next当前版本无Pepper图标故自绘);②admin-web DishManagement.vue表单与列表Flame火焰图标全部替换为ChiliIcon辣椒图标;③H5 Order.vue菜品卡片辣椒图标从菜名旁移至卡片右上角角标(半透明白底+红色辣椒),购物车弹层与确认弹层同步替换ChiliIcon;④H5 OrderDetail.vue与Orders.vue Flame替换为ChiliIcon",
     "V0.0.40 菜品辣度设置(1-3级):①后端Dish实体新增spiceLevel字段(0=不辣,1=微辣,2=中辣,3=重辣)+V22迁移加spice_level列+schema-h2同步;②OrderItem实体新增spiceLevel瞬态字段(@TableField(exist=false)),OrderItemMapper.xml的selectByOrderId/selectByOrderIds JOIN dish表查询d.spice_level AS spice_level,订单列表/详情返回辣度;③admin-web DishManagement.vue表单新增辣度单选(ElRadioGroup+Flame火焰图标4档),列表新增辣度列(Flame图标按级别显示1-3个);④H5 Dish/OrderItem类型新增spiceLevel字段,Order.vue菜品卡片/购物车弹层/确认弹层菜名旁显示Flame辣椒图标(按spiceLevel渲染1-3个),OrderDetail.vue菜品明细菜名旁显示辣椒图标,Orders.vue订单列表菜名旁显示辣椒图标(DishRow新增spiceLevel字段,从OrderItem.spiceLevel填充)",

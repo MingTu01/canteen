@@ -833,16 +833,6 @@ const getDishImg = (iv: MenuItemView): string => {
 // 菜单数据变化时异步刷新缓存 Map
 watch(menusByDate, refreshDishImages, { deep: true, immediate: true })
 
-const categoryEmoji = (category?: string): string => {
-  const cat = (category || '').toLowerCase()
-  if (cat.includes('荤') || cat.includes('肉')) return '🥩'
-  if (cat.includes('素') || cat.includes('菜')) return '🥬'
-  if (cat.includes('汤') || cat.includes('羹')) return '🍲'
-  if (cat.includes('主') || cat.includes('饭') || cat.includes('面')) return '🍚'
-  if (cat.includes('凉')) return '🥗'
-  return '🍽️'
-}
-
 // ============ 生命周期 ============
 /**
  * 重置到"今天"并加载:
@@ -1080,18 +1070,19 @@ onBeforeUnmount(() => {
                       'dish-card--locked': isMealLocked(d.date, section.type) && !orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                     }"
                   >
-                    <!-- 辣度角标(卡片右上角,按级别显示1-3个辣椒) -->
+                    <!-- 辣度角标(卡片右上角,"辣"字 + 按级别显示1-3个辣椒) -->
                     <div
                       v-if="iv.dish?.spiceLevel && iv.dish.spiceLevel > 0"
                       class="dish-card__spice-badge"
                     >
+                      <span class="dish-card__spice-label">辣</span>
                       <ChiliIcon
                         v-for="n in iv.dish.spiceLevel"
                         :key="n"
                         :size="11"
                       />
                     </div>
-                    <!-- 图片区(智能加载:section 进入视口前 1 屏才渲染 <img> 发请求,否则 emoji 占位) -->
+                    <!-- 图片区(有图才渲染 <img>,无图保持透明显示背景色) -->
                     <div class="dish-card__img-wrap">
                       <img
                         v-if="isImageActivated(d.date) && getDishImg(iv)"
@@ -1100,7 +1091,6 @@ onBeforeUnmount(() => {
                         loading="lazy"
                         @error="handleImgError(iv.item.id)"
                       />
-                      <span v-else class="dish-card__emoji">{{ categoryEmoji(iv.dish?.category) }}</span>
                       <!-- 售罄遮罩 -->
                       <span v-if="iv.dish?.status === 0" class="dish-card__soldout">已售罄</span>
                       <!-- 已订数量徽标(锁定餐别下已订菜品图片右上角,显示份数) -->
@@ -1763,7 +1753,8 @@ onBeforeUnmount(() => {
     width: 80px;
     height: 80px;
     border-radius: 8px;
-    background: $brand-muted;
+    /* 无图时透明,显示卡片背景色 */
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1774,11 +1765,6 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
     object-fit: cover;
-  }
-
-  &__emoji {
-    font-size: 32px;
-    line-height: 1;
   }
 
   &__new {
@@ -1832,7 +1818,7 @@ onBeforeUnmount(() => {
     line-height: 1.3;
   }
 
-  /* 辣度角标(卡片右上角,半透明白底 + 红色辣椒图标) */
+  /* 辣度角标(卡片右上角,半透明白底 + "辣"字 + 红色辣椒图标) */
   &__spice-badge {
     position: absolute;
     top: 4px;
@@ -1840,12 +1826,18 @@ onBeforeUnmount(() => {
     z-index: 3;
     display: flex;
     align-items: center;
-    gap: 1px;
-    padding: 2px 4px;
+    gap: 2px;
+    padding: 2px 5px;
     background: rgba(255, 255, 255, 0.92);
     border-radius: 6px;
     color: #ef4444;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    line-height: 1;
+  }
+
+  &__spice-label {
+    font-size: 11px;
+    font-weight: 700;
     line-height: 1;
   }
 

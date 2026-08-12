@@ -236,8 +236,9 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
             if (quantity == null || quantity <= 0) {
                 throw new BusinessException("购买数量必须大于0:" + dish.getName());
             }
-            // P2-11 单次限购校验
-            if (dish.getMaxPerOrder() != null && quantity > dish.getMaxPerOrder()) {
+            // P2-11 单次限购校验(null/0/负数均视为不限,与前端 defaultDish maxPerOrder=0 语义一致)
+            Integer maxPerOrder = dish.getMaxPerOrder();
+            if (maxPerOrder != null && maxPerOrder > 0 && quantity > maxPerOrder) {
                 throw new BusinessException("超过单次限购:" + dish.getName());
             }
             // 库存校验已移除(库存功能下线,保留会阻止 stock=0 菜品下单)
