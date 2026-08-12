@@ -76,6 +76,107 @@ const activityList = computed(() =>
   notifications.value.filter((n) => n.type === 4).slice(0, 10),
 )
 
+/** 卡牌轮播列表(公告 + 活动合并,中间放大凸显,左右半隐藏) */
+const carouselList = computed(() => [...announcementList.value, ...activityList.value])
+const carouselIndex = ref(0)
+/** 自动轮播定时器 */
+let carouselTimer: ReturnType<typeof setInterval> | null = null
+/** 触摸滑动起始 X 坐标 */
+let touchStartX = 0
+let touchDeltaX = 0
+
+/** 切换到指定索引(循环) */
+const setCarouselIndex = (idx: number): void => {
+  const len = carouselList.value.length
+  if (len === 0) return
+  carouselIndex.value = (idx + len) % len
+}
+
+/** 上一张/下一张 */
+const carouselPrev = (): void => setCarouselIndex(carouselIndex.value - 1)
+const carouselNext = (): void => setCarouselIndex(carouselIndex.value + 1)
+
+/** 启动自动轮播(4 秒一切换) */
+const startCarouselAuto = (): void => {
+  stopCarouselAuto()
+  if (carouselList.value.length <= 1) return
+  carouselTimer = setInterval(carouselNext, 4000)
+}
+/** 停止自动轮播 */
+const stopCarouselAuto = (): void => {
+  if (carouselTimer) {
+    clearInterval(carouselTimer)
+    carouselTimer = null
+  }
+}
+
+/** 触摸开始:记录起点,暂停自动轮播 */
+const onCarouselTouchStart = (e: TouchEvent): void => {
+  touchStartX = e.touches[0].clientX
+  touchDeltaX = 0
+  stopCarouselAuto()
+}
+/** 触摸移动:记录位移 */
+const onCarouselTouchMove = (e: TouchEvent): void => {
+  touchDeltaX = e.touches[0].clientX - touchStartX
+}
+/** 触摸结束:位移超过阈值则切换,恢复自动轮播 */
+const onCarouselTouchEnd = (): void => {
+  const threshold = 40
+  if (touchDeltaX < -threshold) {
+    carouselNext()
+  } else if (touchDeltaX > threshold) {
+    carouselPrev()
+  }
+  startCarouselAuto()
+}
+
+/** 卡牌相对中心的偏移量(用于 transform 计算):0=当前,±1=相邻,±2=次相邻 */
+const cardOffset = (i: number): number => {
+  const len = carouselList.value.length
+  if (len === 0) return 0
+  let diff = i - carouselIndex.value
+  // 循环取最短距离
+  if (diff > len / 2) diff -= len
+  if (diff < -len / 2) diff += len
+  return diff
+}
+
+/** 卡牌样式(中间放大,左右半隐藏缩小) */
+const cardStyle = (i: number): Record<string, string> => {
+  const offset = cardOffset(i)
+  // 超过 2 张距离的卡牌隐藏
+  if (Math.abs(offset) > 2) {
+    return { transform: 'translateX(9999px)', opacity: '0', pointerEvents: 'none' }
+  }
+  const translateX = offset * 62 // 卡牌间水平偏移(vw)
+  const scale = offset === 0 ? 1 : 0.78
+  const opacity = offset === 0 ? '1' : Math.abs(offset) === 1 ? '0.55' : '0.25'
+  const zIndex = String(10 - Math.abs(offset))
+  return {
+    transform: `translateX(${translateX}vw) scale(${scale})`,
+    opacity,
+    zIndex,
+    pointerEvents: offset === 0 ? 'auto' : 'none',
+  }
+}
+
+// 列表变化时重置索引并启动/停止自动轮播
+watch(
+  carouselList,
+  (list) => {
+    if (carouselIndex.value >= list.length) carouselIndex.value = 0
+    if (list.length > 1) {
+      startCarouselAuto()
+    } else {
+      stopCarouselAuto()
+    }
+  },
+  { immediate: true },
+)
+
+onUnmounted(stopCarouselAuto)
+
 /** 其他通知(非公告非活动):保留在原"公司通知"列表 */
 const noticeList = computed(() =>
   notifications.value.filter((n) => n.type !== 3 && n.type !== 4).slice(0, 5),
@@ -291,59 +392,53 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- 公告(展示标题 + 图片 + 内容,点击弹出详情) -->
-      <section v-if="announcementList.length > 0" class="home__section">
+      <!-- 公告活动卡牌轮播(中间放大凸显,左右半隐藏,可滑动切换) -->
+      <section v-if="carouselList.length > 0" class="home__section">
         <div class="home__section-header">
-          <h2 class="home__section-title">公告</h2>
+          <h2 class="home__section-title">公告活动</h2>
+          <span class="home__carousel-count">{{ carouselIndex + 1 }}/{{ carouselList.length }}</span>
         </div>
-        <div class="home__notice-list">
+        <div
+          class="home__carousel"
+          @touchstart="onCarouselTouchStart"
+          @touchmove="onCarouselTouchMove"
+          @touchend="onCarouselTouchEnd"
+        >
           <div
-            v-for="item in announcementList"
+            v-for="(item, i) in carouselList"
             :key="item.id"
-            class="home__announcement-card"
-            @click="showNoticeDetail(item)"
+            class="home__carousel-card"
+            :style="cardStyle(i)"
+            @click="cardOffset(i) === 0 ? showNoticeDetail(item) : setCarouselIndex(i)"
           >
-            <div class="home__announcement-top">
-              <h3 class="home__announcement-title">{{ item.title }}</h3>
-              <span class="home__notice-tag home__notice-tag--muted">公告</span>
+            <div class="home__carousel-card-top">
+              <h3 class="home__carousel-card-title">{{ item.title }}</h3>
+              <span
+                class="home__notice-tag"
+                :class="item.type === 4 ? 'home__notice-tag--accent' : 'home__notice-tag--muted'"
+              >
+                {{ item.type === 4 ? '活动' : '公告' }}
+              </span>
             </div>
             <div
               v-if="getNoticeImage(item)"
-              class="home__announcement-image"
-              @click.stop="previewImage(getNoticeImage(item))"
+              class="home__carousel-card-image"
+              @click.stop="cardOffset(i) === 0 ? previewImage(getNoticeImage(item)) : undefined"
             >
               <img :src="getNoticeImage(item)" :alt="item.title" loading="lazy" />
             </div>
-            <p v-if="item.content" class="home__announcement-content">{{ item.content }}</p>
+            <p v-if="item.content" class="home__carousel-card-content">{{ item.content }}</p>
           </div>
         </div>
-      </section>
-
-      <!-- 活动(展示标题 + 图片 + 内容,点击弹出详情) -->
-      <section v-if="activityList.length > 0" class="home__section">
-        <div class="home__section-header">
-          <h2 class="home__section-title">活动</h2>
-        </div>
-        <div class="home__notice-list">
-          <div
-            v-for="item in activityList"
+        <!-- 指示点 -->
+        <div v-if="carouselList.length > 1" class="home__carousel-dots">
+          <span
+            v-for="(item, i) in carouselList"
             :key="item.id"
-            class="home__announcement-card"
-            @click="showNoticeDetail(item)"
-          >
-            <div class="home__announcement-top">
-              <h3 class="home__announcement-title">{{ item.title }}</h3>
-              <span class="home__notice-tag home__notice-tag--accent">活动</span>
-            </div>
-            <div
-              v-if="getNoticeImage(item)"
-              class="home__announcement-image"
-              @click.stop="previewImage(getNoticeImage(item))"
-            >
-              <img :src="getNoticeImage(item)" :alt="item.title" loading="lazy" />
-            </div>
-            <p v-if="item.content" class="home__announcement-content">{{ item.content }}</p>
-          </div>
+            class="home__carousel-dot"
+            :class="{ 'home__carousel-dot--active': i === carouselIndex }"
+            @click="setCarouselIndex(i)"
+          />
         </div>
       </section>
 
@@ -599,41 +694,59 @@ onUnmounted(() => {
     gap: 12px;
   }
 
-  // ============ 公告/活动卡片(标题 + 图片 + 内容) ============
-  &__announcement-card {
+  // ============ 公告活动卡牌轮播(cover-flow 效果) ============
+  &__carousel {
+    position: relative;
+    height: 320px;
+    perspective: 1200px;
+    touch-action: pan-y;
+    user-select: none;
+  }
+
+  &__carousel-card {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 78%;
+    margin-left: -39%;
     padding: 16px;
     background: $brand-card;
     border: 1px solid $brand-border;
-    border-radius: 16px;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
     cursor: pointer;
-    transition: opacity 0.15s ease;
-
-    &:active {
-      opacity: 0.6;
-    }
+    transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1),
+      opacity 0.45s ease;
+    transform-origin: center center;
+    overflow: hidden;
+    backface-visibility: hidden;
   }
 
-  &__announcement-top {
+  &__carousel-card-top {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
 
-  &__announcement-title {
+  &__carousel-card-title {
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 700;
     line-height: 1.4;
     color: $brand-card-foreground;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 
-  &__announcement-image {
-    margin-top: 8px;
-    border-radius: 12px;
+  &__carousel-card-image {
+    border-radius: 14px;
     overflow: hidden;
     background: $brand-muted;
     cursor: zoom-in;
@@ -641,20 +754,49 @@ onUnmounted(() => {
     img {
       display: block;
       width: 100%;
-      max-height: 200px;
+      max-height: 180px;
       object-fit: cover;
     }
   }
 
-  &__announcement-content {
-    margin: 8px 0 0;
+  &__carousel-card-content {
+    margin: 10px 0 0;
     font-size: 13px;
     line-height: 1.6;
     color: $brand-muted-foreground;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  &__carousel-count {
+    font-size: 12px;
+    color: $brand-muted-foreground;
+    font-variant-numeric: tabular-nums;
+  }
+
+  // 指示点
+  &__carousel-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 14px;
+  }
+
+  &__carousel-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: $brand-border;
+    transition: all 0.3s ease;
+    cursor: pointer;
+
+    &--active {
+      width: 18px;
+      border-radius: 3px;
+      background: $brand-primary;
+    }
   }
 
   &__notice-card {
