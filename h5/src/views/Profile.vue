@@ -8,7 +8,6 @@ import {
 } from 'vant'
 import QRCode from 'qrcode'
 import {
-  ClipboardList,
   MessageSquare,
   PenSquare,
   Users,
@@ -181,10 +180,6 @@ const refreshPayCode = async (): Promise<void> => {
 }
 
 // ============ 跳转 ============
-const goOrders = (): void => {
-  router.push('/orders')
-}
-
 const goFeedback = (): void => {
   router.push('/feedback/list')
 }
