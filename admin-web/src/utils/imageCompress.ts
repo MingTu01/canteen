@@ -22,6 +22,22 @@ const LOOSE_MAX_DIMENSION = 1600
 const LOOSE_MIN_QUALITY = 0.85
 
 /**
+ * A4 文档压缩参数(通知/公告配图专用)。
+ *
+ * 场景:用户上传 A4 通知/公告的拍照或截图,内容以文字为主,必须清晰可读。
+ *
+ * 参数推导:
+ * - maxDimension=1600px → A4 纸(210×297mm)在 190DPI 的像素,移动端 H5 卡牌
+ *   展示宽度约 280px,2x retina 需 560px,1600px 提供 ~2.8 倍冗余,文字不糊;
+ * - targetKB=1500KB → 1600×2263px 约 360 万像素,JPEG q=0.8 约 1.2-1.5MB,
+ *   足以保留文字边缘细节不产生 JPEG 量化毛刺;
+ * - minQuality=0.8 → 低于 0.8 时 JPEG 量化会让小字号文字边缘发虚,不可接受。
+ */
+const DOC_TARGET_KB = 1500
+const DOC_MAX_DIMENSION = 1600
+const DOC_MIN_QUALITY = 0.8
+
+/**
  * 压缩图片到目标大小(默认 200KB,最大边长 800px)。
  * 适用于菜品图、员工头像等中尺寸展示场景。
  * @param file 原始 File 对象
@@ -45,6 +61,22 @@ export async function compressImageLoose(file: File): Promise<File> {
     targetKB: LOOSE_TARGET_KB,
     maxDimension: LOOSE_MAX_DIMENSION,
     minQuality: LOOSE_MIN_QUALITY,
+  })
+}
+
+/**
+ * A4 文档压缩(通知/公告配图专用,最大边长 1600px、目标 1.5MB、最低画质 0.8)。
+ *
+ * 适用于通知/公告/活动的 A4 配图(内容以文字为主),保证文字清晰可读:
+ * - 1600px 最大边长覆盖 A4@190DPI,移动端展示有充足分辨率冗余;
+ * - 1.5MB 目标大小给文字细节留足空间,不会因过度压缩导致文字发虚;
+ * - 0.8 最低画质保证 JPEG 量化不影响小字号文字边缘清晰度。
+ */
+export async function compressImageDocument(file: File): Promise<File> {
+  return compressImageCore(file, {
+    targetKB: DOC_TARGET_KB,
+    maxDimension: DOC_MAX_DIMENSION,
+    minQuality: DOC_MIN_QUALITY,
   })
 }
 

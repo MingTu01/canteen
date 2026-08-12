@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Upload, Loader2, X } from 'lucide-vue-next'
 import { fileApi } from '@/api'
-import { compressImage, compressImageLoose } from '@/utils/imageCompress'
+import { compressImage, compressImageLoose, compressImageDocument } from '@/utils/imageCompress'
 
 /**
  * 图片上传组件
@@ -11,12 +11,14 @@ import { compressImage, compressImageLoose } from '@/utils/imageCompress'
  * 特性:
  * - 前端 canvas 压缩(默认 200k 左右/最大边长 800px)
  * - loose=true 时用宽松压缩(更大尺寸/更高画质,用于品牌/背景等大图,避免不清晰)
+ * - document=true 时用 A4 文档压缩(1600px/1.5MB/q0.8,通知配图文字清晰)
  * - 支持预览与删除
  * - v-model 绑定 URL 字符串
  *
  * 用法:
  *   <ImageUploader v-model="form.logoUrl" label="企业 Logo" />
  *   <ImageUploader v-model="form.backgroundUrl" label="背景" loose />
+ *   <ImageUploader v-model="form.imageUrl" label="通知配图" document />
  */
 const props = withDefaults(
   defineProps<{
@@ -28,6 +30,8 @@ const props = withDefaults(
     previewSize?: number
     /** 宽松压缩:用于品牌/背景等大图,保留更多细节(更大尺寸+更高画质) */
     loose?: boolean
+    /** A4文档压缩:通知/公告配图专用,保证文字清晰(1600px/1.5MB/q0.8) */
+    document?: boolean
   }>(),
   {
     modelValue: '',
@@ -35,6 +39,7 @@ const props = withDefaults(
     hint: '',
     previewSize: 100,
     loose: false,
+    document: false,
   }
 )
 
@@ -52,8 +57,12 @@ const handleFile = async (e: Event) => {
 
   uploading.value = true
   try {
-    // 1. 前端 canvas 压缩(默认 200k;loose=true 用宽松压缩保留更多细节)
-    const compressed = props.loose ? await compressImageLoose(file) : await compressImage(file)
+    // 1. 前端 canvas 压缩(document=通知配图用A4文档压缩;loose=品牌大图用宽松压缩;默认200k)
+    const compressed = props.document
+      ? await compressImageDocument(file)
+      : props.loose
+        ? await compressImageLoose(file)
+        : await compressImage(file)
     // 2. 上传到后端
     const result = await fileApi.uploadImage(compressed)
     emit('update:modelValue', result.url)
@@ -124,7 +133,7 @@ const clearImage = () => {
       </button>
       <p v-if="hint" class="mt-1.5 text-xs text-text-muted">{{ hint }}</p>
       <p v-else class="mt-1.5 text-xs text-text-muted">
-        {{ props.loose ? '前端压缩(保留高画质),支持 JPG/PNG/WebP' : '自动压缩到 200KB 以内,支持 JPG/PNG/WebP' }}
+        {{ props.document ? 'A4文档压缩(1600px/1.5MB),文字清晰,支持 JPG/PNG/WebP' : props.loose ? '前端压缩(保留高画质),支持 JPG/PNG/WebP' : '自动压缩到 200KB 以内,支持 JPG/PNG/WebP' }}
       </p>
       <input
         ref="inputRef"

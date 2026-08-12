@@ -142,14 +142,14 @@ const cardOffset = (i: number): number => {
   return diff
 }
 
-/** 卡牌样式(中间放大,左右半隐藏缩小) */
+/** 卡牌样式(中间放大,左右半隐藏缩小,A4比例固定尺寸) */
 const cardStyle = (i: number): Record<string, string> => {
   const offset = cardOffset(i)
   // 超过 2 张距离的卡牌隐藏
   if (Math.abs(offset) > 2) {
     return { transform: 'translateX(9999px)', opacity: '0', pointerEvents: 'none' }
   }
-  const translateX = offset * 62 // 卡牌间水平偏移(vw)
+  const translateX = offset * 58 // 卡牌间水平偏移(vw),A4窄卡牌显示更多侧边
   const scale = offset === 0 ? 1 : 0.78
   const opacity = offset === 0 ? '1' : Math.abs(offset) === 1 ? '0.55' : '0.25'
   const zIndex = String(10 - Math.abs(offset))
@@ -696,10 +696,11 @@ onUnmounted(() => {
     gap: 12px;
   }
 
-  // ============ 公告活动卡牌轮播(cover-flow 效果) ============
+  // ============ 公告活动卡牌轮播(A4比例 cover-flow 效果) ============
   &__carousel {
     position: relative;
-    height: 320px;
+    // A4比例: 宽72vw, 高=72vw*297/210≈101.8vw, 加上下padding
+    height: calc(72vw * 297 / 210 + 16px);
     perspective: 1200px;
     touch-action: pan-y;
     user-select: none;
@@ -707,14 +708,16 @@ onUnmounted(() => {
 
   &__carousel-card {
     position: absolute;
-    top: 0;
+    top: 8px;
     left: 50%;
-    width: 78%;
-    margin-left: -39%;
-    padding: 16px;
+    width: 72%;
+    // A4纸张比例 210:297(宽:高),固定尺寸
+    aspect-ratio: 210 / 297;
+    margin-left: -36%;
+    padding: 14px;
     background: $brand-card;
     border: 1px solid $brand-border;
-    border-radius: 20px;
+    border-radius: 16px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
     cursor: pointer;
     transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1),
@@ -722,23 +725,27 @@ onUnmounted(() => {
     transform-origin: center center;
     overflow: hidden;
     backface-visibility: hidden;
+    // 内容自适应卡牌尺寸: flex纵向布局
+    display: flex;
+    flex-direction: column;
   }
 
   &__carousel-card-top {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 10px;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
   }
 
   &__carousel-card-title {
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
-    line-height: 1.4;
+    line-height: 1.35;
     color: $brand-card-foreground;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -748,7 +755,9 @@ onUnmounted(() => {
   }
 
   &__carousel-card-image {
-    border-radius: 14px;
+    flex: 1;
+    min-height: 0; // 允许flex子项收缩
+    border-radius: 12px;
     overflow: hidden;
     background: $brand-muted;
     cursor: zoom-in;
@@ -756,20 +765,21 @@ onUnmounted(() => {
     img {
       display: block;
       width: 100%;
-      max-height: 180px;
-      object-fit: cover;
+      height: 100%;
+      object-fit: contain; // 完整展示A4内容,不裁剪
     }
   }
 
   &__carousel-card-content {
-    margin: 10px 0 0;
-    font-size: 13px;
-    line-height: 1.6;
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
     color: $brand-muted-foreground;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    flex-shrink: 0;
   }
 
   &__carousel-count {

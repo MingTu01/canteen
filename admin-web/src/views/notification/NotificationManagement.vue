@@ -397,7 +397,8 @@ onMounted(fetchList)
               v-model="form.imageUrl"
               label="通知配图"
               :preview-size="120"
-              hint="支持 JPG/PNG/WebP,自动压缩到 200KB 以内"
+              document
+              hint="A4文档压缩(1600px/1.5MB),文字清晰可读,支持 JPG/PNG/WebP"
             />
           </ElFormItem>
           <ElFormItem label="内容" required>
