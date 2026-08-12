@@ -47,7 +47,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const cartStore = useCartStore()
 const { formatMoney, formatMealType, formatMealTypeShort } = useFormat()
-const { config: orderConfig, loadConfig, isOrderableByDeadline } = useOrderConfig()
+const { loadConfig, isOrderableByDeadline } = useOrderConfig()
 
 // ============ 状态 ============
 /**
@@ -105,7 +105,7 @@ let windowStartDate = formatDateStr(new Date())
 let windowEndDate = addDays(windowStartDate, 14)
 /** 是否正在加载更多(防重入) */
 const loadingMore = ref(false)
-/** 是否已到末尾(某周无新增已发布菜单日期) */
+/** 是否已到末尾(某周无新增可订餐日期) */
 const noMoreData = ref(false)
 
 // ============ 餐别配置(颜色 + 图标,从 @/composables/useMealConfig 复用) ============
@@ -130,11 +130,17 @@ const isMealOrderable = (date: string, _mealType: number): boolean => {
   // 用配置驱动的截止时间判断:
   // - 今天及之前:截止时间(昨天15:00)已过 → 不可订
   // - 明天:截止时间是今天15:00 → 15:00前可订
-  // - 后天及以后:可订(在提前天数内)
+  // - 后天及以后:可订(不限提前天数,只要发布了菜单即可)
   return isOrderableByDeadline(date, new Date())
 }
 
-// ============ 日期选择竖列(显示所有已发布的未来日期) ============
+/** 判断指定日期是否可订餐 */
+const isDateOrderable = (date: string): boolean => {
+  if (!menuDates.value.has(date)) return false
+  return isOrderableByDeadline(date, new Date())
+}
+
+// ============ 日期选择竖列(只显示可订餐日期) ============
 interface DateItem {
   date: string // yyyy-MM-dd
   dateLabel: string // "7月14日"
@@ -142,7 +148,7 @@ interface DateItem {
   isToday: boolean
 }
 
-/** 已发布菜单的日期列表(今天及之后的日期,不论是否仍可订餐) */
+/** 可订餐日期列表(今天及之后,过滤掉已过截止时间的日期) */
 const dateList = computed<DateItem[]>(() => {
   if (menuDates.value.size === 0) return []
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -150,8 +156,7 @@ const dateList = computed<DateItem[]>(() => {
   const list: DateItem[] = []
   const sorted = Array.from(menuDates.value).sort(compareDate)
   for (const dateStr of sorted) {
-    // 只显示今天及之后的日期(过去日期不展示)
-    if (dateStr < today) continue
+    if (!isDateOrderable(dateStr)) continue
     const d = new Date(`${dateStr}T00:00:00`)
     list.push({
       date: dateStr,
@@ -279,10 +284,15 @@ const getMealSectionsForDate = (date: string): MealSection[] => {
   const sections: MealSection[] = []
   const dayMenus = menusByDate.value.get(date)
   if (!dayMenus || dayMenus.length === 0) return sections
+  const lockedSet = lockedMealTypesFor(date)
   for (const mt of [1, 2, 3]) {
     const menu = dayMenus.find((m) => m.menu.mealType === mt)
-    // 显示所有有菜品的餐别(不论是否仍可订餐)
-    // 不可订餐时:菜单可见但无法加菜(handleAdd 中拦截)
+    const isLocked = lockedSet.has(mt)
+    // 已锁定餐别:即使过点也显示(展示已订菜品)
+    if (!isLocked) {
+      // 未锁定:过滤掉过点餐别(今天/明天过了截止时间)
+      if (!isMealOrderable(date, mt)) continue
+    }
     if (menu && menu.items.length > 0) {
       sections.push({
         type: mt,
@@ -507,7 +517,7 @@ const loadMenusFor = async (dates: string[]): Promise<void> => {
 }
 
 /**
- * 加载当前窗口内所有已发布日期的菜单。
+ * 加载当前窗口内所有可订餐日期的菜单。
  * 加载完成后 allMenusLoaded=true,统一渲染当前窗口的日期 section。
  */
 const loadAllMenus = async (): Promise<void> => {
@@ -528,7 +538,7 @@ const loadAllMenus = async (): Promise<void> => {
 
 /**
  * 滚动接近底部时加载下一周(窗口向后扩展 7 天)。
- * 若新增的那一周没有新的已发布菜单日期,认为已到末尾,停止继续加载。
+ * 若新增的那一周没有新的可订餐日期,认为已到末尾,停止继续加载。
  */
 const loadMoreWeek = async (): Promise<void> => {
   if (loadingMore.value || noMoreData.value) return
@@ -539,13 +549,13 @@ const loadMoreWeek = async (): Promise<void> => {
     // 只查询新增那一周(上一周结束次日 → 新结束)的菜单日期
     await fetchMenuDatesForRange(addDays(windowEndDate, 1), newEnd)
     windowEndDate = newEnd
-    // 新增的已发布日期(尚未加载菜单)
-    const newDates = dateList.value.filter((d) => !menusByDate.value.has(d.date))
-    if (newDates.length === 0) {
-      // 新增周无任何菜单日期 → 已到末尾
+    // 新增的可订餐日期(尚未加载菜单)
+    const newOrderable = dateList.value.filter((d) => !menusByDate.value.has(d.date))
+    if (newOrderable.length === 0) {
+      // 新增周无任何可订餐日期 → 已到末尾
       if (menuDates.value.size === prevSize) noMoreData.value = true
     } else {
-      await loadMenusFor(newDates.map((d) => d.date))
+      await loadMenusFor(newOrderable.map((d) => d.date))
     }
   } finally {
     loadingMore.value = false
@@ -835,15 +845,14 @@ const categoryEmoji = (category?: string): string => {
 // ============ 生命周期 ============
 /**
  * 重置到"今天"并加载:
- * - 窗口起始固定为今天,结束日期覆盖可订餐范围 + 7 天缓冲(确保超出 order_advance_days 的已发布菜单也显示)
+ * - 窗口起始固定为今天,结束日期向后扩展 14 天(滚动到底部再加载更多)
+ * - 后天及以后不限提前天数,只要发布了菜单就可订餐
  * - 清空旧数据与缓存,确保每次进入订餐页都以当天为顶
  */
 const resetToTodayAndLoad = async (): Promise<void> => {
   const today = formatDateStr(new Date())
   windowStartDate = today
-  // 窗口覆盖可订餐范围 + 7 天缓冲,确保超出 order_advance_days 的已发布菜单也能显示
-  const advanceDays = orderConfig.value.order_advance_days || 7
-  windowEndDate = addDays(today, Math.max(advanceDays + 7, 14))
+  windowEndDate = addDays(today, 14)
   loadingMore.value = false
   noMoreData.value = false
   allMenusLoaded.value = false
@@ -854,12 +863,12 @@ const resetToTodayAndLoad = async (): Promise<void> => {
   imageActivatedDates.value = new Set()
   cartStore.selectedDate = today
   await loadMenuDates()
-  // 如果今天没有菜单,自动切到第一个有菜单的日期
-  if (dateList.value.length > 0 && !dateList.value.some((d) => d.date === cartStore.selectedDate)) {
+  // 如果今天已不可订餐,自动切到当天起第一个可订餐日期
+  if (dateList.value.length > 0 && !isDateOrderable(cartStore.selectedDate)) {
     cartStore.selectedDate = dateList.value[0].date
   }
   visibleDate.value = cartStore.selectedDate
-  // 加载当前窗口内所有已发布日期的菜单
+  // 加载当前窗口内所有可订餐日期的菜单
   await loadAllMenus()
   // DOM 渲染后滚动到当前日期 section(保持在当天)
   await nextTick()
@@ -990,13 +999,13 @@ onBeforeUnmount(() => {
           </div>
         </button>
 
-        <!-- 空状态:无已发布菜单 -->
+        <!-- 空状态:无可订餐日期 -->
         <div v-if="dateList.length === 0" class="date-sidebar__empty">
-          暂无菜单
+          暂无可订餐日期
         </div>
       </div>
 
-      <!-- 右侧内容区:所有已发布日期垂直堆叠,上下滚动自然浏览,无切换动作 -->
+      <!-- 右侧内容区:所有可订餐日期垂直堆叠,上下滚动自然浏览,无切换动作 -->
       <div
         ref="contentRef"
         class="content-area"
@@ -1008,10 +1017,10 @@ onBeforeUnmount(() => {
           <span class="content-area__date-rel">{{ visibleDateRelativeLabel }}</span>
         </div>
 
-        <!-- 空状态:无已发布菜单(加载完成后才判断,避免初始 flash) -->
+        <!-- 空状态:无可订餐日期(加载完成后才判断,避免初始 flash) -->
         <EmptyState
           v-if="allMenusLoaded && dateList.length === 0"
-          text="暂无菜单"
+          text="暂无可订餐日期"
           icon="default"
         />
 
@@ -1020,7 +1029,7 @@ onBeforeUnmount(() => {
           <van-loading size="24px">加载菜单中...</van-loading>
         </div>
 
-        <!-- 所有已发布日期垂直堆叠(单页滚动,无切换;数据已全部就绪,无懒加载占位) -->
+        <!-- 所有可订餐日期垂直堆叠(单页滚动,无切换;数据已全部就绪,无懒加载占位) -->
         <template v-else>
           <section
             v-for="d in dateList"

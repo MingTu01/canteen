@@ -55,7 +55,7 @@ export function useOrderConfig() {
    * 业务规则:订单日期 X 的截止时间是 (X-1) 15:00,即"前一天 15:00 前可订"。
    * - 今天及之前:截止时间(昨天15:00)已过 → 不可订
    * - 明天:截止时间是今天15:00 → 今天15:00前可订
-   * - 后天及以后:截止时间在未来 → 可订(需在提前天数内)
+   * - 后天及以后:截止时间在未来 → 可订(不限提前天数,只要发布了菜单即可)
    */
   const isOrderableByDeadline = (orderDate: string, now: Date): boolean => {
     const order = new Date(orderDate + 'T00:00:00')
@@ -68,8 +68,8 @@ export function useOrderConfig() {
       // 明天:截止时间是今天15:00
       return nowMinutes < deadlineMinutes
     }
-    // 后天及以后:截止时间在未来,只要在提前天数内即可
-    return diffDays <= config.value.order_advance_days
+    // 后天及以后:只要发布了菜单就可订餐,不限制提前天数
+    return true
   }
 
   /**
