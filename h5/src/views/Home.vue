@@ -66,14 +66,14 @@ const measureTickerViewport = (): void => {
   }
 }
 
-/** 公告列表(type=3):展示标题 + 图片 + 内容,点击弹出详情 */
+/** 公告列表(type=2):展示标题 + 图片 + 内容,点击弹出详情 */
 const announcementList = computed(() =>
-  notifications.value.filter((n) => n.type === 3).slice(0, 10),
+  notifications.value.filter((n) => n.type === 2).slice(0, 10),
 )
 
-/** 活动列表(type=4):展示标题 + 图片 + 内容,点击弹出详情 */
+/** 活动列表(type=3):展示标题 + 图片 + 内容,点击弹出详情 */
 const activityList = computed(() =>
-  notifications.value.filter((n) => n.type === 4).slice(0, 10),
+  notifications.value.filter((n) => n.type === 3).slice(0, 10),
 )
 
 /** 卡牌轮播列表(公告 + 活动合并,中间放大凸显,左右半隐藏) */
@@ -179,7 +179,7 @@ onUnmounted(stopCarouselAuto)
 
 /** 其他通知(非公告非活动):保留在原"公司通知"列表 */
 const noticeList = computed(() =>
-  notifications.value.filter((n) => n.type !== 3 && n.type !== 4).slice(0, 5),
+  notifications.value.filter((n) => n.type !== 2 && n.type !== 3).slice(0, 5),
 )
 
 /** 通知详情弹窗(展示标题 + 图片 + 内容) */
@@ -238,8 +238,10 @@ const noticeTag = (item: Notification): NoticeTag => {
   switch (item.type) {
     case 1:
       return { label: '滚动通知', variant: 'accent' }
-    case 3:
+    case 2:
       return { label: '公告', variant: 'muted' }
+    case 3:
+      return { label: '活动', variant: 'accent' }
     default:
       return { label: '公告', variant: 'muted' }
   }
@@ -415,9 +417,9 @@ onUnmounted(() => {
               <h3 class="home__carousel-card-title">{{ item.title }}</h3>
               <span
                 class="home__notice-tag"
-                :class="item.type === 4 ? 'home__notice-tag--accent' : 'home__notice-tag--muted'"
+                :class="item.type === 3 ? 'home__notice-tag--accent' : 'home__notice-tag--muted'"
               >
-                {{ item.type === 4 ? '活动' : '公告' }}
+                {{ item.type === 3 ? '活动' : '公告' }}
               </span>
             </div>
             <div

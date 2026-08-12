@@ -1,8 +1,9 @@
 {
-  "version": "0.0.35",
+  "version": "0.0.36",
   "buildTime": "2026-08-12",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.36 统一通知类型type值与admin-web一致:WechatNotifyService.notificationTypeLabel修正为type=2公告、type=3活动(原type=3公告、type=4活动与admin-web的NOTIFICATION_TYPE字典type=2公告、type=3活动不一致,导致H5按type=3/4过滤公告活动时查不到数据)",
     "V0.0.35 修复StoreAccessInterceptor误拦白名单公开接口导致403:StoreAccessInterceptor从查询参数提取storeId后对白名单接口(如/api/system/order-config?storeId=3)也执行checkStoreAccess,因公开接口无登录信息currentStoreId为null导致抛403;现注入WhitelistMatcher,preHandle开头对白名单接口直接放行,与JwtAuthenticationFilter白名单保持一致,避免两处白名单不同步",
     "V0.0.34 新增/order/my接口修复H5订单页无权限访问:OrderController新增GET/api/order/my从JWT token提取当前员工ID查询订单列表,不依赖前端传employeeId,解决localStorage缓存employeeId与token不一致导致403无权限访问的问题;H5前端getMyOrders改为无参调用该接口",
     "V0.0.27 管理后台7项BUG修复:①员工管理部门筛选不生效——EmployeeController.getEmployeesByStore新增departmentId参数过滤,前端ElSelect补@change=handleSearch;②门店管理员访问账号管理被退出登录——/admin路由与Layout菜单roles改为仅[1]隐藏tab;③超管看不到门店管理员添加的员工——新增/api/employee/all全局视图接口供超管查看所有门店员工,EmployeeManagement.vue超管未选食堂时走全局视图;④员工管理下载模板按钮重复——移除actions槽按钮仅保留导入弹窗内;⑤重复导入用于批量更新——EmployeeService.batchImport按姓名+门店匹配已有员工,有变化才更新卡号/手机号/密码/部门,无变化忽略;⑥菜品回收站无效——MyBatis-Plus逻辑删除拦截器导致查不到is_deleted=1记录,DishMapper.xml新增自定义SQL(selectTrashByStoreId/selectDeletedById/restoreById/purgeById)绕过拦截器,DishService.getTrashList/restoreDish/purgeDish改用自定义SQL;⑦超管权限问题——OperationLogManagement.vue新增超管全局视图查看所有门店日志,OperationLogController超管可不传storeId查看全部;同步修复OrderManagement/NotificationManagement/Recharge/OperationLog的ElSelect筛选器缺@change问题",

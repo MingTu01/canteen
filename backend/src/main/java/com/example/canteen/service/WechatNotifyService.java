@@ -299,8 +299,8 @@ public class WechatNotifyService {
         if (type == null) return "通知";
         switch (type) {
             case 1: return "通知";
-            case 3: return "公告";
-            case 4: return "活动";
+            case 2: return "公告";
+            case 3: return "活动";
             default: return "通知";
         }
     }
