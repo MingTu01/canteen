@@ -43,6 +43,7 @@ class OrderServiceTest {
     private EmployeeMapper employeeMapper;
     private JdbcTemplate jdbcTemplate;
     private WechatNotifyService wechatNotifyService;
+    private DiningTimeSlotService diningTimeSlotService;
     private OrderService orderService;
 
     private Employee testEmployee;
@@ -57,11 +58,12 @@ class OrderServiceTest {
         employeeMapper = mock(EmployeeMapper.class);
         jdbcTemplate = mock(JdbcTemplate.class);
         wechatNotifyService = mock(WechatNotifyService.class);
+        diningTimeSlotService = mock(DiningTimeSlotService.class);
         // 订单截止时间配置:默认 15:00(测试用例均使用今日日期,实际不会被读取)
         when(jdbcTemplate.queryForObject(anyString(), eq(String.class), anyString()))
                 .thenReturn("15:00");
         orderService = new OrderService(orderMapper, orderItemMapper, dishMapper, employeeMapper,
-                jdbcTemplate, wechatNotifyService);
+                jdbcTemplate, wechatNotifyService, diningTimeSlotService);
 
         testEmployee = new Employee();
         testEmployee.setId(1L);
@@ -96,7 +98,8 @@ class OrderServiceTest {
         OrderCreateDTO dto = new OrderCreateDTO();
         dto.setEmployeeId(1L);
         dto.setStoreId(1L);
-        dto.setDate(LocalDate.now());
+        // 次日订单:checkAdvanceOrderDeadline 要求订单日期在今天之后
+        dto.setDate(LocalDate.now().plusDays(1));
         dto.setMealType(MealType.LUNCH.getCode());
         dto.setItems(Arrays.asList(
                 createItemDTO(1L, 2),
@@ -140,7 +143,8 @@ class OrderServiceTest {
         OrderCreateDTO dto = new OrderCreateDTO();
         dto.setEmployeeId(999L);
         dto.setStoreId(1L);
-        dto.setDate(LocalDate.now());
+        // 次日订单:checkAdvanceOrderDeadline 要求订单日期在今天之后
+        dto.setDate(LocalDate.now().plusDays(1));
         dto.setMealType(MealType.LUNCH.getCode());
         dto.setItems(List.of(createItemDTO(1L, 1)));
 
@@ -197,7 +201,8 @@ class OrderServiceTest {
         OrderCreateDTO dto = new OrderCreateDTO();
         dto.setEmployeeId(1L);
         dto.setStoreId(1L);
-        dto.setDate(LocalDate.now());
+        // 次日订单:checkAdvanceOrderDeadline 要求订单日期在今天之后
+        dto.setDate(LocalDate.now().plusDays(1));
         dto.setMealType(MealType.LUNCH.getCode());
         dto.setItems(List.of(createItemDTO(1L, 2))); // 15*2=30 > 10
 
@@ -251,9 +256,14 @@ class OrderServiceTest {
         order.setId(1L);
         order.setStoreId(1L);
         order.setStatus(OrderStatus.PENDING.getCode());
+        // checkPickupTimeWindow 要求订单日期为今天且在就餐时段内
+        order.setDate(LocalDate.now());
+        order.setMealType(MealType.LUNCH.getCode());
 
         when(orderMapper.selectById(1L)).thenReturn(order);
         when(orderMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+        // mock 就餐时段校验通过
+        when(diningTimeSlotService.isWithinDiningTime(eq(1L), eq(MealType.LUNCH.getCode()), any())).thenReturn(true);
 
         try (MockedStatic<SecurityContext> mocked = mockStatic(SecurityContext.class)) {
             orderService.completeOrder(1L);

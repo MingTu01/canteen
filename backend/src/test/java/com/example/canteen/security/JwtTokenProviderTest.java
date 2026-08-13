@@ -31,6 +31,8 @@ class JwtTokenProviderTest {
         JwtParser jwtParser = Jwts.parser().verifyWith(secretKey).build();
         jwtTokenProvider = new JwtTokenProvider(secretKey, jwtParser);
         ReflectionTestUtils.setField(jwtTokenProvider, "expiration", 86400000L);
+        // generateEmployeeToken 使用 employeeExpiration,@Value 在单元测试中不会注入,需手动设置
+        ReflectionTestUtils.setField(jwtTokenProvider, "employeeExpiration", 2592000000L);
     }
 
     @Test

@@ -136,8 +136,8 @@ class BackupExporterTest {
     void quoteColumn_addsBackticks() {
         assertEquals("`id`", exporter.quoteColumn("id"));
         assertEquals("`store_id`", exporter.quoteColumn("store_id"));
-        // 内嵌反引号原样保留(外层再加一对),实际生产场景列名不会含反引号
-        assertEquals("``select``", exporter.quoteColumn("`select`"));
+        // 列名校验仅允许字母/数字/下划线,含反引号或 SQL 关键字会被拒绝
+        assertEquals("`order_id`", exporter.quoteColumn("order_id"));
     }
 
     /* ----- Jackson 值转换 ----- */

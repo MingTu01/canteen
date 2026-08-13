@@ -140,20 +140,21 @@ class DishServiceTest {
     }
 
     @Test
-    @DisplayName("删除菜品 - 软删除(is_deleted=1)")
+    @DisplayName("删除菜品 - 逻辑删除(deleteById 由 MyBatis-Plus 转为 UPDATE SET is_deleted=1)")
     void deleteDish_SoftDelete() {
         when(dishMapper.selectById(1L)).thenReturn(testDish1);
-        when(dishMapper.updateById(any(Dish.class))).thenReturn(1);
+        when(dishMapper.deleteById(anyLong())).thenReturn(1);
 
         try (MockedStatic<SecurityContext> mocked = mockStatic(SecurityContext.class)) {
             dishService.deleteDish(1L);
 
-            assertEquals(1, testDish1.getIsDeleted());
             mocked.verify(() -> SecurityContext.checkStoreAccess(1L));
         }
 
-        verify(dishMapper).updateById(testDish1);
-        verify(dishMapper, never()).deleteById(anyLong());
+        // 实现使用 deleteById:逻辑删除字段被全局配置托管,
+        // updateById 的 SET 子句会跳过 is_deleted,必须用 deleteById 由 MyBatis-Plus 自动转换
+        verify(dishMapper).deleteById(1L);
+        verify(dishMapper, never()).updateById(any(Dish.class));
     }
 
     @Test

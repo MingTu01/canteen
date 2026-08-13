@@ -3,6 +3,7 @@ package com.example.canteen.service;
 import com.example.canteen.entity.Department;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.exception.BusinessException;
+import com.example.canteen.mapper.AdminMapper;
 import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.RechargeRecordMapper;
@@ -30,6 +31,7 @@ class EmployeeServiceTest {
     private EmployeeMapper employeeMapper;
     private DepartmentMapper departmentMapper;
     private RechargeRecordMapper rechargeRecordMapper;
+    private AdminMapper adminMapper;
     private PasswordEncoder passwordEncoder;
     private EmployeeService employeeService;
 
@@ -42,9 +44,10 @@ class EmployeeServiceTest {
         employeeMapper = mock(EmployeeMapper.class);
         departmentMapper = mock(DepartmentMapper.class);
         rechargeRecordMapper = mock(RechargeRecordMapper.class);
+        adminMapper = mock(AdminMapper.class);
         passwordEncoder = mock(PasswordEncoder.class);
         when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$encoded");
-        employeeService = new EmployeeService(employeeMapper, departmentMapper, rechargeRecordMapper, passwordEncoder);
+        employeeService = new EmployeeService(employeeMapper, departmentMapper, rechargeRecordMapper, adminMapper, passwordEncoder);
 
         testEmployee1 = new Employee();
         testEmployee1.setId(1L);
@@ -126,9 +129,12 @@ class EmployeeServiceTest {
         newEmployee.setStoreId(1L);
         newEmployee.setCardNo("CARD999");
         newEmployee.setName("新员工");
+        newEmployee.setPhone("13800000099");
         newEmployee.setBalance(new BigDecimal("100.00"));
         newEmployee.setStatus(1);
 
+        // createEmployee 校验卡号唯一性
+        when(employeeMapper.countByCardNoExcludeId("CARD999", null)).thenReturn(0);
         when(employeeMapper.insert(any(Employee.class))).thenAnswer(invocation -> {
             Employee emp = invocation.getArgument(0);
             emp.setId(10L);
@@ -168,20 +174,19 @@ class EmployeeServiceTest {
     }
 
     @Test
-    @DisplayName("删除员工 - 软删除(is_deleted=1)")
+    @DisplayName("删除员工 - 调用 deleteById 删除")
     void deleteEmployee_SoftDelete() {
         when(employeeMapper.selectById(1L)).thenReturn(testEmployee1);
-        when(employeeMapper.updateById(any(Employee.class))).thenReturn(1);
+        when(employeeMapper.deleteById(1L)).thenReturn(1);
 
         try (MockedStatic<SecurityContext> mocked = mockStatic(SecurityContext.class)) {
             employeeService.deleteEmployee(1L);
 
-            assertEquals(1, testEmployee1.getIsDeleted());
             mocked.verify(() -> SecurityContext.checkStoreAccess(1L));
         }
 
-        verify(employeeMapper).updateById(testEmployee1);
-        verify(employeeMapper, never()).deleteById(anyLong());
+        verify(employeeMapper).deleteById(1L);
+        verify(employeeMapper, never()).updateById(any(Employee.class));
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.example.canteen.dto.LoginDTO;
 import com.example.canteen.entity.Admin;
 import com.example.canteen.exception.SecurityException;
 import com.example.canteen.mapper.AdminMapper;
+import com.example.canteen.mapper.StoreMapper;
 import com.example.canteen.security.JwtAuthenticationFilter;
 import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.LoginRateLimiter;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.*;
 class AdminServiceTest {
 
     private AdminMapper adminMapper;
+    private StoreMapper storeMapper;
     private JwtTokenProvider jwtTokenProvider;
     private PasswordEncoder passwordEncoder;
     private JwtAuthenticationFilter jwtFilter;
@@ -38,12 +40,13 @@ class AdminServiceTest {
     @BeforeEach
     void setUp() {
         adminMapper = mock(AdminMapper.class);
+        storeMapper = mock(StoreMapper.class);
         jwtTokenProvider = mock(JwtTokenProvider.class);
         passwordEncoder = mock(PasswordEncoder.class);
         jwtFilter = mock(JwtAuthenticationFilter.class);
         rateLimiter = mock(LoginRateLimiter.class);
         when(jwtFilter.getRateLimiter()).thenReturn(rateLimiter);
-        adminService = new AdminService(adminMapper, jwtTokenProvider, passwordEncoder, jwtFilter);
+        adminService = new AdminService(adminMapper, storeMapper, jwtTokenProvider, passwordEncoder, jwtFilter);
 
         testAdmin = new Admin();
         testAdmin.setId(1L);
