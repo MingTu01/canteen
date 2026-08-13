@@ -875,6 +875,36 @@ main() {
     #==========================================================
     step "步骤 ${current_step}/${total_steps} 重启服务"
     info "重启服务(卷映射模式,force-recreate 确保加载新产物)..."
+
+    # 清理失败的 Flyway 迁移记录(之前升级可能因迁移 SQL 错误留下 success=0 记录,
+    # Flyway 检测到失败记录会拒绝启动,需要先清理)
+    if [ "$SCOPE" = "backend" ] || [ "$SCOPE" = "all" ]; then
+        info "检查并清理失败的 Flyway 迁移记录..."
+        if docker ps 2>/dev/null | grep -q canteen-mysql; then
+            local flyway_db_pass="${SPRING_DATASOURCE_PASSWORD:-}"
+            if [ -z "$flyway_db_pass" ]; then
+                flyway_db_pass=$(read_env_var "SPRING_DATASOURCE_PASSWORD" 2>/dev/null) || flyway_db_pass=""
+            fi
+            if [ -z "$flyway_db_pass" ]; then
+                flyway_db_pass="${MYSQL_ROOT_PASSWORD:-}"
+                if [ -z "$flyway_db_pass" ]; then
+                    flyway_db_pass=$(read_env_var "MYSQL_ROOT_PASSWORD" 2>/dev/null) || flyway_db_pass=""
+                fi
+            fi
+            if [ -n "$flyway_db_pass" ]; then
+                local failed_count
+                failed_count=$(docker exec canteen-mysql mysql -uroot -p"${flyway_db_pass}" canteen -sN -e "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0;" 2>/dev/null || echo "0")
+                if [ "${failed_count:-0}" -gt 0 ] 2>/dev/null; then
+                    warn "检测到 ${failed_count} 条失败的 Flyway 迁移记录,自动清理..."
+                    docker exec canteen-mysql mysql -uroot -p"${flyway_db_pass}" canteen -e "DELETE FROM flyway_schema_history WHERE success = 0;" 2>/dev/null
+                    info "已清理失败的迁移记录"
+                else
+                    info "无失败的迁移记录"
+                fi
+            fi
+        fi
+    fi
+
     local restart_failed=false
     case "$SCOPE" in
         backend)
