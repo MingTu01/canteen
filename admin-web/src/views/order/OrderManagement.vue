@@ -5,10 +5,7 @@ import {
   ElDatePicker,
   ElDescriptions,
   ElDescriptionsItem,
-  ElDialog,
   ElDrawer,
-  ElForm,
-  ElFormItem,
   ElInput,
   ElOption,
   ElPagination,
@@ -18,7 +15,7 @@ import {
   ElMessage,
   ElMessageBox,
 } from 'element-plus'
-import { Eye, CheckCircle2, XCircle, Download, ScanLine } from 'lucide-vue-next'
+import { Eye, CheckCircle2, XCircle, Download } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -151,14 +148,13 @@ const handleExport = async () => {
       '订单来源': sourceLabel(o.orderSource),
       '金额': o.totalAmount ?? 0,
       '状态': statusLabel(o.status),
-      '取餐码': o.pickupCode ?? '',
       '下单时间': o.createdAt ?? '',
     }))
     const ws = XLSX.utils.json_to_sheet(exportData)
     // 列宽
     ws['!cols'] = [
       { wch: 6 }, { wch: 22 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 8 },
-      { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
+      { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '订单列表')
@@ -236,35 +232,6 @@ const handleCancel = async (row: OrderRow) => {
   }
 }
 
-// ===== 取餐核销 =====
-const pickupVisible = ref(false)
-const pickupCode = ref('')
-const pickupLoading = ref(false)
-
-const openPickup = () => {
-  pickupCode.value = ''
-  pickupVisible.value = true
-}
-
-const confirmPickup = async () => {
-  const code = pickupCode.value.trim()
-  if (!code) {
-    ElMessage.warning('请输入取餐码')
-    return
-  }
-  pickupLoading.value = true
-  try {
-    await orderApi.pickup({ pickupCode: code })
-    ElMessage.success('核销成功')
-    pickupVisible.value = false
-    fetchOrders()
-  } catch {
-    /* 错误已由拦截器统一提示 */
-  } finally {
-    pickupLoading.value = false
-  }
-}
-
 onMounted(fetchOrders)
 
 // 超管切换食堂后自动刷新订单列表
@@ -310,9 +277,6 @@ watch(() => authStore.storeId, () => {
           aria-label="选择日期范围"
         />
         <template #actions>
-          <ElButton v-if="!noStoreSelected" type="success" :icon="ScanLine" aria-label="取餐核销" @click="openPickup">
-            取餐核销
-          </ElButton>
           <ElButton :icon="Download" :loading="exporting" @click="handleExport">导出Excel</ElButton>
         </template>
       </SearchBar>
@@ -417,9 +381,6 @@ watch(() => authStore.storeId, () => {
               <ElDescriptionsItem label="餐次">
                 {{ mealLabel(detail.order.mealType) }}
               </ElDescriptionsItem>
-              <ElDescriptionsItem label="取餐码">
-                {{ detail.order.pickupCode || '—' }}
-              </ElDescriptionsItem>
               <ElDescriptionsItem label="状态">
                 <StatusTag :value="detail.order.status" :map="ORDER_STATUS" />
               </ElDescriptionsItem>
@@ -481,32 +442,6 @@ watch(() => authStore.storeId, () => {
         </div>
       </ElDrawer>
 
-      <!-- 取餐核销弹窗 -->
-      <ElDialog
-        v-model="pickupVisible"
-        title="取餐核销"
-        width="400px"
-        :close-on-click-modal="false"
-        append-to-body
-        destroy-on-close
-      >
-        <ElForm label-width="80px" @submit.prevent>
-          <ElFormItem label="取餐码">
-            <ElInput
-              v-model="pickupCode"
-              placeholder="请输入取餐码"
-              clearable
-              @keyup.enter="confirmPickup"
-            />
-          </ElFormItem>
-        </ElForm>
-        <template #footer>
-          <ElButton @click="pickupVisible = false">取消</ElButton>
-          <ElButton type="primary" :loading="pickupLoading" @click="confirmPickup">
-            确认核销
-          </ElButton>
-        </template>
-      </ElDialog>
     </PageContainer>
   </Layout>
 </template>

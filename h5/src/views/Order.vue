@@ -31,7 +31,6 @@ import {
   relativeDateLabel,
   formatGroupDate,
 } from '@/utils/date'
-import { getCachedImage } from '@/utils/imageCache'
 import { useOrderConfig } from '@/composables/useOrderConfig'
 import type {
   MenuWithItems,
@@ -58,8 +57,6 @@ const { loadConfig, isOrderableByDeadline } = useOrderConfig()
 const menusByDate = ref<Map<string, MenuWithItems[]>>(new Map())
 const showCart = ref(false)
 const submitting = ref(false)
-/** 加载失败的菜品图片(menu item id),触发 v-if 回退到 emoji 占位 */
-const erroredImages = ref<Set<number>>(new Set())
 /** 标记首次挂载,避免 onMounted + onActivated 双重触发重复加载 */
 let firstMount = true
 /** 下单成功后跳转订单页的定时器,组件失活时需清理避免意外导航 */
@@ -87,15 +84,6 @@ const daySectionRefs: Record<string, HTMLElement | null> = {}
 let lastScrollCalcTime = 0
 /** 用户正在主动滚动(点击左侧日期栏跳转时屏蔽可视日期更新,避免跳动) */
 let isProgrammaticScroll = false
-/**
- * 已激活图片加载的日期集合。
- * 智能图片加载策略:day-section 进入视口前 1 屏时被 IntersectionObserver 标记为激活,
- * 激活后该日期的所有 <img> 才会渲染并请求图片;未激活则显示 emoji 占位,不发请求。
- * 一旦激活不清空(避免回滚重复请求,靠 HTTP immutable 缓存命中)。
- */
-const imageActivatedDates = ref<Set<string>>(new Set())
-/** 图片懒加载 IntersectionObserver 实例(根为内容区,rootMargin 下扩 1 屏) */
-let imageObserver: IntersectionObserver | null = null
 
 /**
  * 增量加载(按周)状态:
@@ -648,52 +636,6 @@ const updateVisibleDate = (): void => {
   }
 }
 
-/**
- * 判断指定日期是否已激活图片加载(模板里 v-if 控制 <img> 是否渲染)。
- * 未激活时显示 emoji 占位,不渲染 <img> 也不发图片请求。
- */
-const isImageActivated = (date: string): boolean => imageActivatedDates.value.has(date)
-
-/**
- * 初始化图片懒加载 IntersectionObserver。
- * 当 day-section 进入视口前 1 屏(rootMargin 下扩 100%)时,标记该日期为"图片可加载",
- * 模板 v-if 切换到 <img> 渲染并发请求;已激活的不取消(回滚靠 HTTP 缓存命中,避免重复请求)。
- *
- * 与 day-section DOM 解耦:day-section 始终全量渲染保证滚动丝滑,仅 <img> 按需渲染。
- */
-const initImageObserver = (): void => {
-  if (imageObserver) imageObserver.disconnect()
-  const root = contentRef.value
-  if (!root) return
-  imageObserver = new IntersectionObserver(
-    (entries) => {
-      // 批量更新,避免每个 entry 触发一次响应式
-      let changed = false
-      const next = new Set(imageActivatedDates.value)
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          const date = (entry.target as HTMLElement).dataset.date
-          if (date && !next.has(date)) {
-            next.add(date)
-            changed = true
-          }
-        }
-      }
-      if (changed) imageActivatedDates.value = next
-    },
-    {
-      root,
-      // 下方向扩展 1 屏:用户滚到该 section 之前提前发请求,滚到时图片已就绪
-      rootMargin: '0px 0px 100% 0px',
-      threshold: 0,
-    },
-  )
-  for (const date of Object.keys(daySectionRefs)) {
-    const el = daySectionRefs[date]
-    if (el) imageObserver!.observe(el)
-  }
-}
-
 // ============ 下单逻辑(跨日期提交) ============
 const doSubmit = async () => {
   if (!cartStore.hasItems) {
@@ -787,52 +729,6 @@ const doSubmit = async () => {
   }
 }
 
-// ============ 图片降级 ============
-/** 标记该项图片加载失败,触发 v-if 切换到 emoji 占位 */
-const handleImgError = (itemId: number): void => {
-  if (erroredImages.value.has(itemId)) return
-  const next = new Set(erroredImages.value)
-  next.add(itemId)
-  erroredImages.value = next
-}
-
-/** 菜品图片缓存 Map（item.id → 缓存后的 blob URL 或原 URL），异步填充 */
-const cachedDishImages = ref<Map<number, string>>(new Map())
-
-/** 批量预加载菜品图片到缓存 Map（懒加载：首次 fetch 后缓存，后续命中缓存直接返回 blob URL） */
-const refreshDishImages = async (): Promise<void> => {
-  const map = new Map<number, string>()
-  const promises: Promise<void>[] = []
-  for (const [, menus] of menusByDate.value) {
-    for (const menu of menus) {
-      for (const iv of menu.items) {
-        if (!iv.item.id || map.has(iv.item.id)) continue
-        const raw = iv.dish?.imageUrl || iv.dish?.image
-        if (!raw) continue
-        // 完整 URL 或 data URL 直接使用，不走 IndexedDB 缓存
-        if (/^(https?:)?\/\//.test(raw) || raw.startsWith('data:')) {
-          map.set(iv.item.id, raw)
-          continue
-        }
-        promises.push(
-          getCachedImage(raw).then((url) => { map.set(iv.item.id, url) }),
-        )
-      }
-    }
-  }
-  await Promise.all(promises)
-  cachedDishImages.value = map
-}
-
-/** 当前项的菜品图片地址(优先返回缓存 blob URL);已失败的返回空串触发 emoji 占位 */
-const getDishImg = (iv: MenuItemView): string => {
-  if (erroredImages.value.has(iv.item.id)) return ''
-  return cachedDishImages.value.get(iv.item.id) || ''
-}
-
-// 菜单数据变化时异步刷新缓存 Map
-watch(menusByDate, refreshDishImages, { deep: true, immediate: true })
-
 // ============ 生命周期 ============
 /**
  * 重置到"今天"并加载:
@@ -849,9 +745,8 @@ const resetToTodayAndLoad = async (): Promise<void> => {
   allMenusLoaded.value = false
   menusByDate.value = new Map()
   menuCache.value = new Map()
-  // 清空旧日期 section 引用与图片激活状态,避免残留影响滚动定位与懒加载
+  // 清空旧日期 section 引用,避免残留影响滚动定位
   for (const k of Object.keys(daySectionRefs)) delete daySectionRefs[k]
-  imageActivatedDates.value = new Set()
   cartStore.selectedDate = today
   await loadMenuDates()
   // 如果今天已不可订餐,自动切到当天起第一个可订餐日期
@@ -869,8 +764,6 @@ const resetToTodayAndLoad = async (): Promise<void> => {
     targetEl.scrollIntoView({ behavior: 'auto', block: 'start' })
     setTimeout(() => { isProgrammaticScroll = false }, 100)
   }
-  // 初始化图片懒加载观察器(DOM 已就绪后即可观察)
-  initImageObserver()
 }
 
 onMounted(async () => {
@@ -922,8 +815,6 @@ watch(
         const arr = data || []
         menuCache.value.set(changedDate, arr)
         menusByDate.value.set(changedDate, arr)
-        // 重置图片激活状态,让新菜品图片重新懒加载
-        imageActivatedDates.value.delete(changedDate)
       } catch {
         /* 单日加载失败不影响其他日期 */
       }
@@ -935,17 +826,12 @@ watch(
   },
 )
 
-/** 清理跳转定时器与图片懒加载观察器,避免离开页面后被意外触发 */
+/** 清理跳转定时器,避免离开页面后被意外触发 */
 const cleanupNavAndObserver = () => {
   // 清理跳转定时器,避免用户离开页面后被意外导航到订单页
   if (navTimer) {
     clearTimeout(navTimer)
     navTimer = null
-  }
-  // 断开图片懒加载观察器,避免失活后继续触发回调
-  if (imageObserver) {
-    imageObserver.disconnect()
-    imageObserver = null
   }
 }
 
@@ -1069,6 +955,7 @@ onBeforeUnmount(() => {
                       'dish-card--ordered': isMealLocked(d.date, section.type) && !!orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                       'dish-card--locked': isMealLocked(d.date, section.type) && !orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                     }"
+                    @click="iv.dish && iv.dish.status !== 0 && !isMealLocked(d.date, section.type) && handleAdd(iv.dish, d.date, section.type)"
                   >
                     <!-- 辣度角标(卡片右上角,"辣"字 + 按级别显示1-3个辣椒) -->
                     <div
@@ -1079,67 +966,65 @@ onBeforeUnmount(() => {
                       <ChiliIcon
                         v-for="n in iv.dish.spiceLevel"
                         :key="n"
-                        :size="11"
+                        :size="12"
                       />
-                    </div>
-                    <!-- 图片区(有图才渲染 <img>,无图保持透明显示背景色) -->
-                    <div class="dish-card__img-wrap">
-                      <img
-                        v-if="isImageActivated(d.date) && getDishImg(iv)"
-                        :src="getDishImg(iv)"
-                        class="dish-card__img"
-                        loading="lazy"
-                        @error="handleImgError(iv.item.id)"
-                      />
-                      <!-- 售罄遮罩 -->
-                      <span v-if="iv.dish?.status === 0" class="dish-card__soldout">已售罄</span>
-                      <!-- 已订数量徽标(锁定餐别下已订菜品图片右上角,显示份数) -->
-                      <span
-                        v-if="isMealLocked(d.date, section.type) && orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0)"
-                        class="dish-card__ordered-badge"
-                      >已订{{ orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0) }}份</span>
                     </div>
 
-                    <!-- 底部:菜名+价格 + 操作按钮 -->
-                    <div class="dish-card__bottom">
-                      <div class="dish-card__info">
-                        <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
-                        <p class="dish-card__price">¥{{ formatMoney(iv.dish?.price) }}</p>
-                      </div>
-                      <!-- 已订菜品:绿色 ✅ 标记(突出显示已订状态) -->
-                      <div
-                        v-if="isMealLocked(d.date, section.type) && orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0)"
-                        class="dish-card__ordered-qty"
-                      >
-                        <Check :size="14" :stroke-width="2.5" />
-                        <span>{{ orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0) }}</span>
-                      </div>
-                      <!-- 未订菜品(锁定餐别下):显示灰色禁用占位,保持卡片对齐 -->
-                      <div
-                        v-else-if="isMealLocked(d.date, section.type)"
-                        class="dish-card__locked-placeholder"
-                      ></div>
-                      <template v-else-if="iv.dish && iv.dish.status !== 0">
-                        <button
-                          v-if="getQty(iv.dish.id, d.date, section.type) === 0"
-                          type="button"
-                          class="dish-card__add"
-                          aria-label="加入购物车"
-                          @click="handleAdd(iv.dish, d.date, section.type)"
-                        >
-                          <Plus :size="14" :stroke-width="2.5" />
-                        </button>
-                        <button
-                          v-else
-                          type="button"
-                          class="dish-card__check"
-                          aria-label="减少一份"
-                          @click="handleDecrease(iv.dish.id, d.date, section.type)"
-                        >
-                          <Check :size="14" :stroke-width="2.5" />
-                        </button>
-                      </template>
+                    <!-- 左侧:菜名+价格(放大) -->
+                    <div class="dish-card__info">
+                      <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
+                      <p class="dish-card__price">¥{{ formatMoney(iv.dish?.price) }}</p>
                     </div>
+
+                    <!-- 右侧:操作区 -->
+                    <!-- 售罄 -->
+                    <span v-if="iv.dish?.status === 0 && !isMealLocked(d.date, section.type)" class="dish-card__soldout-tag">已售罄</span>
+                    <!-- 已订菜品:绿色 ✅ + 份数 -->
+                    <div
+                      v-else-if="isMealLocked(d.date, section.type) && orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0)"
+                      class="dish-card__ordered-qty"
+                    >
+                      <Check :size="15" :stroke-width="2.5" />
+                      <span>{{ orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0) }}</span>
+                    </div>
+                    <!-- 未订菜品(锁定餐别下):灰色占位 -->
+                    <div
+                      v-else-if="isMealLocked(d.date, section.type)"
+                      class="dish-card__locked-placeholder"
+                    ></div>
+                    <!-- 正常可选:整卡可点+1 -->
+                    <template v-else-if="iv.dish && iv.dish.status !== 0">
+                      <!-- 数量为0:显示"+"按钮 -->
+                      <button
+                        v-if="getQty(iv.dish.id, d.date, section.type) === 0"
+                        type="button"
+                        class="dish-card__add"
+                        aria-label="加入购物车"
+                        @click.stop="handleAdd(iv.dish, d.date, section.type)"
+                      >
+                        <Plus :size="18" :stroke-width="2.5" />
+                      </button>
+                      <!-- 数量>0:显示"- 数量 +" -->
+                      <div v-else class="dish-card__stepper">
+                        <button
+                          type="button"
+                          class="dish-card__stepper-btn dish-card__stepper-btn--minus"
+                          aria-label="减少一份"
+                          @click.stop="handleDecrease(iv.dish.id, d.date, section.type)"
+                        >
+                          <Minus :size="16" :stroke-width="2.5" />
+                        </button>
+                        <span class="dish-card__stepper-val">{{ getQty(iv.dish.id, d.date, section.type) }}</span>
+                        <button
+                          type="button"
+                          class="dish-card__stepper-btn dish-card__stepper-btn--plus"
+                          aria-label="增加一份"
+                          @click.stop="handleAdd(iv.dish, d.date, section.type)"
+                        >
+                          <Plus :size="16" :stroke-width="2.5" />
+                        </button>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </section>
@@ -1702,43 +1587,51 @@ onBeforeUnmount(() => {
   }
 
   &__grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: 8px;
   }
 }
 
-/* ============ 菜品卡片 ============ */
+/* ============ 菜品卡片(横条) ============ */
 .dish-card {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
-  padding: 10px;
+  gap: 10px;
+  padding: 12px 14px;
+  /* 给辣度角标留出空间 */
+  padding-right: 60px;
   background: $brand-card;
   border: 1px solid $brand-border;
-  border-radius: 12px;
-  transition: border-color 0.15s ease;
-  /* grid item 默认 min-width: auto,长菜名(nowrap)会撑大列宽导致左右不等;
-     设为 0 允许 grid item 收缩,确保 repeat(2, 1fr) 等宽分配 */
+  border-radius: 14px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  cursor: pointer;
   min-width: 0;
+
+  &:active {
+    opacity: 0.92;
+  }
 
   &--selected {
     border: 2px solid $brand-primary;
-    // 抵消多出的 1px border,保持视觉尺寸一致
-    padding: 9px;
+    padding: 11px 13px;
+    padding-right: 59px;
   }
 
   &--disabled {
     opacity: 0.55;
+    cursor: not-allowed;
   }
 
-  /* 已订菜品(锁定餐别下已下单的菜):绿色边框 + 浅绿背景,突出显示已订状态 */
+  /* 已订菜品(锁定餐别下已下单的菜):绿色边框 + 浅绿背景 */
   &--ordered {
     border: 2px solid #16a34a;
     background: #f0fdf4;
-    padding: 9px;
+    padding: 11px 13px;
+    padding-right: 59px;
+    cursor: default;
   }
 
   /* 未订菜品(锁定餐别下未下单的菜):灰色不可选 */
@@ -1746,59 +1639,10 @@ onBeforeUnmount(() => {
     opacity: 0.5;
     border-color: $brand-border;
     background: $brand-muted;
+    cursor: not-allowed;
   }
 
-  &__img-wrap {
-    position: relative;
-    width: 80px;
-    height: 80px;
-    border-radius: 8px;
-    /* 无图时透明,显示卡片背景色 */
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
-
-  &__img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  &__new {
-    position: absolute;
-    top: 0;
-    left: 0;
-    padding: 2px 6px;
-    background: $brand-accent;
-    color: $brand-accent-foreground;
-    font-size: 10px;
-    font-weight: 600;
-    border-radius: 8px 0 8px 0;
-  }
-
-  &__soldout {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(255, 255, 255, 0.85);
-    color: $brand-muted-foreground;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  &__bottom {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-  }
-
+  /* 左侧:菜名+价格 */
   &__info {
     flex: 1;
     min-width: 0;
@@ -1806,53 +1650,62 @@ onBeforeUnmount(() => {
 
   &__name {
     margin: 0;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 16px;
+    font-weight: 600;
     color: $brand-card-foreground;
-    /* 最多2行,超出省略号;2行统一卡片高度,菜名显示更完整 */
+    /* 最多2行,超出省略号 */
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
     word-break: break-all;
-    line-height: 1.3;
+    line-height: 1.35;
+  }
+
+  &__price {
+    margin: 4px 0 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: $brand-primary;
+    font-variant-numeric: tabular-nums;
   }
 
   /* 辣度角标(卡片右上角,半透明白底 + "辣"字 + 红色辣椒图标) */
   &__spice-badge {
     position: absolute;
-    top: 4px;
-    right: 4px;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
     z-index: 3;
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 2px 5px;
-    background: rgba(255, 255, 255, 0.92);
-    border-radius: 6px;
+    padding: 3px 6px;
+    background: rgba(239, 68, 68, 0.08);
+    border-radius: 8px;
     color: #ef4444;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
     line-height: 1;
   }
 
   &__spice-label {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     line-height: 1;
   }
 
-  &__price {
-    margin: 2px 0 0;
-    font-size: 12px;
-    font-weight: 700;
-    color: $brand-primary;
+  /* 售罄标签 */
+  &__soldout-tag {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: $brand-muted-foreground;
   }
 
-  &__add,
-  &__check {
+  /* "+" 按钮(数量为0时) */
+  &__add {
     flex-shrink: 0;
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     background: $brand-primary;
     color: $brand-primary-fg;
@@ -1868,44 +1721,72 @@ onBeforeUnmount(() => {
     }
   }
 
-  /* 已订数量徽标(已订菜品图片右上角,绿色,显示已订份数) */
-  &__ordered-badge {
-    position: absolute;
-    top: 0;
-    right: 0;
-    padding: 2px 6px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #fff;
-    background: #16a34a;
-    border-radius: 0 8px 0 8px;
-    box-shadow: 0 1px 4px rgba(22, 163, 74, 0.3);
-    letter-spacing: 0.3px;
+  /* "- 数量 +" 步进器(数量>0时) */
+  &__stepper {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
-  /* 已订数量显示(绿色 ✅ + 份数,代替加/减按钮) */
+  &__stepper-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+
+    &--minus {
+      background: $brand-muted;
+      color: $brand-card-foreground;
+    }
+
+    &--plus {
+      background: $brand-primary;
+      color: $brand-primary-fg;
+    }
+
+    &:active {
+      opacity: 0.85;
+    }
+  }
+
+  &__stepper-val {
+    min-width: 20px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+    color: $brand-card-foreground;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 已订数量显示(绿色 ✅ + 份数) */
   &__ordered-qty {
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    min-width: 24px;
-    height: 24px;
-    padding: 0 6px;
-    border-radius: 12px;
+    gap: 3px;
+    min-width: 32px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 14px;
     background: #16a34a;
     color: #fff;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 700;
     border: 1px solid #15803d;
     font-variant-numeric: tabular-nums;
   }
 
-  /* 未订菜品占位(锁定餐别下未下单的菜,灰色占位保持卡片对齐) */
+  /* 未订菜品占位(锁定餐别下未下单的菜,灰色占位) */
   &__locked-placeholder {
     flex-shrink: 0;
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: $brand-border;
     opacity: 0.6;

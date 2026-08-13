@@ -138,6 +138,8 @@ const fetchAndAdvance = async () => {
         price: Number(it.price ?? 0),
         quantity: Number(it.quantity ?? 1),
         dishImage: String(it.dishImage || it.dish_image || ''),
+        // 辣度: 0-3,后端字段 spiceLevel / spice_level 任一存在即可
+        spiceLevel: Number(it.spiceLevel ?? it.spice_level ?? 0),
       })),
     }
     pickupStore.order = order

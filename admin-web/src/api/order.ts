@@ -18,8 +18,6 @@ export const orderApi = {
   create: (data: OrderCreateDTO) => api.post<Order>('/order', data).then((r) => r.data),
   complete: (id: number) => api.put<void>(`/order/${id}/complete`).then((r) => r.data),
   cancel: (id: number) => api.put<void>(`/order/${id}/cancel`).then((r) => r.data),
-  pickup: (data: { pickupCode: string }) =>
-    api.post<void>('/order/pickup', data).then((r) => r.data),
   dashboard: (storeId: number) =>
     api.get<DashboardStats>(`/order/dashboard/${storeId}`).then((r) => r.data),
   /** 订餐汇总:按门店+日期+餐次(可选)统计各菜品订购数量 */

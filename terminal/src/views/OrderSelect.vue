@@ -86,7 +86,7 @@ const selectedDate = computed({
 /**
  * 将后端菜单响应拍平为前端结构。
  * 后端返回 [{menu:{id,mealType,...}, items:[{item,dish}]}]
- * 前端拍平成 [{id, mealType, menuItems:[{dishId,dishName,price,category,image}]}]
+ * 前端拍平成 [{id, mealType, menuItems:[{dishId,dishName,price,category,image,spiceLevel}]}]
  */
 const transformMenu = (raw: any[]) =>
   raw.map((m: any) => ({
@@ -98,6 +98,7 @@ const transformMenu = (raw: any[]) =>
       price: it.dish?.price,
       category: it.dish?.category,
       image: it.dish?.image,
+      spiceLevel: it.dish?.spiceLevel,
     })),
   }))
 

@@ -2,20 +2,19 @@
 /**
  * 餐别区块(选菜页用)
  *
- * 对齐 H5 Order.vue 的 meal-section 结构:
+ * 对齐 H5 Order.vue 的横条卡片结构:
  * - 餐别胶囊标题(按餐别配色:早橙/午绿/晚紫)
- * - 菜品网格(3列,垂直卡片:图片在上 + 名称价格 + 选中按钮)
+ * - 菜品列表(单列横条:左侧菜名+价格,右侧操作区,整卡可点 +1)
+ * - 辣度角标(卡片右上角,"辣"字 + 按级别 1-3 个辣椒)
  * - 支持"已订餐锁定":锁定时整块不可加菜,已订菜品框出 + 显示固定数量(像购物车那样,但不可调)
  *
  * 选中态由父组件通过 getQuantity 函数判断(>0 即已选),切换通过 inc/dec 事件上报。
  * 已订菜品通过 orderedItems Map 传入(dishId -> quantity),锁定状态下显示固定数量。
  */
-import { reactive, watch, onMounted, onUnmounted } from 'vue'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { formatMoney } from '@/composables/useFormat'
-import { dishIcon } from '@/utils'
-import { getDishImgUrl } from '@/utils/cache'
 import { Plus, Minus, Lock } from 'lucide-vue-next'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 
 interface MenuItem {
   dishId: number
@@ -24,6 +23,8 @@ interface MenuItem {
   category?: string
   image?: string
   imageUrl?: string
+  /** 辣度: 0-不辣, 1-微辣, 2-中辣, 3-重辣 */
+  spiceLevel?: number
 }
 
 const props = defineProps<{
@@ -44,58 +45,6 @@ const emit = defineEmits<{
 
 const { mealPillStyle, mealIconColor, mealIconMap } = useMealConfig()
 
-/** 图片加载失败的 dishId 集合(响应式,触发回退到占位图标) */
-const erroredDishIds = reactive(new Set<number>())
-const onImgError = (dishId: number) => erroredDishIds.add(dishId)
-
-/** 本地图片 URL 缓存:dishId -> ObjectURL(走 IndexedDB Blob) */
-const localImgUrls = reactive<Record<number, string>>({})
-
-/** 释放所有 ObjectURL(切换日期/卸载前调用,避免内存泄漏) */
-const revokeLocalImgUrls = () => {
-  for (const key of Object.keys(localImgUrls)) {
-    const url = localImgUrls[Number(key)]
-    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
-  }
-}
-
-/**
- * 加载本地图片 URL(命中 IndexedDB 则用 Blob,否则降级后端 URL)。
- *
- * 关键:在 localImgUrls 就绪前不渲染 <img>,避免终端用相对路径
- * (/uploads/xxx.jpg?v=...) 直接请求本地服务器导致 404 → erroredDishIds
- * 永久锁定 → 即使缓存就绪后仍显示占位图标。
- */
-const loadLocalImg = async (item: MenuItem) => {
-  const url = item.image || item.imageUrl
-  if (!url) return
-  try {
-    const localUrl = await getDishImgUrl(url)
-    if (localUrl) {
-      // 释放旧的 ObjectURL(如果存在)
-      const old = localImgUrls[item.dishId]
-      if (old && old.startsWith('blob:')) URL.revokeObjectURL(old)
-      // 清除可能存在的旧错误状态(切换日期后图片 URL 变化)
-      erroredDishIds.delete(item.dishId)
-      localImgUrls[item.dishId] = localUrl
-    }
-  } catch { /* 降级直查后端 */ }
-}
-
-onMounted(() => {
-  props.items.forEach(loadLocalImg)
-})
-// items 变化时重新加载(避免切换日期时图片不更新)
-watch(() => props.items, () => {
-  // 切换日期前释放旧 ObjectURL
-  revokeLocalImgUrls()
-  props.items.forEach(loadLocalImg)
-}, { deep: false })
-
-onUnmounted(() => {
-  revokeLocalImgUrls()
-})
-
 const mealName = (t: number) =>
   ({ 1: '早餐', 2: '午餐', 3: '晚餐' } as Record<number, string>)[t] || '未知'
 
@@ -106,16 +55,16 @@ const isOrdered = (dishId: number) =>
 /** 已订菜品的固定数量(从 orderedItems 取) */
 const orderedQty = (dishId: number) => props.orderedItems?.get(dishId) ?? 0
 
-/** 点击菜品卡片:
- * - 锁定状态:整块禁用,不响应
- * - 已选(数量 > 0):减一
- * - 未选:加一
+/** 辣度(0-3),未配置视为不辣 */
+const spiceOf = (item: MenuItem) => item.spiceLevel ?? 0
+
+/**
+ * 点击菜品卡片:整卡 +1(锁定/已订状态不响应)。
+ * 数量调整由右侧步进器(@click.stop)独立处理,避免与卡片点击重复触发。
  */
 const onClick = (item: MenuItem) => {
   if (props.locked) return
-  const q = props.getQuantity(item.dishId, props.mealType)
-  if (q > 0) emit('dec', item)
-  else emit('inc', item)
+  emit('inc', item)
 }
 </script>
 
@@ -138,76 +87,77 @@ const onClick = (item: MenuItem) => {
       </span>
     </div>
 
-    <!-- 菜品网格 -->
-    <div class="meal-section__grid">
-      <button
+    <!-- 菜品横条列表(单列) -->
+    <div class="meal-section__list">
+      <div
         v-for="item in items"
         :key="item.dishId"
-        type="button"
         class="dish"
         :class="{
           'dish--selected': getQuantity(item.dishId, mealType) > 0,
           'dish--ordered': isOrdered(item.dishId),
           'dish--locked': locked,
         }"
-        :disabled="locked"
         @click="onClick(item)"
       >
-        <!-- 图片区 80×80 -->
-        <div class="dish__img">
-          <!-- 仅在本地 URL 就绪后渲染 <img>,避免相对路径直查本地服务器 404 -->
-          <img
-            v-if="localImgUrls[item.dishId] && !erroredDishIds.has(item.dishId)"
-            :src="localImgUrls[item.dishId]"
-            :alt="item.dishName"
-            @error="onImgError(item.dishId)"
-          />
-          <component
-            v-else
-            :is="dishIcon(item.category || '')"
-            :size="28"
-            class="dish__placeholder"
+        <!-- 辣度角标(卡片右上角,"辣"字 + 按级别 1-3 个辣椒) -->
+        <div
+          v-if="spiceOf(item) > 0"
+          class="dish__spice-badge"
+        >
+          <span class="dish__spice-label">辣</span>
+          <ChiliIcon
+            v-for="n in spiceOf(item)"
+            :key="n"
+            :size="12"
           />
         </div>
 
-        <!-- 信息区 -->
+        <!-- 左侧:菜名 + 价格 -->
         <div class="dish__info">
-          <span class="dish__name text-ellipsis">{{ item.dishName }}</span>
+          <span class="dish__name">{{ item.dishName }}</span>
           <span class="dish__price">¥{{ formatMoney(item.price) }}</span>
         </div>
 
+        <!-- 右侧:操作区 -->
         <!-- 已订菜品:显示固定数量(像购物车那样框出,不可调) -->
         <div v-if="isOrdered(item.dishId)" class="dish__ordered-qty">
           <span class="dish__ordered-num">×{{ orderedQty(item.dishId) }}</span>
           <span class="dish__ordered-label">已订</span>
         </div>
-
-        <!-- 数量调整按钮(未锁定时) -->
-        <div v-else-if="!locked" class="dish__qty">
+        <!-- 未锁定时:数量调整(整卡可点 +1,步进器用 @click.stop 防止重复触发) -->
+        <div v-else-if="!locked" class="dish__action" @click.stop>
           <template v-if="getQuantity(item.dishId, mealType) > 0">
             <button
               type="button"
-              class="dish__qty-btn dish__qty-btn--dec btn-press"
+              class="dish__step-btn dish__step-btn--dec"
               aria-label="减少"
               @click.stop="emit('dec', item)"
             >
-              <Minus :size="14" stroke-width="2.5" />
+              <Minus :size="16" stroke-width="2.5" />
             </button>
-            <span class="dish__qty-num">{{ getQuantity(item.dishId, mealType) }}</span>
+            <span class="dish__step-num">{{ getQuantity(item.dishId, mealType) }}</span>
             <button
               type="button"
-              class="dish__qty-btn dish__qty-btn--inc btn-press"
+              class="dish__step-btn dish__step-btn--inc"
               aria-label="增加"
               @click.stop="emit('inc', item)"
             >
-              <Plus :size="14" stroke-width="2.5" />
+              <Plus :size="16" stroke-width="2.5" />
             </button>
           </template>
-          <div v-else class="dish__btn dish__btn--add">
-            <Plus :size="16" stroke-width="2.5" />
-          </div>
+          <!-- 数量为 0:整卡可点 +1,这里放一个 + 号作为视觉提示 -->
+          <button
+            v-else
+            type="button"
+            class="dish__add-btn"
+            aria-label="加入购物车"
+            @click.stop="emit('inc', item)"
+          >
+            <Plus :size="18" stroke-width="2.5" />
+          </button>
         </div>
-      </button>
+      </div>
     </div>
   </section>
 </template>
@@ -244,86 +194,169 @@ const onClick = (item: MenuItem) => {
   font-weight: 700;
 }
 
-.meal-section__grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+/* 菜品横条列表(单列) */
+.meal-section__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
+/* 单条菜品横条 */
 .dish {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
+  gap: 10px;
+  padding: 12px 14px;
+  /* 给右上角辣度角标预留空间 */
+  padding-right: 70px;
   background: var(--doubao-card);
   border: 1px solid var(--doubao-border);
   border-radius: var(--doubao-radius);
   cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.12s ease;
-  font-family: inherit;
-  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  min-width: 0;
 }
-.dish:active { transform: scale(0.98); }
+.dish:active {
+  opacity: 0.92;
+}
 .dish--selected {
   border: 2px solid var(--doubao-primary);
-  padding: 11px;
+  padding: 11px 13px;
+  padding-right: 69px;
 }
 /* 已订餐菜品:绿色框 + 浅绿背景,显示固定数量,不可再加 */
 .dish--ordered {
   border: 2px solid var(--doubao-success, #07c160);
-  padding: 11px;
+  padding: 11px 13px;
+  padding-right: 69px;
   background: rgba(7, 193, 96, 0.08);
   cursor: not-allowed;
 }
-.dish--ordered:active { transform: none; }
+.dish--ordered:active {
+  opacity: 1;
+}
+/* 锁定餐别下未订菜品:灰色不可选 */
 .dish--locked:not(.dish--ordered) {
   opacity: 0.55;
   cursor: not-allowed;
 }
-.dish--locked:active { transform: none; }
 
-.dish__img {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 80px;
-  height: 80px;
-  border-radius: var(--doubao-radius-xs);
-  background: var(--doubao-muted);
-  overflow: hidden;
-}
-.dish__img img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.dish__placeholder {
-  color: var(--doubao-muted-foreground);
-}
-
+/* 左侧:菜名 + 价格 */
 .dish__info {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .dish__name {
-  font-size: var(--fs-base);
-  font-weight: 400;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--doubao-card-foreground);
+  /* 最多 2 行,超出省略号 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+  line-height: 1.35;
 }
 .dish__price {
-  font-size: var(--fs-base);
+  font-size: 16px;
   font-weight: 700;
   color: var(--doubao-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 辣度角标(卡片右上角,半透明红底 + "辣"字 + 红色辣椒图标) */
+.dish__spice-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  color: #ef4444;
+  line-height: 1;
+}
+.dish__spice-label {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 右侧操作区 */
+.dish__action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dish__step-num {
+  min-width: 20px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--doubao-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.dish__step-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  transition: opacity 0.15s ease;
+}
+.dish__step-btn:active {
+  opacity: 0.85;
+}
+.dish__step-btn--inc {
+  background: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+}
+.dish__step-btn--dec {
+  background: var(--doubao-muted);
+  color: var(--doubao-secondary-foreground);
+  border: 1px solid var(--doubao-border);
+}
+
+/* "+" 按钮(数量为 0 时,整卡可点 +1,这里仅作视觉提示) */
+.dish__add-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  transition: opacity 0.15s ease;
+}
+.dish__add-btn:active {
+  opacity: 0.85;
 }
 
 /* 已订菜品固定数量显示(像购物车那样,但不可调) */
 .dish__ordered-qty {
-  align-self: flex-end;
-  display: flex;
+  flex-shrink: 0;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
@@ -340,55 +373,5 @@ const onClick = (item: MenuItem) => {
   font-size: var(--fs-xs);
   font-weight: 700;
   opacity: 0.9;
-}
-
-/* 数量调整按钮区 */
-.dish__qty {
-  align-self: flex-end;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.dish__qty-num {
-  min-width: 18px;
-  text-align: center;
-  font-size: var(--fs-base);
-  font-weight: 700;
-  color: var(--doubao-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.dish__qty-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  transition: transform 0.12s ease, opacity 0.15s ease;
-}
-.dish__qty-btn:active { transform: scale(0.92); }
-.dish__qty-btn--inc {
-  background: var(--doubao-primary);
-  color: var(--doubao-primary-foreground);
-}
-.dish__qty-btn--dec {
-  background: var(--doubao-muted);
-  color: var(--doubao-secondary-foreground);
-  border: 1px solid var(--doubao-border);
-}
-
-.dish__btn {
-  align-self: flex-end;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  color: var(--doubao-primary-foreground);
-  background: var(--doubao-primary);
 }
 </style>

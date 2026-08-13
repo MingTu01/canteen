@@ -43,7 +43,7 @@ import java.util.Map;
  *
  * 模板字段约定(在微信开发者平台申请模板时按此字段命名):
  * 通知模板:title / content / time
- * 订单模板:orderDate / mealType / amount / pickupCode / time
+ * 订单模板:orderDate / mealType / amount / time
  */
 @Service
 public class WechatNotifyService {
@@ -310,7 +310,7 @@ public class WechatNotifyService {
     // ============================================================
 
     /**
-     * 订单创建成功后,向员工推送微信订阅消息(含订单日期、餐次、金额、取餐码)。
+     * 订单创建成功后,向员工推送微信订阅消息(含订单日期、餐次、金额)。
      * 异步执行,仅记录日志,不抛异常,不影响下单主流程。
      * 注意:员工需在 H5 端预先订阅订单模板,否则发送会被微信拒绝(43101)。
      *
@@ -341,14 +341,11 @@ public class WechatNotifyService {
         // 时间
         String timeStr = java.time.LocalDateTime.now()
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
-        // 取餐码
-        String pickupCode = order.getPickupCode() == null ? "" : order.getPickupCode();
 
         Map<String, Object> data = new HashMap<>();
         data.put("orderDate", dataItem(dateStr));
         data.put("mealType", dataItem(mealTypeStr));
         data.put("amount", dataItem("¥" + amountStr));
-        data.put("pickupCode", dataItem(pickupCode));
         data.put("time", dataItem(timeStr));
 
         // 点击跳转到订单详情页

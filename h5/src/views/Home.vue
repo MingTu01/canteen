@@ -94,13 +94,7 @@ const setCarouselIndex = (idx: number): void => {
 const carouselPrev = (): void => setCarouselIndex(carouselIndex.value - 1)
 const carouselNext = (): void => setCarouselIndex(carouselIndex.value + 1)
 
-/** 启动自动轮播(4 秒一切换) */
-const startCarouselAuto = (): void => {
-  stopCarouselAuto()
-  if (carouselList.value.length <= 1) return
-  carouselTimer = setInterval(carouselNext, 4000)
-}
-/** 停止自动轮播 */
+/** 停止自动轮播(保留清理逻辑,当前已禁用自动轮播) */
 const stopCarouselAuto = (): void => {
   if (carouselTimer) {
     clearInterval(carouselTimer)
@@ -108,17 +102,16 @@ const stopCarouselAuto = (): void => {
   }
 }
 
-/** 触摸开始:记录起点,暂停自动轮播 */
+/** 触摸开始:记录起点 */
 const onCarouselTouchStart = (e: TouchEvent): void => {
   touchStartX = e.touches[0].clientX
   touchDeltaX = 0
-  stopCarouselAuto()
 }
 /** 触摸移动:记录位移 */
 const onCarouselTouchMove = (e: TouchEvent): void => {
   touchDeltaX = e.touches[0].clientX - touchStartX
 }
-/** 触摸结束:位移超过阈值则切换,恢复自动轮播 */
+/** 触摸结束:位移超过阈值则切换(手动滑动,无自动轮播) */
 const onCarouselTouchEnd = (): void => {
   const threshold = 40
   if (touchDeltaX < -threshold) {
@@ -126,7 +119,6 @@ const onCarouselTouchEnd = (): void => {
   } else if (touchDeltaX > threshold) {
     carouselPrev()
   }
-  startCarouselAuto()
 }
 
 /** 卡牌相对中心的偏移量(用于 transform 计算):0=当前,±1=相邻,±2=次相邻 */
@@ -147,7 +139,7 @@ const cardStyle = (i: number): Record<string, string> => {
   if (Math.abs(offset) > 2) {
     return { transform: 'translateX(9999px)', opacity: '0', pointerEvents: 'none' }
   }
-  const translateX = offset * 58 // 卡牌间水平偏移(vw),A4窄卡牌显示更多侧边
+  const translateX = offset * 52 // 卡牌间水平偏移(vw),A4窄卡牌显示更多侧边
   const scale = offset === 0 ? 1 : 0.78
   const opacity = offset === 0 ? '1' : Math.abs(offset) === 1 ? '0.55' : '0.25'
   const zIndex = String(10 - Math.abs(offset))
@@ -159,16 +151,12 @@ const cardStyle = (i: number): Record<string, string> => {
   }
 }
 
-// 列表变化时重置索引并启动/停止自动轮播
+// 列表变化时重置索引(取消自动轮播,仅手动滑动切换)
 watch(
   carouselList,
   (list) => {
     if (carouselIndex.value >= list.length) carouselIndex.value = 0
-    if (list.length > 1) {
-      startCarouselAuto()
-    } else {
-      stopCarouselAuto()
-    }
+    stopCarouselAuto()
   },
   { immediate: true },
 )
@@ -631,22 +619,24 @@ onUnmounted(() => {
   // ============ 公告活动卡牌轮播(A4比例 cover-flow 效果) ============
   &__carousel {
     position: relative;
-    // A4比例: 宽72vw, 高=72vw*297/210≈101.8vw, 加上下padding
-    height: calc(72vw * 297 / 210 + 16px);
+    // A4比例: 宽80vw, 高=80vw*297/210≈113vw, 加上下padding
+    height: calc(80vw * 297 / 210 + 16px);
     perspective: 1200px;
     touch-action: pan-y;
     user-select: none;
+    // 防止侧边半隐藏卡牌导致横向滚动条
+    overflow: hidden;
   }
 
   &__carousel-card {
     position: absolute;
     top: 8px;
     left: 50%;
-    width: 72%;
+    width: 80%;
     // A4纸张比例 210:297(宽:高),固定尺寸
     aspect-ratio: 210 / 297;
-    margin-left: -36%;
-    padding: 14px;
+    margin-left: -40%;
+    padding: 12px;
     background: $brand-card;
     border: 1px solid $brand-border;
     border-radius: 16px;

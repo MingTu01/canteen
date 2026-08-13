@@ -215,37 +215,6 @@ public class OrderController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog("取餐核销")
-    @PostMapping("/pickup")
-    public ApiResponse<Void> pickup(@RequestBody Map<String, String> body) {
-        // 仅管理角色(1/2/6)与终端(3)可核销:员工不可自行核销(防自取自核销/锁定全店)
-        Integer role = SecurityContext.currentRole();
-        if (!SecurityContext.hasAnyRole(1, 2, 3, 6)) {
-            throw new SecurityException(SecurityException.FORBIDDEN, "无权核销取餐");
-        }
-        // 取餐码核销限流:防止暴力枚举取餐码。
-        // 限流键细化到「门店+操作人」:按门店限流会被恶意操作者锁死全店核销 5 分钟
-        Long storeId = SecurityContext.currentStoreId();
-        Long adminId = SecurityContext.currentAdminId();
-        String deviceLabel = SecurityContext.currentDeviceLabel();
-        String operator = adminId != null ? "a" + adminId
-                : (deviceLabel != null && !deviceLabel.isBlank() ? "t" + deviceLabel : "r" + role);
-        String rateLimitKey = "pickup:" + (storeId != null ? storeId : "unknown") + ":" + operator;
-        rateLimiter.checkLocked(rateLimitKey);
-        String pickupCode = body.get("pickupCode");
-        if (pickupCode == null || pickupCode.isBlank()) {
-            throw new BusinessException("取餐码不能为空");
-        }
-        try {
-            orderService.pickup(pickupCode);
-            rateLimiter.recordSuccess(rateLimitKey);
-            return ApiResponse.success(null);
-        } catch (RuntimeException e) {
-            rateLimiter.recordFail(rateLimitKey);
-            throw e;
-        }
-    }
-
     @GetMapping("/dashboard/{storeId}")
     public ApiResponse<Map<String, Object>> getDashboardStats(@PathVariable Long storeId) {
         SecurityContext.checkStoreAccess(storeId);

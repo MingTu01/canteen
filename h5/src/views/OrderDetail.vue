@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showSuccessToast, showToast, showConfirmDialog } from 'vant'
+import { showSuccessToast, showConfirmDialog } from 'vant'
 import ChiliIcon from '@/components/ChiliIcon.vue'
-import QRCode from 'qrcode'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getOrderDetail, cancelOrder } from '@/api/order'
@@ -26,10 +25,6 @@ const { loadConfig, isCancellableByDeadline } = useOrderConfig()
 
 const detail = ref<OrderDetail | null>(null)
 const loading = ref(false)
-const qrDataUrl = ref<string>('')
-
-/** 图片加载失败的菜品明细 ID 集合(触发回退到占位图标) */
-const erroredImages = ref<Set<number>>(new Set())
 
 const orderId = Number(route.params.id)
 
@@ -57,30 +52,12 @@ const canCancel = computed<boolean>(() => {
   return isCancellableByDeadline(order.value.date, new Date())
 })
 
-/** 生成二维码 */
-const genQrcode = async (text: string): Promise<void> => {
-  if (!text) {
-    qrDataUrl.value = ''
-    return
-  }
-  try {
-    qrDataUrl.value = await QRCode.toDataURL(text, {
-      width: 200,
-      margin: 2,
-      color: { dark: '#1a1a1a', light: '#ffffff' },
-    })
-  } catch {
-    qrDataUrl.value = ''
-  }
-}
-
 /** 加载订单详情 */
 const loadDetail = async (): Promise<void> => {
   if (!orderId) return
   loading.value = true
   try {
     detail.value = await getOrderDetail(orderId)
-    // 二维码生成统一交给下方 watch(pickupCode) 处理,避免重复调用产生竞态
   } catch {
     /* 拦截器已提示 */
   } finally {
@@ -92,16 +69,6 @@ onMounted(() => {
   loadConfig(authStore.storeId)
   loadDetail()
 })
-
-// 详情变化时重新生成二维码(loadDetail 赋值 detail 后触发,immediate 保证首次也生成)
-watch(
-  () => order.value?.pickupCode,
-  (code) => {
-    if (code) genQrcode(code)
-    else qrDataUrl.value = ''
-  },
-  { immediate: true },
-)
 
 /** 返回 */
 const onBack = (): void => {
@@ -138,46 +105,10 @@ const onReorder = (): void => {
   router.push('/order')
 }
 
-/** 复制取餐码 */
-const copyCode = async (code: string): Promise<void> => {
-  if (!code) return
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(code)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = code
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    showSuccessToast('取餐码已复制')
-  } catch {
-    showToast('复制失败,请手动复制')
-  }
-}
-
 /** 菜品小计 */
 const itemSubtotal = (it: OrderItem): number => {
   if (it.amount != null) return it.amount
   return it.price * it.quantity
-}
-
-/** 标记菜品图片加载失败,触发 v-if 回退到占位图标 */
-const handleImgError = (id: number): void => {
-  if (erroredImages.value.has(id)) return
-  const next = new Set(erroredImages.value)
-  next.add(id)
-  erroredImages.value = next
-}
-
-/** 获取菜品图片地址;已失败的返回空串触发占位图标 */
-const getItemImg = (it: OrderItem): string => {
-  if (erroredImages.value.has(it.id)) return ''
-  return it.dishImage || ''
 }
 
 /** 状态文字 */
@@ -211,26 +142,6 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
           </div>
         </div>
 
-        <!-- 取餐码区域(仅待取餐) -->
-        <div v-if="isPending && order.pickupCode" class="order-detail__pickup">
-          <div class="order-detail__pickup-inner" @click="copyCode(order.pickupCode!)">
-            <div class="order-detail__pickup-label">取餐码</div>
-            <div class="order-detail__pickup-code">{{ order.pickupCode }}</div>
-            <div class="order-detail__pickup-tip">点击复制取餐码</div>
-          </div>
-          <div class="order-detail__qrcode">
-            <van-image
-              v-if="qrDataUrl"
-              width="160"
-              height="160"
-              :src="qrDataUrl"
-              fit="contain"
-            />
-            <van-loading v-else size="24px">二维码生成中...</van-loading>
-          </div>
-          <div class="order-detail__pickup-hint">请到取餐终端扫码取餐</div>
-        </div>
-
         <!-- 菜品明细 -->
         <div class="card order-detail__items">
           <div class="order-detail__items-title">菜品明细</div>
@@ -239,18 +150,6 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
             :key="it.id"
             class="order-detail__item"
           >
-            <div class="order-detail__item-img">
-              <img
-                v-if="getItemImg(it)"
-                :src="getItemImg(it)"
-                class="order-detail__item-img-src"
-                loading="lazy"
-                @error="handleImgError(it.id)"
-              />
-              <div v-else class="order-detail__item-img-placeholder">
-                <van-icon name="goods-o" size="24" color="#c8c9cc" />
-              </div>
-            </div>
             <div class="order-detail__item-info">
               <div class="order-detail__item-name">
                 <span>{{ it.dishName || '菜品' }}</span>
@@ -363,60 +262,6 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
     }
   }
 
-  // 取餐码区域:品牌蓝渐变背景
-  &__pickup {
-    margin-bottom: 12px;
-    border-radius: 12px;
-    overflow: hidden;
-    background: linear-gradient(135deg, #0065fd 0%, #0095ff 100%);
-    padding: 20px 16px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-
-    &-inner {
-      text-align: center;
-      cursor: pointer;
-    }
-
-    &-label {
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.85);
-    }
-
-    &-code {
-      font-size: 36px;
-      font-weight: 700;
-      color: #fff;
-      letter-spacing: 4px;
-      margin: 4px 0;
-      line-height: 1.2;
-    }
-
-    &-tip {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.75);
-    }
-
-    &-hint {
-      margin-top: 8px;
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.85);
-    }
-  }
-
-  &__qrcode {
-    margin-top: 12px;
-    padding: 8px;
-    background: #fff;
-    border-radius: 8px;
-    width: 176px;
-    height: 176px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   // 菜品明细
   &__items {
     margin-bottom: 12px;
@@ -445,31 +290,6 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
 
     &:last-child {
       border-bottom: none;
-    }
-
-    &-img {
-      flex-shrink: 0;
-      width: 60px;
-      height: 60px;
-      border-radius: 6px;
-      overflow: hidden;
-      background: $bg-gray;
-
-      &-src {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-
-      &-placeholder {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: $bg-gray;
-      }
     }
 
     &-info {

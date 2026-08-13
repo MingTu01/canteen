@@ -23,7 +23,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -253,7 +252,7 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
 
         // 库存扣减已下线(前端不再提供库存功能);保留字段以兼容历史数据,默认 null 跳过
 
-        // 创建订单(B7 订单号 + B3 取餐码)
+        // 创建订单(B7 订单号)
         Order order = new Order();
         order.setOrderNo(generateOrderNo());
         order.setStoreId(storeId);
@@ -263,7 +262,6 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         order.setTotalAmount(totalAmount);
         order.setStatus(OrderStatus.PENDING.getCode());
         order.setOrderSource(orderSourceCode);
-        order.setPickupCode(generatePickupCode(storeId, orderDate));
         orderMapper.insert(order);
 
         for (OrderItemDTO itemDTO : dto.getItems()) {
@@ -277,7 +275,7 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
             orderItemMapper.insert(item);
         }
 
-        // 微信公众号模板消息推送(含订单日期、餐次、金额、取餐码)
+        // 微信公众号模板消息推送(含订单日期、餐次、金额)
         // 事务提交后异步推送,失败仅记录日志,不影响下单主流程
         try {
             wechatNotifyService.notifyOrderCreated(order, employee);
@@ -401,37 +399,6 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
     }
 
     /**
-     * 核销取餐:按取餐码查询订单(收口到当前门店+当天),校验后置为已完成。
-     * 收口说明:取餐码仅保证「同店+当天」唯一,全局查询会在跨店/跨日碰撞时错核销他人订单。
-     */
-    @Transactional
-    public Order pickup(String pickupCode) {
-        Long storeId = SecurityContext.currentStoreId();
-        LocalDate today = LocalDate.now(ZONE_SHANGHAI);
-        Order order = orderMapper.selectByStoreDatePickupCode(storeId, today, pickupCode);
-        if (order == null) {
-            throw new BusinessException("取餐码无效");
-        }
-        if (order.getStatus() == null || order.getStatus() != OrderStatus.PENDING.getCode()) {
-            throw new BusinessException("订单状态不允许核销");
-        }
-        SecurityContext.checkStoreAccess(order.getStoreId());
-        // 就餐时段校验:只能在配置的 [startTime, endTime] 内核销当日订单
-        checkPickupTimeWindow(order);
-        // P0-4 原子状态更新:仅 status=1 可核销,防并发重复核销
-        // 使用 UpdateWrapper+字符串列名,兼容单元测试
-        int rows = orderMapper.update(null, new UpdateWrapper<Order>()
-                .eq("id", order.getId())
-                .eq("status", OrderStatus.PENDING.getCode())
-                .set("status", OrderStatus.COMPLETED.getCode()));
-        if (rows == 0) {
-            throw new BusinessException("订单状态已变更");
-        }
-        order.setStatus(OrderStatus.COMPLETED.getCode());
-        return order;
-    }
-
-    /**
      * 标记超时未核销订单为"未就餐"(status=4)。
      * 由定时任务 OrderStatusScheduler 每分钟调用:
      * 扫描所有 status=1 且订单日期<=今天 的订单,若该订单餐次的就餐时段已过,则标记为 4。
@@ -486,23 +453,6 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
      */
     private String generateOrderNo() {
         return "ORD" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
-    }
-
-    /**
-     * B3 6 位取餐码(P1-4 从 4 位改为 6 位降低暴力破解风险;P2-6 使用 SecureRandom 防可预测)
-     * 生成时在「同店+当天」范围内查重重试,避免碰撞导致无法核销/错核销;
-     * 数据库层由 uk_order_store_date_pickup 唯一索引兜底(V18)。
-     */
-    private String generatePickupCode(Long storeId, LocalDate date) {
-        SecureRandom random = new SecureRandom();
-        for (int i = 0; i < 10; i++) {
-            String code = String.format("%06d", random.nextInt(1000000));
-            if (orderMapper.selectByStoreDatePickupCode(storeId, date, code) == null) {
-                return code;
-            }
-        }
-        // 连续 10 次碰撞(理论上几乎不可能)仍放行,由唯一索引兜底,插入冲突时事务回滚提示重试
-        return String.format("%06d", random.nextInt(1000000));
     }
 
     public Map<String, Object> getDashboardStats(Long storeId) {

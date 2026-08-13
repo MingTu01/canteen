@@ -117,7 +117,6 @@ export interface Order {
   status: number
   /** 订单来源: 0-正常订餐, 1-未订餐用餐 */
   orderSource?: number
-  pickupCode?: string
   createdAt?: string
   updatedAt?: string
   /** 非数据库字段:员工卡号(列表展示用,由后端填充) */

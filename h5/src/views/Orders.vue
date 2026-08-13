@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { showSuccessToast, showFailToast, showToast, showConfirmDialog } from 'vant'
+import { showSuccessToast, showFailToast, showConfirmDialog } from 'vant'
 import { Popup as VanPopup } from 'vant'
 import ChiliIcon from '@/components/ChiliIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -86,7 +86,6 @@ interface DishRow {
   quantity: number
   price: number
   status: number
-  pickupCode?: string
   /** 辣度:0=不辣,1=微辣,2=中辣,3=重辣 */
   spiceLevel?: number
 }
@@ -174,7 +173,6 @@ const groupedOrders = computed<DateGroup[]>(() => {
               quantity: it.quantity,
               price: it.price,
               status: o.status,
-              pickupCode: o.pickupCode,
               spiceLevel: it.spiceLevel,
             })
             subtotal += it.price * it.quantity
@@ -188,7 +186,6 @@ const groupedOrders = computed<DateGroup[]>(() => {
             quantity: 1,
             price: o.totalAmount,
             status: o.status,
-            pickupCode: o.pickupCode,
           })
           subtotal += o.totalAmount
         }
@@ -417,19 +414,6 @@ const updateVisibleDate = (): void => {
   }
 }
 
-/** 餐别中可复制取餐码的订单(按 orderId 去重,一个订单只显示一个取餐码) */
-const pickupOrders = (meal: MealGroup): DishRow[] => {
-  const seen = new Set<number>()
-  const result: DishRow[] = []
-  for (const r of meal.rows) {
-    if (r.status === 1 && r.pickupCode && !seen.has(r.orderId)) {
-      seen.add(r.orderId)
-      result.push(r)
-    }
-  }
-  return result
-}
-
 /**
  * 滚动到今天日期所在的分组位置。
  * 用于:每次进入页面 / 下拉刷新 / 切换 Tab 后,确保今天订单首先可见。
@@ -488,28 +472,6 @@ const selectTab = (value: number): void => {
 
 const goDetail = (id: number): void => {
   router.push(`/orders/${id}`)
-}
-
-/** 复制取餐码 */
-const copyCode = async (code: string, e: Event): Promise<void> => {
-  e.stopPropagation()
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(code)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = code
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    showSuccessToast('取餐码已复制')
-  } catch {
-    showToast('复制失败,请手动复制')
-  }
 }
 
 /** 取消整个餐别的订单(二次确认,取消后金额退回余额) */
@@ -863,22 +825,6 @@ onMounted(() => {
                       'orders-page__status-tag--muted': row.status === 3,
                     }"
                   >{{ formatOrderStatus(row.status) }}</span>
-                </div>
-
-                <!-- 取餐码(待取餐且存在 pickupCode) -->
-                <div
-                  v-if="meal.cancellable && pickupOrders(meal).length > 0"
-                  class="orders-page__pickup-row"
-                >
-                  <button
-                    v-for="(row, idx) in pickupOrders(meal)"
-                    :key="`${row.key}-${idx}`"
-                    type="button"
-                    class="orders-page__pickup-pill"
-                    @click.stop="row.pickupCode && copyCode(row.pickupCode, $event)"
-                  >
-                    取餐码 {{ row.pickupCode }}
-                  </button>
                 </div>
 
                 <!-- 取消按钮(仅待取餐,位于卡片右下角) -->
@@ -1360,27 +1306,6 @@ onMounted(() => {
     &--muted {
       color: $brand-muted-foreground;
       background: transparent;
-    }
-  }
-
-  &__pickup-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 4px 16px 8px;
-  }
-
-  &__pickup-pill {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px dashed $brand-primary;
-    background: rgba(0, 101, 253, 0.04);
-    color: $brand-primary;
-    cursor: pointer;
-
-    &:active {
-      background: rgba(0, 101, 253, 0.1);
     }
   }
 

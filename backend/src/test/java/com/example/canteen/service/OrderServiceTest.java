@@ -123,7 +123,6 @@ class OrderServiceTest {
             assertEquals(1L, result.getStoreId());
             assertEquals(1L, result.getEmployeeId());
             assertEquals(OrderStatus.PENDING.getCode(), result.getStatus());
-            assertNotNull(result.getPickupCode());
             // 总金额：15*2 + 12*1 = 42
             assertEquals(new BigDecimal("42.00"), result.getTotalAmount());
 

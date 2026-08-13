@@ -5,23 +5,23 @@
  * 展示员工信息 + 待取餐订单详情,员工确认后调用 complete 接口。
  * - 顶栏(右侧倒计时 + 暂停按钮)
  * - 员工头像 + 姓名 + 部门
- * - 餐别信息卡片(对齐 useMealConfig 餐别配色)+ 菜品列表(图片+名称)
+ * - 餐别信息卡片(对齐 useMealConfig 餐别配色)+ 菜品横条列表(辣度角标+名称+数量单价)
  * - 取餐完成按钮(缩小,一般不点)
  * - 30 秒倒计时,到时自动返回待机
  * - 刷卡切换:展示当前员工菜品时,新员工刷卡直接切换显示,无需返回待机
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
 import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { useMealTimeSlots } from '@/composables/useMealTimeSlots'
 import { mealTypeLabel, mealTypeTime, toDateKey } from '@/utils'
-import { getDishImgUrl } from '@/utils/cache'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { Pause, Play } from 'lucide-vue-next'
 import BrandingHeader from '@/components/BrandingHeader.vue'
 import Modal from '@/components/Modal.vue'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 
 import { fetchBranding } from '@/store/branding'
 
@@ -74,48 +74,6 @@ const errorMsg = ref('')
 
 /* 切换中提示(新员工刷卡后正在加载订单) */
 const switching = ref(false)
-
-/** 图片加载失败的菜品索引,触发 emoji 占位 */
-const erroredImages = ref<Set<number>>(new Set())
-const onImgError = (idx: number) => {
-  const next = new Set(erroredImages.value)
-  next.add(idx)
-  erroredImages.value = next
-}
-
-/** 本地图片 URL 缓存:菜品索引 -> ObjectURL(走 IndexedDB Blob) */
-const localImgUrls = reactive<Record<number, string>>({})
-
-/** 释放 localImgUrls 中所有 ObjectURL(切换员工前调用,避免内存泄漏) */
-const revokeLocalImgUrls = () => {
-  for (const key of Object.keys(localImgUrls)) {
-    const url = localImgUrls[Number(key)]
-    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
-  }
-}
-
-/** 加载本地图片 URL(命中 IndexedDB 则用 Blob,否则降级后端 URL) */
-const loadLocalImg = async (idx: number, url: string | null | undefined) => {
-  if (!url) return
-  try {
-    const localUrl = await getDishImgUrl(url)
-    if (localUrl) {
-      // 释放旧的 ObjectURL(如果存在)
-      const old = localImgUrls[idx]
-      if (old && old.startsWith('blob:')) URL.revokeObjectURL(old)
-      localImgUrls[idx] = localUrl
-    }
-  } catch { /* 降级直查后端 */ }
-}
-
-/** 订单变化时重新加载图片(切换员工场景) */
-watch(() => order.value, () => {
-  // 切换员工前释放旧 ObjectURL,避免内存泄漏
-  revokeLocalImgUrls()
-  for (const [idx, it] of (order.value?.orderItems || []).entries()) {
-    loadLocalImg(idx, it.dishImage)
-  }
-}, { immediate: true })
 
 const countdownText = computed(() =>
   paused.value ? '已暂停' : `${remaining.value}秒后自动返回`,
@@ -247,12 +205,13 @@ const switchEmployee = async (cardNo: string) => {
         price: Number(it.price ?? 0),
         quantity: Number(it.quantity ?? 1),
         dishImage: String(it.dishImage || it.dish_image || ''),
+        // 辣度: 0-3,后端字段 spiceLevel / spice_level 任一存在即可
+        spiceLevel: Number(it.spiceLevel ?? it.spice_level ?? 0),
       })),
     }
     // 订单拉取成功后,原子更新 employee + order
     pickupStore.employee = newEmp
     pickupStore.order = newOrder
-    erroredImages.value = new Set()
     resetCountdown()
   } catch (e: any) {
     // 异常时恢复原状态,避免 store 数据不一致
@@ -280,8 +239,7 @@ onUnmounted(() => {
   if (timer) clearInterval(timer)
   window.removeEventListener('keydown', onKeyPress)
   if (cardBufferTimer) clearTimeout(cardBufferTimer)
-  // 释放所有 ObjectURL,避免内存泄漏
-  revokeLocalImgUrls()
+  // 释放头像 ObjectURL,避免内存泄漏
   revokeAvatarUrl()
 })
 </script>
@@ -357,18 +315,31 @@ onUnmounted(() => {
             :key="idx"
             class="pickup-info__dish"
           >
-            <div class="pickup-info__dish-img-wrap">
-              <img
-                v-if="it.dishImage && !erroredImages.has(idx)"
-                :src="localImgUrls[idx] || it.dishImage"
-                :alt="it.dishName"
-                class="pickup-info__dish-img"
-                @error="onImgError(idx)"
-              />
-              <span v-else class="pickup-info__dish-emoji">🍽️</span>
-              <span v-if="Number(it.quantity || 1) > 1" class="pickup-info__qty">×{{ it.quantity }}</span>
+            <!-- 左:辣度角标 -->
+            <div class="pickup-info__dish-spice">
+              <span
+                v-if="Number(it.spiceLevel ?? 0) === 0"
+                class="pickup-info__spice-tag pickup-info__spice-tag--mild"
+              >不辣</span>
+              <span
+                v-else
+                class="pickup-info__spice-tag pickup-info__spice-tag--spicy"
+              >
+                辣
+                <ChiliIcon
+                  v-for="n in Number(it.spiceLevel ?? 0)"
+                  :key="n"
+                  :size="16"
+                />
+              </span>
             </div>
+            <!-- 中:菜品名称(放大加粗) -->
             <span class="pickup-info__dish-name">{{ it.dishName }}</span>
+            <!-- 右:数量 + 单价 -->
+            <div class="pickup-info__dish-right">
+              <span class="pickup-info__dish-qty">×{{ it.quantity }}</span>
+              <span class="pickup-info__dish-price">¥{{ Number(it.price ?? 0).toFixed(2) }}</span>
+            </div>
           </div>
           <div v-if="!order.orderItems.length" class="pickup-info__empty">暂无菜品</div>
         </div>
@@ -555,56 +526,77 @@ onUnmounted(() => {
 }
 
 .pickup-info__dishes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 20px;
-  padding: 28px 12px;
-}
-.pickup-info__dish {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  gap: 12px;
+  padding: 20px 12px;
 }
-.pickup-info__dish-img-wrap {
-  position: relative;
-  width: 130px;
-  height: 130px;
-  border-radius: var(--doubao-radius-sm);
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
+/* 横条卡片:左辣度角标 + 中菜品名(放大加粗) + 右数量&单价 */
+.pickup-info__dish {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: var(--doubao-radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
-.pickup-info__dish-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.pickup-info__dish-spice {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
-.pickup-info__dish-emoji {
-  font-size: 48px;
-  line-height: 1;
-}
-.pickup-info__dish-name {
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: #ffffff;
-  text-align: center;
-}
-.pickup-info__qty {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  padding: 2px 8px;
+/* 辣度角标 */
+.pickup-info__spice-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border-radius: 6px;
   font-size: var(--fs-sm);
   font-weight: 700;
-  color: #fff;
-  background: var(--doubao-primary);
-  border-radius: 999px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.pickup-info__spice-tag--mild {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+}
+.pickup-info__spice-tag--spicy {
+  background: rgba(244, 67, 54, 0.18);
+  color: #ff6b5b;
+}
+.pickup-info__dish-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.3;
+  /* 超长菜品名省略号 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pickup-info__dish-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.pickup-info__dish-qty {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+.pickup-info__dish-price {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  min-width: 64px;
+  text-align: right;
 }
 .pickup-info__empty {
-  grid-column: 1 / -1;
   font-size: var(--fs-lg);
   color: rgba(255, 255, 255, 0.7);
   text-align: center;

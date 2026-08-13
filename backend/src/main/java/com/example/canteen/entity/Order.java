@@ -25,8 +25,6 @@ public class Order {
     private Integer status;
     /** 订单来源: 0-正常订餐, 1-未订餐用餐 */
     private Integer orderSource;
-    /** 取餐码(4-6 位) */
-    private String pickupCode;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

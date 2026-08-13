@@ -8,16 +8,16 @@
  * - 提示需经打菜人员确认菜品后下单
  * - 下单时带 orderSource=1,后端绕过截止时间和防重复校验
  */
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showSuccessToast, showFailToast, showConfirmDialog } from 'vant'
 import { ArrowLeft, Plus, Minus, ShoppingCart, AlertCircle } from 'lucide-vue-next'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getMenuByDate, getDiningTimes } from '@/api/menu'
 import { createOrder } from '@/api/order'
 import { fetchServerTime, type ServerTime } from '@/composables/useServerTime'
 import { parseTimeToMinutes, formatDateStr } from '@/utils/date'
-import { getCachedImage } from '@/utils/imageCache'
 import { formatMoney, formatMealType } from '@/composables/useFormat'
 import type { MenuWithItems, Dish, DiningTimeSlot } from '@/api/types'
 
@@ -74,40 +74,6 @@ const currentDishes = computed<Dish[]>(() => {
     .map((iv) => iv.dish)
     .filter((d): d is Dish => !!d)
 })
-
-// ============ 菜品图片 ============
-/** 加载失败的菜品图片(dishId 集合),触发 v-if 回退到 emoji 占位 */
-const erroredImages = ref(new Set<number>())
-
-/** 菜品图片缓存(dishId → 缓存后的 blob URL 或原 URL),异步填充 */
-const dishImageCache = ref<Map<number, string>>(new Map())
-
-/** 预加载当前餐别菜品图片到缓存(懒加载:首次 fetch 后缓存,后续命中缓存直接返回 blob URL) */
-watch(currentDishes, async (dishes) => {
-  const map = new Map(dishImageCache.value)
-  const promises: Promise<void>[] = []
-  for (const dish of dishes) {
-    if (!dish.id || map.has(dish.id)) continue
-    const raw = dish.image || dish.imageUrl
-    if (!raw) continue
-    // 完整 URL 或 data URL 直接使用,不走 IndexedDB 缓存
-    if (/^(https?:)?\/\//.test(raw) || raw.startsWith('data:')) {
-      map.set(dish.id, raw)
-      continue
-    }
-    promises.push(
-      getCachedImage(raw).then((url) => { map.set(dish.id, url) }),
-    )
-  }
-  await Promise.all(promises)
-  dishImageCache.value = map
-}, { immediate: true })
-
-/** 获取菜品图片地址(优先 image 字段,回退 imageUrl;走本地缓存);已失败的返回空串触发 emoji 占位 */
-const getDishImg = (dish: any): string => {
-  if (erroredImages.value.has(dish.id)) return ''
-  return dishImageCache.value.get(dish.id) || ''
-}
 
 // ============ 购物车操作 ============
 const addToCart = (dish: Dish) => {
@@ -312,39 +278,56 @@ onUnmounted(() => {
         <h2 class="unsolicited__section-title">
           {{ currentMealLabel }}菜品({{ currentDishes.length }} 道)
         </h2>
-        <div class="unsolicited__dish-grid">
-          <div v-for="dish in currentDishes" :key="dish.id" class="unsolicited__dish">
-            <div class="unsolicited__dish-img-wrap">
-              <img
-                v-if="getDishImg(dish) && !erroredImages.has(dish.id)"
-                :src="getDishImg(dish)"
-                :alt="dish.name"
-                class="unsolicited__dish-img"
-                @error="() => erroredImages.add(dish.id)"
-              />
-              <div v-else class="unsolicited__dish-img-placeholder">🍽️</div>
+        <div class="unsolicited__dish-list">
+          <div
+            v-for="dish in currentDishes"
+            :key="dish.id"
+            class="unsolicited__dish"
+            :class="{ 'unsolicited__dish--selected': getDishQty(dish.id) > 0 }"
+            @click="dish.status !== 0 && addToCart(dish)"
+          >
+            <!-- 辣度角标 -->
+            <div
+              v-if="dish.spiceLevel && dish.spiceLevel > 0"
+              class="unsolicited__dish-spice"
+            >
+              <span class="unsolicited__dish-spice-label">辣</span>
+              <ChiliIcon v-for="n in dish.spiceLevel" :key="n" :size="12" />
             </div>
+            <!-- 左侧:菜名+价格 -->
             <div class="unsolicited__dish-info">
               <h3 class="unsolicited__dish-name">{{ dish.name }}</h3>
-              <div class="unsolicited__dish-meta">
-                <span class="unsolicited__dish-price">¥{{ formatMoney(dish.price) }}</span>
-                <div class="unsolicited__dish-counter">
-                  <button
-                    class="unsolicited__counter-btn"
-                    :disabled="getDishQty(dish.id) === 0"
-                    @click="decreaseFromCart(dish)"
-                  >
-                    <Minus :size="14" />
-                  </button>
-                  <span class="unsolicited__counter-num">{{ getDishQty(dish.id) }}</span>
-                  <button
-                    class="unsolicited__counter-btn unsolicited__counter-btn--plus"
-                    @click="addToCart(dish)"
-                  >
-                    <Plus :size="14" />
-                  </button>
-                </div>
-              </div>
+              <span class="unsolicited__dish-price">¥{{ formatMoney(dish.price) }}</span>
+            </div>
+            <!-- 右侧:操作区 -->
+            <span v-if="dish.status === 0" class="unsolicited__dish-soldout">已售罄</span>
+            <button
+              v-else-if="getDishQty(dish.id) === 0"
+              type="button"
+              class="unsolicited__dish-add"
+              aria-label="加入购物车"
+              @click.stop="addToCart(dish)"
+            >
+              <Plus :size="18" :stroke-width="2.5" />
+            </button>
+            <div v-else class="unsolicited__dish-stepper">
+              <button
+                type="button"
+                class="unsolicited__stepper-btn unsolicited__stepper-btn--minus"
+                aria-label="减少一份"
+                @click.stop="decreaseFromCart(dish)"
+              >
+                <Minus :size="16" :stroke-width="2.5" />
+              </button>
+              <span class="unsolicited__stepper-val">{{ getDishQty(dish.id) }}</span>
+              <button
+                type="button"
+                class="unsolicited__stepper-btn unsolicited__stepper-btn--plus"
+                aria-label="增加一份"
+                @click.stop="addToCart(dish)"
+              >
+                <Plus :size="16" :stroke-width="2.5" />
+              </button>
             </div>
           </div>
         </div>
@@ -497,92 +480,136 @@ onUnmounted(() => {
   color: #333;
 }
 
-.unsolicited__dish-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+.unsolicited__dish-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 0 12px;
 }
 .unsolicited__dish {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  padding-right: 60px;
   background: #fff;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid #eee;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+  min-width: 0;
 }
-.unsolicited__dish-img-wrap {
-  width: 100%;
-  aspect-ratio: 1;
-  background: #f5f5f5;
-  overflow: hidden;
+.unsolicited__dish:active {
+  opacity: 0.92;
 }
-.unsolicited__dish-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.unsolicited__dish--selected {
+  border: 2px solid #1989fa;
+  padding: 11px 13px;
+  padding-right: 59px;
 }
-.unsolicited__dish-img-placeholder {
-  width: 100%;
-  height: 100%;
+.unsolicited__dish-spice {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 36px;
-  background: #f9f9f9;
+  gap: 2px;
+  padding: 3px 6px;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  color: #ef4444;
+  line-height: 1;
+}
+.unsolicited__dish-spice-label {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 .unsolicited__dish-info {
-  padding: 8px 10px 10px;
+  flex: 1;
+  min-width: 0;
 }
 .unsolicited__dish-name {
-  font-size: 14px;
-  font-weight: 500;
-  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
   color: #333;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.unsolicited__dish-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  word-break: break-all;
+  line-height: 1.35;
 }
 .unsolicited__dish-price {
+  display: block;
+  margin-top: 4px;
   color: #ee0a24;
+  font-weight: 700;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.unsolicited__dish-soldout {
+  flex-shrink: 0;
+  font-size: 13px;
   font-weight: 600;
-  font-size: 14px;
+  color: #999;
 }
-.unsolicited__dish-counter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.unsolicited__counter-btn {
-  width: 22px;
-  height: 22px;
+.unsolicited__dish-add {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
+  background: #1989fa;
+  color: #fff;
   border: none;
-  background: #f0f0f0;
-  color: #666;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
   padding: 0;
 }
-.unsolicited__counter-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.unsolicited__dish-add:active {
+  opacity: 0.85;
 }
-.unsolicited__counter-btn--plus {
+.unsolicited__dish-stepper {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.unsolicited__stepper-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.unsolicited__stepper-btn--minus {
+  background: #f0f0f0;
+  color: #333;
+}
+.unsolicited__stepper-btn--plus {
   background: #1989fa;
   color: #fff;
 }
-.unsolicited__counter-num {
-  font-size: 14px;
-  font-weight: 600;
-  min-width: 16px;
+.unsolicited__stepper-btn:active {
+  opacity: 0.85;
+}
+.unsolicited__stepper-val {
+  min-width: 20px;
   text-align: center;
+  font-size: 16px;
+  font-weight: 700;
   color: #333;
+  font-variant-numeric: tabular-nums;
 }
 
 .unsolicited__empty {

@@ -105,14 +105,11 @@ CREATE TABLE IF NOT EXISTS `order` (
     meal_type INT NOT NULL,
     total_amount DECIMAL(10,2) NOT NULL,
     status INT DEFAULT 1,
-    pickup_code VARCHAR(10),
     order_source INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_order_store_date_status ON `order` (store_id, date, status);
--- V18 取餐码「同店+当天」唯一(与 MySQL Flyway 对齐;NULL 不参与唯一约束)
-CREATE UNIQUE INDEX IF NOT EXISTS uk_order_store_date_pickup ON `order` (store_id, date, pickup_code);
 
 CREATE TABLE IF NOT EXISTS order_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

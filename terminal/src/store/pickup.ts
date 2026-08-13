@@ -20,7 +20,14 @@ export interface PickupOrder {
   totalAmount: number
   /** 订单来源: 0-正常订餐, 1-未订餐用餐 */
   orderSource?: number
-  orderItems: { dishName: string; price: number; quantity: number; dishImage?: string }[]
+  orderItems: {
+    dishName: string
+    price: number
+    quantity: number
+    dishImage?: string
+    /** 辣度: 0-不辣, 1-微辣, 2-中辣, 3-特辣 */
+    spiceLevel?: number
+  }[]
 }
 
 export const pickupStore = reactive({
