@@ -157,6 +157,7 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
                   v-if="it.spiceLevel && it.spiceLevel > 0"
                   class="order-detail__item-spice"
                 >
+                  <span class="order-detail__item-spice-label">辣</span>
                   <ChiliIcon
                     v-for="n in it.spiceLevel"
                     :key="n"
@@ -312,12 +313,19 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
     &-spice {
       display: inline-flex;
       align-items: center;
-      gap: 1px;
+      gap: 2px;
       flex-shrink: 0;
+      padding: 2px 5px;
+      background: rgba(239, 68, 68, 0.08);
+      border-radius: 6px;
+      color: #ef4444;
+      line-height: 1;
     }
 
-    &-spice-icon {
-      color: #ef4444;
+    &-spice-label {
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
     }
 
     &-meta {
@@ -364,5 +372,10 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
   &__info {
     margin-bottom: 12px;
   }
+}
+
+/* 取消订单按钮:plain danger 文字色强制为红色(全局变量未覆盖 action-bar-button) */
+:deep(.van-action-bar-button--danger.van-button--plain) {
+  color: #{$brand-danger};
 }
 </style>
