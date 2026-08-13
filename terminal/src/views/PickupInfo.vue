@@ -315,14 +315,12 @@ onUnmounted(() => {
             :key="idx"
             class="pickup-info__dish"
           >
-            <!-- 左:辣度角标 -->
-            <div class="pickup-info__dish-spice">
+            <!-- 左:菜品名称(放大加粗) -->
+            <span class="pickup-info__dish-name">{{ it.dishName }}</span>
+            <!-- 右:辣度角标 + 数量 + 单价 -->
+            <div class="pickup-info__dish-right">
               <span
-                v-if="Number(it.spiceLevel ?? 0) === 0"
-                class="pickup-info__spice-tag pickup-info__spice-tag--mild"
-              >不辣</span>
-              <span
-                v-else
+                v-if="Number(it.spiceLevel ?? 0) > 0"
                 class="pickup-info__spice-tag pickup-info__spice-tag--spicy"
               >
                 辣
@@ -332,11 +330,6 @@ onUnmounted(() => {
                   :size="16"
                 />
               </span>
-            </div>
-            <!-- 中:菜品名称(放大加粗) -->
-            <span class="pickup-info__dish-name">{{ it.dishName }}</span>
-            <!-- 右:数量 + 单价 -->
-            <div class="pickup-info__dish-right">
               <span class="pickup-info__dish-qty">×{{ it.quantity }}</span>
               <span class="pickup-info__dish-price">¥{{ Number(it.price ?? 0).toFixed(2) }}</span>
             </div>
@@ -531,7 +524,7 @@ onUnmounted(() => {
   gap: 12px;
   padding: 20px 12px;
 }
-/* 横条卡片:左辣度角标 + 中菜品名(放大加粗) + 右数量&单价 */
+/* 横条卡片:左菜品名(放大加粗) + 右辣度&数量&单价 */
 .pickup-info__dish {
   display: flex;
   align-items: center;
@@ -541,12 +534,7 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
-.pickup-info__dish-spice {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-/* 辣度角标 */
+/* 辣度角标(仅有辣度时显示) */
 .pickup-info__spice-tag {
   display: inline-flex;
   align-items: center;
@@ -558,10 +546,6 @@ onUnmounted(() => {
   line-height: 1.2;
   white-space: nowrap;
 }
-.pickup-info__spice-tag--mild {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.75);
-}
 .pickup-info__spice-tag--spicy {
   background: rgba(244, 67, 54, 0.18);
   color: #ff6b5b;
@@ -569,7 +553,7 @@ onUnmounted(() => {
 .pickup-info__dish-name {
   flex: 1;
   min-width: 0;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   color: #ffffff;
   line-height: 1.3;

@@ -59,11 +59,14 @@ const orderedQty = (dishId: number) => props.orderedItems?.get(dishId) ?? 0
 const spiceOf = (item: MenuItem) => item.spiceLevel ?? 0
 
 /**
- * 点击菜品卡片:整卡 +1(锁定/已订状态不响应)。
- * 数量调整由右侧步进器(@click.stop)独立处理,避免与卡片点击重复触发。
+ * 点击菜品卡片:仅在数量为 0 时整卡 +1(首次选择)。
+ * 数量 > 0 时整卡不响应,必须点 + 按钮增加,避免误操作。
+ * 锁定/已订状态不响应。
  */
 const onClick = (item: MenuItem) => {
   if (props.locked) return
+  // 数量 > 0 时整卡不响应,只能点 + 按钮增加
+  if (props.getQuantity(item.dishId, props.mealType) > 0) return
   emit('inc', item)
 }
 </script>
@@ -87,7 +90,7 @@ const onClick = (item: MenuItem) => {
       </span>
     </div>
 
-    <!-- 菜品横条列表(单列) -->
+    <!-- 菜品横条列表(单列,两行布局对齐 H5) -->
     <div class="meal-section__list">
       <div
         v-for="item in items"
@@ -100,62 +103,64 @@ const onClick = (item: MenuItem) => {
         }"
         @click="onClick(item)"
       >
-        <!-- 辣度角标(卡片右上角,"辣"字 + 按级别 1-3 个辣椒) -->
-        <div
-          v-if="spiceOf(item) > 0"
-          class="dish__spice-badge"
-        >
-          <span class="dish__spice-label">辣</span>
-          <ChiliIcon
-            v-for="n in spiceOf(item)"
-            :key="n"
-            :size="12"
-          />
-        </div>
-
-        <!-- 左侧:菜名 + 价格 -->
-        <div class="dish__info">
+        <!-- 第一行:菜名(左) + 辣度(右) -->
+        <div class="dish__top">
           <span class="dish__name">{{ item.dishName }}</span>
-          <span class="dish__price">¥{{ formatMoney(item.price) }}</span>
+          <div
+            v-if="spiceOf(item) > 0"
+            class="dish__spice-badge"
+          >
+            <span class="dish__spice-label">辣</span>
+            <ChiliIcon
+              v-for="n in spiceOf(item)"
+              :key="n"
+              :size="12"
+            />
+          </div>
         </div>
 
-        <!-- 右侧:操作区 -->
-        <!-- 已订菜品:显示固定数量(像购物车那样框出,不可调) -->
-        <div v-if="isOrdered(item.dishId)" class="dish__ordered-qty">
-          <span class="dish__ordered-num">×{{ orderedQty(item.dishId) }}</span>
-          <span class="dish__ordered-label">已订</span>
-        </div>
-        <!-- 未锁定时:数量调整(整卡可点 +1,步进器用 @click.stop 防止重复触发) -->
-        <div v-else-if="!locked" class="dish__action" @click.stop>
-          <template v-if="getQuantity(item.dishId, mealType) > 0">
+        <!-- 第二行:价格(左) + 操作区(右) -->
+        <div class="dish__bottom">
+          <span class="dish__price">¥{{ formatMoney(item.price) }}</span>
+
+          <!-- 已订菜品:显示固定数量(像购物车那样框出,不可调) -->
+          <div v-if="isOrdered(item.dishId)" class="dish__ordered-qty">
+            <span class="dish__ordered-num">×{{ orderedQty(item.dishId) }}</span>
+            <span class="dish__ordered-label">已订</span>
+          </div>
+          <!-- 未锁定时:数量调整 -->
+          <div v-else-if="!locked" class="dish__action" @click.stop>
+            <!-- 数量 > 0:步进器(只能点按钮,整卡不可点) -->
+            <template v-if="getQuantity(item.dishId, mealType) > 0">
+              <button
+                type="button"
+                class="dish__step-btn dish__step-btn--dec"
+                aria-label="减少"
+                @click.stop="emit('dec', item)"
+              >
+                <Minus :size="16" stroke-width="2.5" />
+              </button>
+              <span class="dish__step-num">{{ getQuantity(item.dishId, mealType) }}</span>
+              <button
+                type="button"
+                class="dish__step-btn dish__step-btn--inc"
+                aria-label="增加"
+                @click.stop="emit('inc', item)"
+              >
+                <Plus :size="16" stroke-width="2.5" />
+              </button>
+            </template>
+            <!-- 数量为 0:整卡可点 +1,这里放一个 + 号作为视觉提示 -->
             <button
+              v-else
               type="button"
-              class="dish__step-btn dish__step-btn--dec"
-              aria-label="减少"
-              @click.stop="emit('dec', item)"
-            >
-              <Minus :size="16" stroke-width="2.5" />
-            </button>
-            <span class="dish__step-num">{{ getQuantity(item.dishId, mealType) }}</span>
-            <button
-              type="button"
-              class="dish__step-btn dish__step-btn--inc"
-              aria-label="增加"
+              class="dish__add-btn"
+              aria-label="加入购物车"
               @click.stop="emit('inc', item)"
             >
-              <Plus :size="16" stroke-width="2.5" />
+              <Plus :size="18" stroke-width="2.5" />
             </button>
-          </template>
-          <!-- 数量为 0:整卡可点 +1,这里放一个 + 号作为视觉提示 -->
-          <button
-            v-else
-            type="button"
-            class="dish__add-btn"
-            aria-label="加入购物车"
-            @click.stop="emit('inc', item)"
-          >
-            <Plus :size="18" stroke-width="2.5" />
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -201,16 +206,13 @@ const onClick = (item: MenuItem) => {
   gap: 8px;
 }
 
-/* 单条菜品横条 */
+/* 单条菜品横条(两行布局,对齐 H5) */
 .dish {
   position: relative;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 12px 14px;
-  /* 给右上角辣度角标预留空间 */
-  padding-right: 70px;
   background: var(--doubao-card);
   border: 1px solid var(--doubao-border);
   border-radius: var(--doubao-radius);
@@ -224,13 +226,11 @@ const onClick = (item: MenuItem) => {
 .dish--selected {
   border: 2px solid var(--doubao-primary);
   padding: 11px 13px;
-  padding-right: 69px;
 }
 /* 已订餐菜品:绿色框 + 浅绿背景,显示固定数量,不可再加 */
 .dish--ordered {
   border: 2px solid var(--doubao-success, #07c160);
   padding: 11px 13px;
-  padding-right: 69px;
   background: rgba(7, 193, 96, 0.08);
   cursor: not-allowed;
 }
@@ -243,13 +243,21 @@ const onClick = (item: MenuItem) => {
   cursor: not-allowed;
 }
 
-/* 左侧:菜名 + 价格 */
-.dish__info {
-  flex: 1;
-  min-width: 0;
+/* 第一行:菜名(左) + 辣度(右) */
+.dish__top {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+/* 第二行:价格(左) + 操作区(右) */
+.dish__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 .dish__name {
   font-size: 16px;
@@ -262,20 +270,20 @@ const onClick = (item: MenuItem) => {
   overflow: hidden;
   word-break: break-all;
   line-height: 1.35;
+  flex: 1;
+  min-width: 0;
 }
 .dish__price {
   font-size: 16px;
   font-weight: 700;
   color: var(--doubao-primary);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
-/* 辣度角标(卡片右上角,半透明红底 + "辣"字 + 红色辣椒图标) */
+/* 辣度角标(第一行右侧,"辣"字 + 红色辣椒图标) */
 .dish__spice-badge {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  z-index: 3;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 2px;
