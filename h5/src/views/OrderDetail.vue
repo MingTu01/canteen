@@ -205,7 +205,6 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
         <van-action-bar-button
           v-if="isPending && canCancel"
           type="danger"
-          plain
           text="取消订单"
           @click="onCancel"
         />
@@ -374,10 +373,10 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
   }
 }
 
-/* 取消订单按钮:plain danger 模式下 vant 未正确覆盖背景,
-   导致红底红字看不到文字,强制背景透明 + 文字红色 */
-:deep(.van-action-bar-button--danger.van-button--plain) {
-  color: #{$brand-danger} !important;
-  background: transparent !important;
+/* 取消订单按钮:红底白字,文字放大15% */
+:deep(.van-action-bar-button--danger) {
+  color: #fff !important;
+  background: #{$brand-danger} !important;
+  font-size: calc(var(--van-action-bar-button-font-size, 16px) * 1.15) !important;
 }
 </style>
