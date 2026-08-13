@@ -34,8 +34,9 @@ export function useOrderConfig() {
     if (!force && loaded && loadedStoreId === (storeId ?? null)) return config.value
     try {
       const params = storeId ? { storeId } : undefined
-      // H5 axios 拦截器在 code===200 时已解包返回 body.data(即配置对象本身)
-      const d = await api.get('/system/order-config', { params })
+      // H5 axios 拦截器在 code===200 时已解包返回 body.data(即配置对象本身),
+      // 运行时 d 已是配置对象,但 TS 类型仍是 AxiosResponse,用 as any 断言绕过
+      const d = await api.get('/system/order-config', { params }) as any
       if (d && typeof d === 'object') {
         config.value = {
           // 0=不限制提前天数;负数或异常回退默认 7
