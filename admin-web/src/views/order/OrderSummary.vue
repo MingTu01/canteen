@@ -425,12 +425,9 @@ const generateImage = async () => {
       ctx.textBaseline = 'top'
       y += groupHeaderH
 
-      // --- 表头(使用该餐别的颜色) ---
-      ctx.fillStyle = g.mealColor
-      roundRect(ctx, padding, y, contentW, tableHeaderH, 10)
-      ctx.fill()
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 15px "PingFang SC", "Microsoft YaHei", sans-serif'
+      // --- 表头(去掉背景色,字体黑色加粗放大) ---
+      ctx.fillStyle = '#000000'
+      ctx.font = 'bold 17px "PingFang SC", "Microsoft YaHei", sans-serif'
       ctx.textBaseline = 'middle'
       ctx.fillText('菜品名称', padding + 18, y + tableHeaderH / 2)
       ctx.textAlign = 'right'
@@ -442,14 +439,9 @@ const generateImage = async () => {
       for (let i = 0; i < g.items.length; i++) {
         const it = g.items[i]
         const ry = y + i * rowH
-        // 斑马纹背景
-        if (i % 2 === 1) {
-          ctx.fillStyle = '#f8fafc'
-          ctx.fillRect(padding, ry, contentW, rowH)
-        }
-        // 菜品名(支持换行)
-        ctx.fillStyle = '#0f172a'
-        ctx.font = '16px "PingFang SC", "Microsoft YaHei", sans-serif'
+        // 菜品名(黑色加粗放大,支持换行)
+        ctx.fillStyle = '#000000'
+        ctx.font = 'bold 20px "PingFang SC", "Microsoft YaHei", sans-serif'
         ctx.textBaseline = 'middle'
         drawWrappedText(
           ctx,
@@ -459,9 +451,9 @@ const generateImage = async () => {
           colNameW - 36,
           20
         )
-        // 份数(加粗、餐别色)
-        ctx.fillStyle = g.mealColor
-        ctx.font = 'bold 18px "PingFang SC", "Microsoft YaHei", sans-serif'
+        // 份数(黑色加粗放大)
+        ctx.fillStyle = '#000000'
+        ctx.font = 'bold 23px "PingFang SC", "Microsoft YaHei", sans-serif'
         ctx.textAlign = 'right'
         ctx.fillText(String(it.quantity), padding + colNameW + colQtyW - 18, ry + rowH / 2)
         ctx.textAlign = 'left'
@@ -530,7 +522,7 @@ onMounted(() => {
   <Layout>
     <PageContainer
       title="订餐汇总"
-      description="按日期与餐次汇总各菜品订购数量,15:00 截止订餐后导出 Excel 交厨师备料。"
+      description="按日期与餐次汇总各菜品订购数量,截止订餐后导出 Excel 交厨师备料。"
     >
       <template #actions>
         <ElButton :icon="RefreshCw" :loading="loading" @click="fetchSummary">刷新</ElButton>
@@ -593,7 +585,7 @@ onMounted(() => {
 
         <div class="ml-auto flex items-center gap-2 text-xs text-text-muted">
           <ChefHat class="h-4 w-4" />
-          <span>次日订单截止时间:前一天 15:00</span>
+          <span>次日订单截止时间以前一天订餐配置为准</span>
         </div>
       </div>
 

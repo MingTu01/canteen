@@ -235,9 +235,9 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px dashed var(--doubao-border);
-  font-size: var(--fs-base);
+  font-size: 20px;
   color: var(--doubao-secondary-foreground);
 }
 .order-card__item:last-child {
@@ -245,6 +245,7 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
 }
 .order-card__dish {
   color: var(--doubao-foreground);
+  font-weight: 700;
 }
 .order-card__price {
   font-weight: 700;

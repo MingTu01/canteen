@@ -327,7 +327,7 @@ onUnmounted(() => {
                 <ChiliIcon
                   v-for="n in Number(it.spiceLevel ?? 0)"
                   :key="n"
-                  :size="16"
+                  :size="20"
                 />
               </span>
               <span class="pickup-info__dish-qty">×{{ it.quantity }}</span>
@@ -529,7 +529,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 14px 18px;
+  padding: 18px 22px;
   border-radius: var(--doubao-radius-sm);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -538,10 +538,10 @@ onUnmounted(() => {
 .pickup-info__spice-tag {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px 8px;
+  gap: 3px;
+  padding: 4px 10px;
   border-radius: 6px;
-  font-size: var(--fs-sm);
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
@@ -553,7 +553,7 @@ onUnmounted(() => {
 .pickup-info__dish-name {
   flex: 1;
   min-width: 0;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 700;
   color: #ffffff;
   line-height: 1.3;
@@ -566,19 +566,21 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 .pickup-info__dish-qty {
-  font-size: var(--fs-lg);
+  font-size: 24px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.95);
+  font-variant-numeric: tabular-nums;
 }
 .pickup-info__dish-price {
-  font-size: var(--fs-base);
+  font-size: 20px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
-  min-width: 64px;
+  color: rgba(255, 255, 255, 0.8);
+  min-width: 72px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .pickup-info__empty {
   font-size: var(--fs-lg);

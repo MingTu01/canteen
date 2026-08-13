@@ -540,7 +540,7 @@ watch(menuInvalidated, (v) => {
                           aria-label="减少"
                           @click="onCartDec(it)"
                         >
-                          <Minus :size="14" stroke-width="2.5" />
+                          <Minus :size="20" stroke-width="2.5" />
                         </button>
                         <span class="cart-modal__qty-num">{{ it.quantity }}</span>
                         <button
@@ -548,14 +548,14 @@ watch(menuInvalidated, (v) => {
                           aria-label="增加"
                           @click="onCartInc(it)"
                         >
-                          <Plus :size="14" stroke-width="2.5" />
+                          <Plus :size="20" stroke-width="2.5" />
                         </button>
                         <button
                           class="cart-modal__remove btn-press"
                           aria-label="删除"
                           @click="onCartRemove(it)"
                         >
-                          <Trash2 :size="14" stroke-width="2.5" />
+                          <Trash2 :size="18" stroke-width="2.5" />
                         </button>
                       </div>
                     </div>
@@ -850,8 +850,8 @@ watch(menuInvalidated, (v) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0;
-  font-size: var(--fs-base);
+  padding: 10px 0;
+  font-size: 18px;
   color: var(--doubao-secondary-foreground);
 }
 .cart-modal__dish-info {
@@ -859,14 +859,14 @@ watch(menuInvalidated, (v) => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .cart-modal__dish-name {
-  font-weight: 400;
+  font-weight: 700;
   color: var(--doubao-foreground);
 }
 .cart-modal__dish-price {
-  font-size: var(--fs-xs);
+  font-size: 14px;
   color: var(--doubao-muted-foreground);
 }
 
@@ -874,13 +874,13 @@ watch(menuInvalidated, (v) => {
 .cart-modal__ctrl {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
 }
 .cart-modal__qty-num {
-  min-width: 20px;
+  min-width: 24px;
   text-align: center;
-  font-size: var(--fs-base);
+  font-size: 18px;
   font-weight: 700;
   color: var(--doubao-foreground);
   font-variant-numeric: tabular-nums;
@@ -889,8 +889,8 @@ watch(menuInvalidated, (v) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: none;
   cursor: pointer;
@@ -911,8 +911,8 @@ watch(menuInvalidated, (v) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   margin-left: 4px;
   border-radius: 50%;
   background: transparent;

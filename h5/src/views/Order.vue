@@ -64,6 +64,13 @@ let navTimer: ReturnType<typeof setTimeout> | null = null
 /** 组件是否处于 keep-alive 激活状态(SSE 菜单刷新仅在激活时执行) */
 let isComponentActive = false
 
+/**
+ * 响应式时间戳:每分钟更新一次,触发 dateList 等 computed 重新计算。
+ * 解决"过了截止时间但 computed 不重新计算"的问题(dateList 中 new Date() 非响应式)。
+ */
+const nowTick = ref(Date.now())
+let nowTickTimer: ReturnType<typeof setInterval> | null = null
+
 /** 已配置菜单的日期集合(yyyy-MM-dd) */
 const menuDates = ref<Set<string>>(new Set())
 /** 餐别时段配置(用于判断"过点不订") */
@@ -116,16 +123,16 @@ const mealDotColor = mealDotColorFn
 
 /** 判断指定日期+餐别是否可订餐 */
 const isMealOrderable = (date: string, _mealType: number): boolean => {
-  // 用配置驱动的截止时间判断:
-  // - 今天及之前:截止时间(昨天15:00)已过 → 不可订
-  // - 明天:截止时间是今天15:00 → 15:00前可订
-  // - 后天及以后:可订(不限提前天数,只要发布了菜单即可)
+  // 读取 nowTick.value 确保过了截止时间后 computed 能重新计算
+  void nowTick.value
   return isOrderableByDeadline(date, new Date())
 }
 
 /** 判断指定日期是否可订餐 */
 const isDateOrderable = (date: string): boolean => {
   if (!menuDates.value.has(date)) return false
+  // 读取 nowTick.value 确保过了截止时间后 computed 能重新计算
+  void nowTick.value
   return isOrderableByDeadline(date, new Date())
 }
 
@@ -772,6 +779,10 @@ onMounted(async () => {
   await loadConfig(authStore.storeId)
   await Promise.all([loadDiningTimes(), fetchOrderedOrders()])
   await resetToTodayAndLoad()
+  // 每分钟刷新 nowTick,触发 dateList computed 重新计算(过了截止时间自动隐藏)
+  if (!nowTickTimer) {
+    nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 60_000)
+  }
 })
 
 onActivated(async () => {
@@ -781,9 +792,15 @@ onActivated(async () => {
     firstMount = false
     return
   }
-  // keep-alive 激活(从其他页切回订餐页):重新拉取已下单订单 + 重置到当天并重新加载
+  // keep-alive 激活(从其他页切回订餐页):强制重新加载配置(管理员可能修改了截止时间)
+  await loadConfig(authStore.storeId, true)
+  // 立即刷新 nowTick(过了截止时间后切回页面能立即生效)
+  nowTick.value = Date.now()
   void fetchOrderedOrders()
   await resetToTodayAndLoad()
+  if (!nowTickTimer) {
+    nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 60_000)
+  }
 })
 
 /**
@@ -838,11 +855,20 @@ const cleanupNavAndObserver = () => {
 onDeactivated(() => {
   isComponentActive = false
   cleanupNavAndObserver()
+  // 失活时暂停定时器(切回时 onActivated 会重建)
+  if (nowTickTimer) {
+    clearInterval(nowTickTimer)
+    nowTickTimer = null
+  }
 })
 
 onBeforeUnmount(() => {
   isComponentActive = false
   cleanupNavAndObserver()
+  if (nowTickTimer) {
+    clearInterval(nowTickTimer)
+    nowTickTimer = null
+  }
 })
 </script>
 
@@ -955,7 +981,7 @@ onBeforeUnmount(() => {
                       'dish-card--ordered': isMealLocked(d.date, section.type) && !!orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                       'dish-card--locked': isMealLocked(d.date, section.type) && !orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                     }"
-                    @click="iv.dish && iv.dish.status !== 0 && !isMealLocked(d.date, section.type) && getQty(iv.dish.id, d.date, section.type) === 0 && handleAdd(iv.dish, d.date, section.type)"
+                    @click="iv.dish && iv.dish.status !== 0 && !isMealLocked(d.date, section.type) && (getQty(iv.dish.id, d.date, section.type) === 0 ? handleAdd(iv.dish, d.date, section.type) : handleDecrease(iv.dish.id, d.date, section.type))"
                   >
                     <!-- 第一行:菜名(左) + 辣度(右) -->
                     <div class="dish-card__top">

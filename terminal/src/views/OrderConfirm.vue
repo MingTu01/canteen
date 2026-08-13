@@ -392,9 +392,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--fs-base);
-  color: var(--doubao-secondary-foreground);
-  padding: 4px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--doubao-card-foreground);
+  padding: 6px 0;
+}
+.confirm__dish-name {
+  font-weight: 700;
 }
 .confirm__dish-price {
   font-weight: 700;
@@ -402,12 +406,12 @@ onMounted(() => {
 }
 .confirm__qty {
   display: inline-block;
-  margin-left: 6px;
-  padding: 1px 8px;
+  margin-left: 8px;
+  padding: 2px 10px;
   border-radius: 999px;
   background: var(--doubao-muted);
   color: var(--doubao-secondary-foreground);
-  font-size: var(--fs-xs);
+  font-size: 16px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }

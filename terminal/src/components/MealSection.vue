@@ -4,7 +4,7 @@
  *
  * 对齐 H5 Order.vue 的横条卡片结构:
  * - 餐别胶囊标题(按餐别配色:早橙/午绿/晚紫)
- * - 菜品列表(单列横条:左侧菜名+价格,右侧操作区,整卡可点 +1)
+ * - 菜品列表(单列横条:左侧菜名+价格,右侧操作区,整卡可点:首次+1,再次-1)
  * - 辣度角标(卡片右上角,"辣"字 + 按级别 1-3 个辣椒)
  * - 支持"已订餐锁定":锁定时整块不可加菜,已订菜品框出 + 显示固定数量(像购物车那样,但不可调)
  *
@@ -59,15 +59,19 @@ const orderedQty = (dishId: number) => props.orderedItems?.get(dishId) ?? 0
 const spiceOf = (item: MenuItem) => item.spiceLevel ?? 0
 
 /**
- * 点击菜品卡片:仅在数量为 0 时整卡 +1(首次选择)。
- * 数量 > 0 时整卡不响应,必须点 + 按钮增加,避免误操作。
- * 锁定/已订状态不响应。
+ * 点击菜品卡片(对齐 H5 交互):
+ * - 数量为 0 时:整卡点击 +1(首次选择)
+ * - 数量 > 0 时:整卡点击 -1(再次点击减一份)
+ * - 加数量只能点 + 按钮,避免误操作
+ * - 锁定/已订状态不响应
  */
 const onClick = (item: MenuItem) => {
   if (props.locked) return
-  // 数量 > 0 时整卡不响应,只能点 + 按钮增加
-  if (props.getQuantity(item.dishId, props.mealType) > 0) return
-  emit('inc', item)
+  if (props.getQuantity(item.dishId, props.mealType) === 0) {
+    emit('inc', item)
+  } else {
+    emit('dec', item)
+  }
 }
 </script>
 
@@ -130,7 +134,7 @@ const onClick = (item: MenuItem) => {
           </div>
           <!-- 未锁定时:数量调整 -->
           <div v-else-if="!locked" class="dish__action" @click.stop>
-            <!-- 数量 > 0:步进器(只能点按钮,整卡不可点) -->
+            <!-- 数量 > 0:步进器(+ 按钮增加,整卡或 - 按钮减少) -->
             <template v-if="getQuantity(item.dishId, mealType) > 0">
               <button
                 type="button"
@@ -138,7 +142,7 @@ const onClick = (item: MenuItem) => {
                 aria-label="减少"
                 @click.stop="emit('dec', item)"
               >
-                <Minus :size="16" stroke-width="2.5" />
+                <Minus :size="22" stroke-width="2.5" />
               </button>
               <span class="dish__step-num">{{ getQuantity(item.dishId, mealType) }}</span>
               <button
@@ -147,7 +151,7 @@ const onClick = (item: MenuItem) => {
                 aria-label="增加"
                 @click.stop="emit('inc', item)"
               >
-                <Plus :size="16" stroke-width="2.5" />
+                <Plus :size="22" stroke-width="2.5" />
               </button>
             </template>
             <!-- 数量为 0:整卡可点 +1,这里放一个 + 号作为视觉提示 -->
@@ -158,7 +162,7 @@ const onClick = (item: MenuItem) => {
               aria-label="加入购物车"
               @click.stop="emit('inc', item)"
             >
-              <Plus :size="18" stroke-width="2.5" />
+              <Plus :size="24" stroke-width="2.5" />
             </button>
           </div>
         </div>
@@ -211,8 +215,8 @@ const onClick = (item: MenuItem) => {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 16px 18px;
   background: var(--doubao-card);
   border: 1px solid var(--doubao-border);
   border-radius: var(--doubao-radius);
@@ -225,12 +229,12 @@ const onClick = (item: MenuItem) => {
 }
 .dish--selected {
   border: 2px solid var(--doubao-primary);
-  padding: 11px 13px;
+  padding: 15px 17px;
 }
 /* 已订餐菜品:绿色框 + 浅绿背景,显示固定数量,不可再加 */
 .dish--ordered {
   border: 2px solid var(--doubao-success, #07c160);
-  padding: 11px 13px;
+  padding: 15px 17px;
   background: rgba(7, 193, 96, 0.08);
   cursor: not-allowed;
 }
@@ -248,7 +252,7 @@ const onClick = (item: MenuItem) => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
 /* 第二行:价格(左) + 操作区(右) */
@@ -256,11 +260,11 @@ const onClick = (item: MenuItem) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
 .dish__name {
-  font-size: 16px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--doubao-card-foreground);
   /* 最多 2 行,超出省略号 */
@@ -269,12 +273,12 @@ const onClick = (item: MenuItem) => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-all;
-  line-height: 1.35;
+  line-height: 1.3;
   flex: 1;
   min-width: 0;
 }
 .dish__price {
-  font-size: 16px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--doubao-primary);
   font-variant-numeric: tabular-nums;
@@ -286,15 +290,15 @@ const onClick = (item: MenuItem) => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px 6px;
+  gap: 3px;
+  padding: 4px 8px;
   background: rgba(239, 68, 68, 0.08);
   border-radius: 8px;
   color: #ef4444;
   line-height: 1;
 }
 .dish__spice-label {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1;
 }
@@ -304,12 +308,12 @@ const onClick = (item: MenuItem) => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .dish__step-num {
-  min-width: 20px;
+  min-width: 28px;
   text-align: center;
-  font-size: 16px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--doubao-foreground);
   font-variant-numeric: tabular-nums;
@@ -318,8 +322,8 @@ const onClick = (item: MenuItem) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   cursor: pointer;
@@ -346,8 +350,8 @@ const onClick = (item: MenuItem) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);
@@ -367,7 +371,7 @@ const onClick = (item: MenuItem) => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-radius: 999px;
   background: var(--doubao-success, #07c160);
   color: #fff;
@@ -375,10 +379,10 @@ const onClick = (item: MenuItem) => {
   font-variant-numeric: tabular-nums;
 }
 .dish__ordered-num {
-  font-size: var(--fs-base);
+  font-size: 20px;
 }
 .dish__ordered-label {
-  font-size: var(--fs-xs);
+  font-size: 16px;
   font-weight: 700;
   opacity: 0.9;
 }
