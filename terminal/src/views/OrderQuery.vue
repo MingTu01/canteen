@@ -18,13 +18,13 @@
  * - 后端 getOrdersByEmployee 可能未填充 items(旧版容器),前端对 items 为空的订单
  *   批量调用 GET /order/{id} 补充菜品明细(getOrderDetail 返回 {order, items})
  */
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { loadConfig as loadTerminalConfig } from '@/api'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
 import { useOrderConfig } from '@/composables/useOrderConfig'
-import { toDateKey, dateWindow } from '@/utils'
+import { toDateKey, dateWindow, shortDate, dateRelLabel } from '@/utils'
 import { menuInvalidated } from '@/utils/cache'
 import TopBar from '@/components/TopBar.vue'
 import DatePicker from '@/components/DatePicker.vue'
@@ -45,14 +45,23 @@ const futureDatesAll = dateWindow(today, 31, 1) // [today, today+1, ..., today+3
 const pastDatesAll = dateWindow(today, 31, -1).slice(1) // [today-1, ..., today-30]
 const allDates = [...futureDatesAll, ...pastDatesAll]
 
-/** 默认 sidebar 窗口:今天 + 未来10天(含今天共11天) */
-const defaultWindow = futureDatesAll.slice(0, 11) // [today, today+1, ..., today+10]
+/** 排序后的全部日期(过去30天 → 今天 → 未来30天,升序),供 sidebar + 堆叠渲染 */
+const sortedDates = computed(() => [...allDates].sort())
 
 const orders = ref<any[]>([])
 const canceling = ref<number | null>(null)
 const loading = ref(false)
 
-const selectedDate = ref('')
+/** 右侧内容区滚动容器(用于 scroll 事件监听 + 滚动控制) */
+const contentRef = ref<HTMLElement | null>(null)
+/** 当前可视日期(滚动时动态更新,驱动左侧栏高亮 + sticky 日期指示器) */
+const visibleDate = ref<string>('')
+/** 每个日期 section 的 DOM 引用,用于滚动定位 + 可视检测 */
+const daySectionRefs: Record<string, HTMLElement | null> = {}
+/** scroll 事件节流时间戳 */
+let lastScrollCalcTime = 0
+/** 程序滚动标志(点击左侧栏跳转时屏蔽可视日期更新,避免跳动) */
+let isProgrammaticScroll = false
 
 useIdleTimer(() => {
   resetOrderFlow()
@@ -72,6 +81,9 @@ const availableSet = computed(() => {
   }
   return s
 })
+
+/** 有订单的日期列表(按时间升序,用于堆叠渲染) */
+const dateList = computed(() => sortedDates.value.filter((d) => availableSet.value.has(d)))
 
 /** 各日期已有订单的餐别列表(用于 DateSidebar 圆点提示) */
 const mealTypesMap = computed(() => {
@@ -104,25 +116,63 @@ const orderCancellable = (order: any) => {
   return isCancellableByDeadline(order.date, new Date())
 }
 
+/* ============ 无极滑动切换日期(单页堆叠模式,对齐 H5 Order.vue) ============ */
+/** 设置日期 section 的 DOM 引用(供 v-for :ref 回调用) */
+const setDaySectionRef = (date: string, el: Element | null): void => {
+  daySectionRefs[date] = (el as HTMLElement) || null
+}
+
 /**
- * sidebar 日期列表:
- * - 显示连续日期范围(今天+未来10天),让用户能完整查看每天的订餐情况
- * - 有订单的日期通过 DateSidebar 圆点标记,无订单的显示空状态
- * - 如果选中日期不在默认窗口内(如过去日期),将其加入窗口
+ * 内容区滚动事件处理(单页堆叠模式):
+ * - 节流计算当前可视日期(触发线算法)→ 更新 visibleDate
+ * - 程序滚动期间(点击左侧栏跳转)忽略,避免与平滑滚动冲突
  */
-const sidebarDates = computed(() => {
-  const set = new Set(defaultWindow)
-  // 选中日期始终加入窗口(支持过去日期查看)
-  if (selectedDate.value) set.add(selectedDate.value)
-  const list = Array.from(set)
-  // 排序:今天永远排第一,其余按日期升序(27, 28, 29, 30...)
-  list.sort((a, b) => {
-    if (a === today) return -1
-    if (b === today) return 1
-    return a < b ? -1 : a > b ? 1 : 0
-  })
-  return list
-})
+const handleContentScroll = (): void => {
+  if (isProgrammaticScroll) return
+  const now = Date.now()
+  if (now - lastScrollCalcTime < 100) return // 100ms 节流
+  lastScrollCalcTime = now
+  updateVisibleDate()
+}
+
+/**
+ * 计算当前可视日期(触发线算法,稳定不跳动)。
+ * 触发线位于容器顶部下方 60px(sticky 日期指示器之下):
+ * - 若触发线落在某 section 内 → 选定该日期
+ * - 否则(触发线在 section 之间空隙)→ 选触发线上方最近的 section
+ */
+const updateVisibleDate = (): void => {
+  const container = contentRef.value
+  if (!container) return
+  const containerTop = container.getBoundingClientRect().top
+  const TRIGGER_Y = 60
+  let bestDate = ''
+  let bestTop = -Infinity
+  for (const d of dateList.value) {
+    const el = daySectionRefs[d]
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    const top = rect.top - containerTop
+    const bottom = rect.bottom - containerTop
+    // 触发线在 section 内:直接选定,跳出循环(稳定锚点)
+    if (top <= TRIGGER_Y && bottom > TRIGGER_Y) {
+      bestDate = d
+      break
+    }
+    // 否则记录"触发线上方的最后一个 section"(section 已完全滚过触发线)
+    if (top <= TRIGGER_Y && top >= bestTop) {
+      bestTop = top
+      bestDate = d
+    }
+  }
+  if (bestDate && bestDate !== visibleDate.value) {
+    visibleDate.value = bestDate
+  }
+}
+
+/** sticky 日期指示器:当前可视日期的数字日期 + 相对标签 */
+const visibleDateNumber = computed(() => shortDate(visibleDate.value))
+const visibleDateRel = computed(() => dateRelLabel(visibleDate.value))
 
 const fetchOrders = async () => {
   loading.value = true
@@ -200,14 +250,29 @@ const confirmCancel = async () => {
   }
 }
 
+/**
+ * 点击左侧 DateSidebar / 头部 DatePicker:平滑滚动到对应日期 section。
+ * 单页堆叠模式:所有日期已在 DOM 中,滚动即可(不切换、不替换数据)。
+ */
+const scrollToDate = (date: string): void => {
+  const el = daySectionRefs[date]
+  if (!el) return
+  // 屏蔽滚动期间的可视日期更新,避免与平滑滚动冲突
+  isProgrammaticScroll = true
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  visibleDate.value = date
+  // 平滑滚动结束后恢复监听(500ms 足够覆盖大多数滚动时长)
+  setTimeout(() => { isProgrammaticScroll = false }, 500)
+}
+
 /** DateSidebar 头部 DatePicker 选中某日期(可能是过去日期) */
 const onSelectDate = (key: string) => {
-  selectedDate.value = key
+  scrollToDate(key)
 }
 
 /** 左侧 DateSidebar 列表选中某日期 */
 const onSelectSidebar = (key: string) => {
-  selectedDate.value = key
+  scrollToDate(key)
 }
 
 onMounted(async () => {
@@ -217,12 +282,20 @@ onMounted(async () => {
   }
   // 先加载订餐截止配置(按门店,驱动取消按钮可见性)
   await loadConfig(loadTerminalConfig()?.storeId ?? null)
-  selectedDate.value = today
   await fetchOrders()
-  // 今日无订单,自动选中默认窗口内最近的有订单日期
-  if (!availableSet.value.has(selectedDate.value)) {
-    const found = defaultWindow.find((d) => availableSet.value.has(d))
-    if (found) selectedDate.value = found
+  // 初始可视日期:今天有订单则今天,否则最近的有订单日期
+  let initDate = availableSet.value.has(today) ? today : ''
+  if (!initDate && dateList.value.length > 0) {
+    // 优先未来最近的有订单日期,否则过去最近
+    initDate = dateList.value.find((d) => d >= today) || dateList.value[dateList.value.length - 1]
+  }
+  if (initDate) {
+    visibleDate.value = initDate
+    // 即时滚动到初始日期(非平滑,避免初始动画抖动)
+    nextTick(() => {
+      const el = daySectionRefs[initDate as string]
+      if (el) el.scrollIntoView({ block: 'start' })
+    })
   }
 })
 
@@ -245,46 +318,73 @@ watch(menuInvalidated, (v) => {
     <!-- 左右布局:左侧 DateSidebar + 右侧订单卡片 -->
     <div class="query__body">
       <DateSidebar
-        :dates="sidebarDates"
-        :selected-date="selectedDate"
+        :dates="sortedDates"
+        :selected-date="visibleDate"
         :meal-types-for-date="mealTypesFor"
+        :available-set="availableSet"
         @select="onSelectSidebar"
       >
         <template #header>
           <DatePicker
             :dates="allDates"
-            :selected-date="selectedDate"
+            :selected-date="visibleDate"
             :available-set="availableSet"
             @select="onSelectDate"
           />
         </template>
       </DateSidebar>
 
-      <div class="query__content no-scrollbar">
+      <!-- 右侧内容区:所有有订单的日期垂直堆叠,上下滚动自然浏览,无切换动作 -->
+      <div
+        ref="contentRef"
+        class="query__content no-scrollbar"
+        @scroll.passive="handleContentScroll"
+      >
         <!-- 加载中 -->
         <div v-if="loading" class="query__loading">
           <div class="query__spinner spinner"></div>
           <span>加载订单中...</span>
         </div>
 
-        <!-- 空状态:该日期无订单 -->
-        <div v-else-if="!availableSet.has(selectedDate)" class="query__empty">
+        <!-- 空状态:无任何订单 -->
+        <div v-else-if="dateList.length === 0" class="query__empty">
           <div class="query__empty-icon">📭</div>
-          <div class="query__empty-title">该日期无订单</div>
+          <div class="query__empty-title">暂无订单</div>
           <div class="query__empty-hint">请在左侧选择其他日期</div>
         </div>
 
-        <!-- 三餐订单卡片 -->
+        <!-- 所有有订单的日期垂直堆叠(单页滚动,无切换) -->
         <template v-else>
-          <OrderCard
-            v-for="t in mealTypes"
-            :key="t"
-            :meal-type="t"
-            :order="orderFor(selectedDate, t) || null"
-            :canceling="canceling === orderFor(selectedDate, t)?.id"
-            :cancellable="orderCancellable(orderFor(selectedDate, t))"
-            @cancel="onCancelClick"
-          />
+          <!-- 顶部 sticky 日期指示器:跟随当前可视日期吸顶显示 -->
+          <div class="query__sticky-date">
+            <span class="query__sticky-num">{{ visibleDateNumber }}</span>
+            <span class="query__sticky-rel">{{ visibleDateRel }}</span>
+          </div>
+
+          <section
+            v-for="d in dateList"
+            :key="d"
+            :ref="(el) => setDaySectionRef(d, el as Element | null)"
+            class="day-section"
+            :data-date="d"
+          >
+            <!-- 日期标题胶囊(数字日期 + 今天/明天/周X) -->
+            <div class="day-section__header">
+              <span class="day-section__date-num">{{ shortDate(d) }}</span>
+              <span class="day-section__date-rel">{{ dateRelLabel(d) }}</span>
+            </div>
+
+            <!-- 三餐订单卡片 -->
+            <OrderCard
+              v-for="t in mealTypes"
+              :key="t"
+              :meal-type="t"
+              :order="orderFor(d, t) || null"
+              :canceling="canceling === orderFor(d, t)?.id"
+              :cancellable="orderCancellable(orderFor(d, t))"
+              @cancel="onCancelClick"
+            />
+          </section>
         </template>
       </div>
     </div>
@@ -331,7 +431,84 @@ watch(menuInvalidated, (v) => {
   flex: 1;
   overflow-y: auto;
   min-width: 0;
-  padding: 20px 32px 80px;
+  overscroll-behavior: contain;
+  /* 顶部无 padding:让 sticky 日期指示器吸顶 */
+  padding: 0 32px 80px;
+}
+
+/* ============ 顶部 sticky 日期指示器(跟随当前可视日期吸顶) ============ */
+.query__sticky-date {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 0;
+  margin-bottom: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 70%, rgba(255, 255, 255, 0));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.query__sticky-num,
+.query__sticky-rel {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 16px;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+.query__sticky-num {
+  background: rgba(0, 101, 253, 0.12);
+  color: var(--doubao-primary);
+  border: 1px solid rgba(0, 101, 253, 0.25);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.query__sticky-rel {
+  background: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+  border: 1px solid var(--doubao-primary);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* ============ 日期 section(单页堆叠模式:每个日期一个 section) ============ */
+.day-section {
+  padding: 4px 0 8px;
+}
+.day-section__header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 16px 0 12px;
+}
+.day-section__date-num,
+.day-section__date-rel {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 18px;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  border-radius: 999px;
+}
+.day-section__date-num {
+  color: var(--doubao-secondary-foreground);
+  background: var(--doubao-card);
+  border: 1px solid var(--doubao-border);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.day-section__date-rel {
+  color: var(--doubao-primary);
+  background: rgba(0, 101, 253, 0.08);
+  border: 1px solid rgba(0, 101, 253, 0.2);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 .query__loading,
 .query__empty {

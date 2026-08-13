@@ -279,7 +279,11 @@ class TerminalWindow(QWidget):
         print(f'[Window] 窗口已创建(模式: {"全屏" if self._is_fullscreen else "窗口"}),加载: {self.url}')
 
     def _on_render_crash(self, termination_type, exit_code):
-        """渲染进程崩溃诊断。"""
+        """渲染进程崩溃诊断 + 自动恢复。
+
+        渲染进程(QtWebEngineProcess.exe)崩溃会导致页面白屏/网络失效,
+        终端需 7×24 运行,因此崩溃后自动 reload 页面而非仅打印日志。
+        """
         type_map = {
             0: 'Normal(正常结束)',
             1: 'Abnormal(异常退出)',
@@ -289,6 +293,23 @@ class TerminalWindow(QWidget):
         type_str = type_map.get(termination_type, f'未知({termination_type})')
         print(f'[WebEngine ERROR] 渲染进程崩溃! 类型={type_str} 退出码={exit_code}')
         print(f'[WebEngine ERROR] 可能原因: GPU 驱动问题 / 资源加载失败 / 沙箱冲突')
+        print(f'[WebEngine ERROR] 3秒后自动恢复页面...')
+        QTimer.singleShot(3000, self._recover_render)
+
+    def _recover_render(self):
+        """恢复渲染进程:重新加载当前页面。
+
+        setUrl(url) 会触发 QtWebEngine 重建渲染进程并重新加载页面,
+        localStorage / IndexedDB 持久化数据不受影响。
+        恢复失败时延迟 5 秒重试,避免连续异常导致日志刷屏。
+        """
+        try:
+            url = self.view.url()
+            self.view.setUrl(url)
+            print('[WebEngine] 页面已自动恢复')
+        except Exception as e:
+            print(f'[WebEngine] 恢复失败: {e}, 5秒后重试')
+            QTimer.singleShot(5000, self._recover_render)
 
     def keyPressEvent(self, event: QKeyEvent):
         """键盘事件:Alt+F4 / Ctrl+Shift+Q 退出。"""
@@ -482,6 +503,53 @@ def start_update_check(window, card_reader):
     check_thread.setParent(window)
 
 
+# ===== 守护定时器回调:读卡器线程监控 / 网络连通性检测 =====
+def check_card_reader(reader):
+    """检查读卡器线程是否存活,异常退出则自动重启。
+
+    CardReader 基于 threading.Thread(非 QThread),没有 is_running()/_stop 接口,
+    这里依据内部状态判断:
+      - 正常运行:reader._thread 不为 None 且 is_alive(),reader._running=True
+      - 主动 stop():reader._running=False, reader._thread=None(如更新流程/退出)
+      - 线程异常崩溃但未主动 stop:reader._running 仍为 True,但线程已死
+    仅在"_running=True 但线程已死"时重启,避免在主动 stop 或未启动时误重启。
+    """
+    thread = reader._thread
+    if reader._running and (thread is None or not thread.is_alive()):
+        print('[Watchdog] 读卡器线程异常退出,尝试重启...')
+        # 重置状态(与 stop() 一致),防止 start() 因 _running=True 提前返回
+        reader._running = False
+        reader._thread = None
+        reader._dll = None
+        try:
+            reader.start()
+        except Exception as e:
+            print(f'[Watchdog] 读卡器重启失败: {e}')
+
+
+def check_network(window):
+    """检测后端服务器连通性,断线时打印告警。
+
+    前端已有 SSE 重连机制(cache.ts),会自行显示离线提示并自动重连;
+    此处仅作后端连通性诊断日志。urlopen 放到后台线程执行,避免 5 秒
+    超时阻塞 Qt 主线程导致 UI 卡顿(终端为 7×24 触摸屏,主线程阻塞会
+    影响刷卡响应)。
+    """
+    def _ping():
+        try:
+            import urllib.request
+            cfg = read_full_config()
+            server_url = cfg.get('server_url', '').rstrip('/')
+            if not server_url:
+                return
+            urllib.request.urlopen(server_url + '/api/system/info', timeout=5)
+        except Exception as e:
+            print(f'[Watchdog] 后端不可达,前端将显示离线提示: {e}')
+
+    import threading
+    threading.Thread(target=_ping, daemon=True).start()
+
+
 def main():
     """主入口。"""
     # 启用 stdout 无缓冲,确保 print 立即输出(PyInstaller onedir 模式下默认全缓冲)
@@ -653,6 +721,20 @@ def main():
     # 延迟启动,确保前端已就绪
     from PyQt5.QtCore import QTimer
     QTimer.singleShot(2000, card_reader.start)
+
+    # 10.1 守护定时器:读卡器心跳监控(每 30 秒检查一次,异常退出则自动重启)
+    #     parent=window 防止 QTimer 被 GC 回收导致定时器停止
+    card_watchdog = QTimer(window)
+    card_watchdog.timeout.connect(lambda: check_card_reader(card_reader))
+    card_watchdog.start(30000)
+    print('[Init] 已启动读卡器守护定时器(30秒/次)')
+
+    # 10.2 守护定时器:网络连通性检测(每 60 秒一次,断线时打印告警)
+    #     前端 SSE 会自行显示离线提示并重连,此处仅作诊断
+    net_watchdog = QTimer(window)
+    net_watchdog.timeout.connect(lambda: check_network(window))
+    net_watchdog.start(60000)
+    print('[Init] 已启动网络心跳定时器(60秒/次)')
 
     print('[Init] 初始化完成,进入事件循环')
     print('-' * 60)

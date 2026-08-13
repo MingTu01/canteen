@@ -41,6 +41,64 @@ const size = ref(20)
 const loading = ref(false)
 const exporting = ref(false)
 
+/** 扁平化后的菜品行:同一订单的菜品拆成多行,重点是哪个菜点了几份 */
+interface DishRow {
+  key: string
+  orderId?: number
+  orderNo?: string
+  date: string
+  employeeName: string
+  departmentName: string
+  cardNo: string
+  mealType: number
+  totalAmount: number
+  updatedAt?: string
+  status: number
+  orderSource?: number
+  dishName: string
+  price: number
+  quantity: number
+  isFirstRow: boolean
+  _order: OrderRow
+}
+
+const flatRows = computed<DishRow[]>(() => {
+  const result: DishRow[] = []
+  for (const o of orders.value) {
+    const items = o.items && o.items.length > 0
+      ? o.items
+      : [{ dishName: '—', price: 0, quantity: 0 } as OrderItem]
+    items.forEach((item, idx) => {
+      result.push({
+        key: `${o.id ?? 0}-${idx}`,
+        orderId: o.id,
+        orderNo: o.orderNo,
+        date: o.date,
+        employeeName: o.employeeName ?? `#${o.employeeId}`,
+        departmentName: o.departmentName ?? '—',
+        cardNo: o.cardNo ?? '—',
+        mealType: o.mealType,
+        totalAmount: o.totalAmount,
+        updatedAt: o.updatedAt,
+        status: o.status,
+        orderSource: o.orderSource,
+        dishName: item.dishName ?? '—',
+        price: item.price ?? 0,
+        quantity: item.quantity ?? 0,
+        isFirstRow: idx === 0,
+        _order: o,
+      })
+    })
+  }
+  return result
+})
+
+/** 格式化结帐时间(仅已完成订单显示) */
+const formatCheckoutTime = (row: { status?: number; updatedAt?: string }) => {
+  if (row.status !== 2 || !row.updatedAt) return '—'
+  return row.updatedAt.replace('T', ' ').substring(0, 19)
+}
+
 const filters = reactive({
   status: undefined as number | undefined,
   mealType: undefined as number | undefined,
@@ -138,29 +196,45 @@ const handleExport = async () => {
       ElMessage.warning('当前筛选条件下没有可导出的订单')
       return
     }
-    const exportData = rows.map((o, idx) => ({
-      '序号': idx + 1,
-      '订单号': o.orderNo ?? '',
-      '卡号': o.cardNo ?? '',
-      '员工姓名': o.employeeName ?? `#${o.employeeId}`,
-      '日期': o.date ?? '',
-      '餐次': mealLabel(o.mealType),
-      '订单来源': sourceLabel(o.orderSource),
-      '金额': o.totalAmount ?? 0,
-      '状态': statusLabel(o.status),
-      '下单时间': o.createdAt ?? '',
-    }))
+    // 按菜品拆行导出(同订单号菜品拆出来)
+    const exportData: Record<string, string | number>[] = []
+    let seq = 0
+    for (const o of rows) {
+      const items = o.items && o.items.length > 0
+        ? o.items
+        : [{ dishName: '', price: 0, quantity: 0 } as OrderItem]
+      items.forEach((item, idx) => {
+        seq++
+        exportData.push({
+          '序号': seq,
+          '订单号': o.orderNo ?? '',
+          '日期': o.date ?? '',
+          '姓名': o.employeeName ?? `#${o.employeeId}`,
+          '部门': o.departmentName ?? '',
+          '会员号': o.cardNo ?? '',
+          '餐次': mealLabel(o.mealType),
+          '菜名': item.dishName ?? '',
+          '单价': item.price ?? 0,
+          '数量': item.quantity ?? 0,
+          '合计价格': idx === 0 ? (o.totalAmount ?? 0) : '',
+          '结帐时间': o.status === 2 && o.updatedAt ? o.updatedAt.replace('T', ' ').substring(0, 19) : '',
+          '订单状态': statusLabel(o.status),
+          '订单来源': sourceLabel(o.orderSource),
+        })
+      })
+    }
     const ws = XLSX.utils.json_to_sheet(exportData)
     // 列宽
     ws['!cols'] = [
-      { wch: 6 }, { wch: 22 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 8 },
-      { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
+      { wch: 6 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+      { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 20 },
+      { wch: 10 }, { wch: 12 },
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '订单列表')
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     XLSX.writeFile(wb, `订单列表_${dateStr}.xlsx`)
-    ElMessage.success(`已导出 ${rows.length} 条订单`)
+    ElMessage.success(`已导出 ${rows.length} 条订单(${exportData.length} 行菜品)`)
   } catch {
     /* 错误已由拦截器统一提示 */
   } finally {
@@ -284,61 +358,81 @@ watch(() => authStore.storeId, () => {
       <div class="card overflow-hidden">
         <ElTable
           v-loading="loading"
-          :data="orders"
+          :data="flatRows"
           style="width: 100%"
           :show-overflow-tooltip="true"
           highlight-current-row
-          row-key="id"
+          row-key="key"
           aria-label="订单列表"
-          @row-click="openDetail"
+          @row-click="(row: any) => openDetail(row._order as OrderRow)"
         >
           <ElTableColumn prop="orderNo" label="订单号" min-width="160" />
-          <ElTableColumn prop="cardNo" label="卡号" min-width="130" />
-          <ElTableColumn label="员工" min-width="110">
+          <ElTableColumn prop="date" label="日期" width="120" />
+          <ElTableColumn label="姓名" min-width="100">
+            <template #default="{ row }">{{ row.employeeName }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="部门" min-width="110">
+            <template #default="{ row }">{{ row.departmentName }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="会员号" min-width="130">
+            <template #default="{ row }">{{ row.cardNo }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="餐次" width="80" align="center">
+            <template #default="{ row }">{{ mealLabel(row.mealType) }}</template>
+          </ElTableColumn>
+          <ElTableColumn prop="dishName" label="菜名" min-width="140" />
+          <ElTableColumn label="单价" width="90" align="right">
+            <template #default="{ row }">¥{{ row.price }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="数量" width="70" align="center">
+            <template #default="{ row }">{{ row.quantity }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="合计价格" width="110" align="right">
             <template #default="{ row }">
-              {{ row.employeeName || `#${row.employeeId}` }}
+              <span v-if="row.isFirstRow" class="font-medium tabular-nums text-text">¥{{ row.totalAmount }}</span>
+              <span v-else class="text-text-muted">—</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn prop="date" label="日期" width="120" />
-          <ElTableColumn label="餐次" width="90" align="center">
-            <template #default="{ row }">{{ mealLabel(row.mealType) }}</template>
+          <ElTableColumn label="结帐时间" width="170" align="center">
+            <template #default="{ row }">
+              <span class="text-xs tabular-nums">{{ formatCheckoutTime(row) }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="订单状态" width="100" align="center">
+            <template #default="{ row }">
+              <StatusTag v-if="row.isFirstRow" :value="row.status" :map="ORDER_STATUS" />
+              <span v-else class="text-text-muted">—</span>
+            </template>
           </ElTableColumn>
           <ElTableColumn label="订单来源" width="110" align="center">
             <template #default="{ row }">
-              <StatusTag :value="row.orderSource ?? 0" :map="ORDER_SOURCE" />
+              <StatusTag v-if="row.isFirstRow" :value="row.orderSource ?? 0" :map="ORDER_SOURCE" />
+              <span v-else class="text-text-muted">—</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="金额" width="110" align="right">
+          <ElTableColumn label="操作" width="200" fixed="right" :show-overflow-tooltip="false">
             <template #default="{ row }">
-              <span class="font-medium tabular-nums text-text">¥{{ row.totalAmount }}</span>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="状态" width="100" align="center">
-            <template #default="{ row }">
-              <StatusTag :value="row.status" :map="ORDER_STATUS" />
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="操作" width="280" fixed="right" :show-overflow-tooltip="false">
-            <template #default="{ row }">
-              <ElButton size="small" :icon="Eye" @click.stop="openDetail(row as OrderRow)">详情</ElButton>
-              <ElButton
-                v-if="row.status === 1"
-                size="small"
-                type="success"
-                :icon="CheckCircle2"
-                @click.stop="handleComplete(row as OrderRow)"
-              >
-                完成
-              </ElButton>
-              <ElButton
-                v-if="row.status === 1"
-                size="small"
-                type="danger"
-                :icon="XCircle"
-                @click.stop="handleCancel(row as OrderRow)"
-              >
-                取消
-              </ElButton>
+              <template v-if="row.isFirstRow">
+                <ElButton size="small" :icon="Eye" @click.stop="openDetail(row._order as OrderRow)">详情</ElButton>
+                <ElButton
+                  v-if="row.status === 1"
+                  size="small"
+                  type="success"
+                  :icon="CheckCircle2"
+                  @click.stop="handleComplete(row._order as OrderRow)"
+                >
+                  完成
+                </ElButton>
+                <ElButton
+                  v-if="row.status === 1"
+                  size="small"
+                  type="danger"
+                  :icon="XCircle"
+                  @click.stop="handleCancel(row._order as OrderRow)"
+                >
+                  取消
+                </ElButton>
+              </template>
             </template>
           </ElTableColumn>
           <template #empty>

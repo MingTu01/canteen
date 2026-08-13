@@ -25,7 +25,7 @@
 #define MyAppNameEn "CanteenTerminal"
 ; 版本号默认值;build_installer.py 会从 VERSIONS.json 读取并通过 /DMyAppVersion 覆盖
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.17"
+  #define MyAppVersion "1.0.21"
 #endif
 #define MyAppPublisher "Enterprise Canteen System"
 #define MyAppExeName "canteen-terminal.exe"
@@ -86,6 +86,7 @@ Name: "startup"; Description: "开机自动启动"; GroupDescription: "附加选
 
 [Files]
 ; 主程序目录(PyInstaller onedir 产物,递归打包)
+; 包含 canteen-terminal.exe(主程序)与 watchdog.exe(守护进程,由 canteen-terminal.spec 一并构建)
 Source: "dist\canteen-terminal\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; 图标文件(打包到安装目录,供快捷方式和卸载程序使用)
@@ -97,7 +98,8 @@ Source: "remove_ch375_driver.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 ; CH375 驱动文件(只打包 INF/SYS/CAT/DLL,排除易被安全软件误报的第三方 EXE)
 ; 驱动安装由系统自带 pnputil 完成,不依赖第三方安装程序
-Source: "drivers\*"; DestDir: "{app}\drivers"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "SETUP.EXE,DRVSETUP64.exe"; Check: DriverFilesExist
+; 注意:不加 Check: DriverFilesExist,因为该函数检查目标路径,首次安装时文件未复制会返回 false
+Source: "drivers\*"; DestDir: "{app}\drivers"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "SETUP.EXE,DRVSETUP64.exe"
 
 [Icons]
 ; 开始菜单快捷方式(使用食堂主题图标)
@@ -107,8 +109,13 @@ Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"; IconFilename: "
 ; 桌面快捷方式(可选,使用食堂主题图标)
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\terminal_icon.ico"; Tasks: desktopicon
 
-; 开机自启(可选,注册到 HKLM Run)
-Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\terminal_icon.ico"; Tasks: startup
+; 开机自启(可选,注册到"开始菜单-启动"目录)
+; 自启目标为 watchdog.exe(守护进程)而非终端主程序:
+;   watchdog 启动后自动拉起 canteen-terminal.exe 并持续监控,崩溃时自动重启,
+;   实现 7×24 不间断运行。若改为"直接自启主程序 + 同时自启 watchdog",开机时
+;   双方都会尝试启动主程序,触发单实例 Mutex 冲突并弹出"已在运行"提示框。
+;   桌面/开始菜单快捷方式仍指向主程序,供手动启动/调试使用。
+Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\watchdog.exe"; IconFilename: "{app}\terminal_icon.ico"; Tasks: startup
 
 [Run]
 ; 安装 CH375 读卡器驱动 - 只使用系统自带 pnputil(不会触发安全软件拦截)
@@ -207,7 +214,10 @@ function InitializeSetup(): Boolean;
 var
     ResultCode: Integer;
 begin
-    // 先关闭正在运行的终端进程,避免其占用 config.json 导致备份失败
+    // 先关闭守护进程,避免其在主进程被结束后自动重启主进程(导致文件占用)
+    Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im watchdog.exe',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // 再关闭正在运行的终端进程,避免其占用 config.json 导致备份失败
     Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im canteen-terminal.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(1000);
@@ -242,7 +252,10 @@ var
     ResultCode: Integer;
     Msg: String;
 begin
-    // 强制结束终端进程(不存在时 taskkill 返回非零,忽略即可)
+    // 先关闭守护进程,避免其在主进程被结束后自动重启主进程(导致卸载文件被占用)
+    Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im watchdog.exe',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // 再强制结束终端进程(不存在时 taskkill 返回非零,忽略即可)
     Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im canteen-terminal.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // 等待 Windows 释放文件句柄(DLL 卸载有延迟)

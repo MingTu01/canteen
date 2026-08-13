@@ -17,9 +17,10 @@ import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
+import { CreditCard, Loader2, Camera, ScanLine, Search } from 'lucide-vue-next'
 
 import Modal from '@/components/Modal.vue'
+import OrderQueryModal from '@/components/OrderQueryModal.vue'
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
 import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
@@ -45,6 +46,9 @@ const ERROR_AUTO_CLOSE_DELAY = 5000
 /* 取餐成功提示(非阻塞,2 秒后自动消失) */
 const showSuccess = ref(false)
 const successMsg = ref('')
+
+/* 菜品查询弹窗(右下角浮动按钮触发) */
+const showOrderQuery = ref(false)
 
 let timer = 0
 let successTimer: ReturnType<typeof setTimeout> | null = null
@@ -168,6 +172,9 @@ useCardReader((cardNo) => {
   if (showError.value) {
     dismissError()
   }
+  if (showOrderQuery.value) {
+    showOrderQuery.value = false
+  }
   handleInput(cardNo)
 })
 
@@ -186,6 +193,7 @@ const {
     // 摄像头扫描到码:关闭弹窗并走统一输入处理
     // fromCamera=true:摄像头不接受纯卡号识别员工(防远程冒充)
     if (showError.value) dismissError()
+    if (showOrderQuery.value) showOrderQuery.value = false
     handleInput(code, true)
   },
   // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
@@ -311,6 +319,19 @@ onUnmounted(() => {
         {{ successMsg }}
       </div>
     </Transition>
+
+    <!-- 右下角浮动按钮:菜品查询 -->
+    <button
+      class="pickup-standby__query-btn btn-press"
+      aria-label="菜品查询"
+      @click="showOrderQuery = true"
+    >
+      <Search :size="26" />
+      <span class="pickup-standby__query-text">菜品查询</span>
+    </button>
+
+    <!-- 菜品查询弹窗 -->
+    <OrderQueryModal v-model="showOrderQuery" />
 
     <!-- 错误提示弹窗(5 秒自动消失,下一位刷卡也会关闭) -->
     <Modal
@@ -503,6 +524,36 @@ onUnmounted(() => {
 /* 竖屏适配 */
 @media (orientation: portrait) {
   .pickup-standby__main { gap: 32px; }
+}
+
+/* 右下角浮动按钮:菜品查询(玻璃态,与待机页风格统一) */
+.pickup-standby__query-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 22px 0 18px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+.pickup-standby__query-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.pickup-standby__query-text {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
 /* 低分辨率适配 */

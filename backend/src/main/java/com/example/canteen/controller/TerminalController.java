@@ -181,7 +181,7 @@ public class TerminalController {
         if (storeId == null) {
             throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
         }
-        Employee employee = employeeService.getEmployeeByCardNoAndStore(cardNo, storeId);
+        Employee employee = findEmployeeByCardNo(cardNo, storeId);
         if (employee == null) {
             throw new BusinessException("卡号不存在或非本食堂员工");
         }
@@ -194,6 +194,59 @@ public class TerminalController {
             }
         }
         return ApiResponse.success(vo);
+    }
+
+    /**
+     * 多格式卡号匹配:兼容 USB 读卡器(OUR_IDR.dll)和 HID 键盘模拟读卡器。
+     * 依次尝试:
+     *   1. 精确匹配
+     *   2. 去除前导零后匹配
+     *   3. 仅保留数字后匹配(HID 可能输出带分隔符的 WG26 格式)
+     *   4. 取后10位匹配(HID 可能输出更长的卡号)
+     *   5. 取后8位匹配
+     */
+    private Employee findEmployeeByCardNo(String cardNo, Long storeId) {
+        if (cardNo == null || cardNo.isBlank()) return null;
+        String trimmed = cardNo.trim();
+
+        // 1. 精确匹配
+        Employee emp = employeeService.getEmployeeByCardNoAndStore(trimmed, storeId);
+        if (emp != null) return emp;
+
+        // 2. 去除前导零后匹配
+        String noLeadingZeros = trimmed.replaceFirst("^0+", "");
+        if (!noLeadingZeros.isEmpty() && !noLeadingZeros.equals(trimmed)) {
+            emp = employeeService.getEmployeeByCardNoAndStore(noLeadingZeros, storeId);
+            if (emp != null) return emp;
+        }
+
+        // 3. 仅保留数字后匹配(HID 可能输出带分隔符的 WG26 格式,如 "123;45678")
+        String digitsOnly = trimmed.replaceAll("[^0-9]", "");
+        if (!digitsOnly.isEmpty() && !digitsOnly.equals(trimmed)) {
+            emp = employeeService.getEmployeeByCardNoAndStore(digitsOnly, storeId);
+            if (emp != null) return emp;
+            String digitsNoZeros = digitsOnly.replaceFirst("^0+", "");
+            if (!digitsNoZeros.isEmpty() && !digitsNoZeros.equals(digitsOnly)) {
+                emp = employeeService.getEmployeeByCardNoAndStore(digitsNoZeros, storeId);
+                if (emp != null) return emp;
+            }
+        }
+
+        // 4. 取后10位匹配(HID 可能输出更长的卡号)
+        if (digitsOnly.length() > 10) {
+            emp = employeeService.getEmployeeByCardNoAndStore(
+                    digitsOnly.substring(digitsOnly.length() - 10), storeId);
+            if (emp != null) return emp;
+        }
+
+        // 5. 取后8位匹配
+        if (digitsOnly.length() > 8) {
+            emp = employeeService.getEmployeeByCardNoAndStore(
+                    digitsOnly.substring(digitsOnly.length() - 8), storeId);
+            if (emp != null) return emp;
+        }
+
+        return null;
     }
 
     /**

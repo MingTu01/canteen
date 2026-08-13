@@ -36,6 +36,10 @@ public class Order {
     @TableField(exist = false)
     private String cardNo;
 
+    /** 非数据库字段:员工部门名称(列表展示用,由 controller 层填充) */
+    @TableField(exist = false)
+    private String departmentName;
+
     /** 非数据库字段:订单菜品列表(终端订单查询页展示用,由 service 层批量填充) */
     @TableField(exist = false)
     private List<OrderItem> items;

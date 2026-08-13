@@ -115,11 +115,59 @@ exe = EXE(
     icon='terminal_icon.ico',  # 程序图标(食堂取餐餐碗主题;读卡助手仍用 icon.ico)
 )
 
+# ===== watchdog 守护进程(独立 EXE,与主程序共享 _internal 依赖) =====
+# watchdog 仅依赖标准库(os/sys/time/subprocess/logging/pathlib),不引入 PyQt5;
+# 与 canteen-terminal.exe 共享同一 onedir 目录(dist/canteen-terminal/),
+# 因此 installer.iss 的 "Source: dist\canteen-terminal\*" 递归打包会自动包含 watchdog.exe
+a_wd = Analysis(
+    ['watchdog.py'],
+    pathex=[SRC_DIR],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'tkinter',
+        'unittest',
+        'pydoc',
+        'PyQt5',  # watchdog 不需要 Qt,排除以减小分析开销
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz_wd = PYZ(a_wd.pure, a_wd.zipped_data, cipher=block_cipher)
+
+exe_wd = EXE(
+    pyz_wd,
+    a_wd.scripts,
+    [],
+    exclude_binaries=True,
+    name='watchdog',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,  # 后台守护进程,不显示控制台窗口(日志写入 %LOCALAPPDATA%\CanteenTerminal\watchdog.log)
+    disable_windowed_traceback=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
 coll = COLLECT(
     exe,
+    exe_wd,  # watchdog.exe 与主程序共用同一 onedir 目录
     a.binaries,
     a.zipfiles,
     a.datas,
+    a_wd.binaries,
+    a_wd.zipfiles,
+    a_wd.datas,
     strip=False,
     upx=True,
     upx_exclude=[

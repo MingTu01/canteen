@@ -31,7 +31,7 @@ import { useIdleTimer } from '@/composables/useIdleTimer'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { useOrderConfig } from '@/composables/useOrderConfig'
 import { formatMoney } from '@/composables/useFormat'
-import { toDateKey, dateWindow, parseDateKey, relativeLabel, pad2 } from '@/utils'
+import { toDateKey, dateWindow, parseDateKey, relativeLabel, pad2, shortDate, dateRelLabel } from '@/utils'
 import { mealTypeLabel } from '@/utils'
 import { menuInvalidated, getCachedMenu, cacheMenu } from '@/utils/cache'
 import { ShoppingCart, X, Plus, Minus, Trash2 } from 'lucide-vue-next'
@@ -63,9 +63,8 @@ const startDateKey = computed(() => {
 /** 未来 30 天可订餐日期 */
 const allDates = computed(() => dateWindow(startDateKey.value, 30, 1))
 
-/** 左侧 DateSidebar 窗口(7 天,可上下翻页) */
-const windowStart = ref(startDateKey.value)
-const sidebarDates = computed(() => dateWindow(windowStart.value, 7, 1))
+/** 左侧 DateSidebar 候选日期(全部 30 天,由 DateSidebar 按 availableSet 过滤为有菜单的日期) */
+const sidebarDates = computed(() => allDates.value)
 
 /** menuCache: 日期 -> 转换后的菜单数组 [{id, mealType, menuItems}] */
 const menuCache = ref<Record<string, any[]>>({})
@@ -74,10 +73,19 @@ const loadingSet = ref<Set<string>>(new Set())
 /** 已下单订单(从后端拉取,用于锁定已订餐别) */
 const orderedOrders = ref<any[]>([])
 
-/** 右侧菜品区容器(切换日期时滚动到顶部,确保早餐可见) */
+/** 右侧菜品区滚动容器(用于 scroll 事件监听 + 滚动控制) */
 const contentRef = ref<HTMLElement | null>(null)
 
-/** 当前选中日期(双向同步到 orderStore) */
+/** 当前可视日期(滚动时动态更新,驱动左侧栏高亮 + sticky 日期指示器) */
+const visibleDate = ref<string>('')
+/** 每个日期 section 的 DOM 引用,用于滚动定位 + 可视检测 */
+const daySectionRefs: Record<string, HTMLElement | null> = {}
+/** scroll 事件节流时间戳 */
+let lastScrollCalcTime = 0
+/** 程序滚动标志(点击左侧栏跳转时屏蔽可视日期更新,避免跳动) */
+let isProgrammaticScroll = false
+
+/** 当前选中日期(双向同步到 orderStore,与 visibleDate 保持同步) */
 const selectedDate = computed({
   get: () => orderStore.selectedDate,
   set: (v: string) => { orderStore.selectedDate = v },
@@ -238,16 +246,20 @@ const orderedDateSet = computed(() => {
   return s
 })
 
-/** 当日菜单按餐别排序 */
-const mealSections = computed(() => {
-  const menus = selectedDate.value ? menuCache.value[selectedDate.value] || [] : []
+/** 可订餐日期列表(有菜单的日期,按时间升序,用于堆叠渲染 + 左侧栏) */
+const dateList = computed(() => allDates.value.filter((d) => availableSet.value.has(d)))
+
+/** 指定日期的菜单按餐别排序 */
+const mealSectionsFor = (date: string) => {
+  const menus = menuCache.value[date] || []
   return [...menus].sort((a: any, b: any) => a.mealType - b.mealType)
-})
+}
 
 /** 购物车全局总数/总价(跨日期) */
 const cartCount = cartTotalCount
 const cartTotal = cartTotalAmount
-const loading = computed(() => loadingSet.value.has(selectedDate.value))
+/** 全部菜单是否加载完成(完成后统一渲染堆叠 section,杜绝布局抖动) */
+const allLoaded = ref(false)
 
 /**
  * 某日期已订餐的餐别列表:
@@ -263,22 +275,20 @@ const mealTypesFor = (date: string) => {
   return Array.from(set).sort((a, b) => a - b)
 }
 
-/** 当前选中日期下,已下单(status=1)的餐别集合 */
-const lockedMealTypes = computed<Set<number>>(() => {
+/** 指定日期下,已下单(status=1)的餐别集合 */
+const lockedMealTypesFor = (date: string): Set<number> => {
   const s = new Set<number>()
-  if (!selectedDate.value) return s
   for (const o of orderedOrders.value) {
-    if (o.date === selectedDate.value && o.status === 1) s.add(Number(o.mealType))
+    if (o.date === date && o.status === 1) s.add(Number(o.mealType))
   }
   return s
-})
+}
 
-/** 当前选中日期 + 指定餐别下,已下单的菜品映射:dishId -> quantity */
-const orderedItemsFor = (mealType: number): Map<number, number> => {
+/** 指定日期 + 餐别下,已下单的菜品映射:dishId -> quantity */
+const orderedItemsFor = (date: string, mealType: number): Map<number, number> => {
   const m = new Map<number, number>()
-  if (!selectedDate.value) return m
   for (const o of orderedOrders.value) {
-    if (o.date === selectedDate.value && Number(o.mealType) === mealType && o.status === 1) {
+    if (o.date === date && Number(o.mealType) === mealType && o.status === 1) {
       // 后端返回 items 字段(批量查询填充)
       const items: any[] = o.items ?? []
       for (const it of items) {
@@ -292,35 +302,105 @@ const orderedItemsFor = (mealType: number): Map<number, number> => {
   return m
 }
 
+/**
+ * 点击左侧 DateSidebar / 头部 DatePicker:平滑滚动到对应日期 section。
+ * 单页堆叠模式:所有日期已在 DOM 中,滚动即可(不切换、不替换数据)。
+ */
+const scrollToDate = (date: string): void => {
+  const el = daySectionRefs[date]
+  if (!el) return
+  // 屏蔽滚动期间的可视日期更新,避免与平滑滚动冲突
+  isProgrammaticScroll = true
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  visibleDate.value = date
+  selectedDate.value = date
+  loadMenu(date)
+  // 平滑滚动结束后恢复监听(500ms 足够覆盖大多数滚动时长)
+  setTimeout(() => { isProgrammaticScroll = false }, 500)
+}
+
 /** DateSidebar 头部 DatePicker 选中某日期 */
 const onSelectDate = (key: string) => {
-  selectedDate.value = key
-  // 同步左侧 sidebar 窗口,使选中日期可见
-  if (!sidebarDates.value.includes(key)) {
-    windowStart.value = key
-  }
-  loadMenu(key)
+  scrollToDate(key)
 }
 
 /** 左侧 DateSidebar 列表选中某日期 */
 const onSelectSidebar = (key: string) => {
-  selectedDate.value = key
-  loadMenu(key)
+  scrollToDate(key)
 }
 
-/** 菜品 + / - */
-const onInc = (item: any, mealType: number) => {
-  if (lockedMealTypes.value.has(mealType)) return
-  addDish(item, mealType, selectedDate.value)
+/** 菜品 + / -(按所在日期 section 的日期归位购物车) */
+const onInc = (item: any, mealType: number, date: string) => {
+  if (lockedMealTypesFor(date).has(mealType)) return
+  addDish(item, mealType, date)
 }
-const onDec = (item: any, mealType: number) => {
-  if (lockedMealTypes.value.has(mealType)) return
-  decDish(item.dishId, mealType, selectedDate.value)
+const onDec = (item: any, mealType: number, date: string) => {
+  if (lockedMealTypesFor(date).has(mealType)) return
+  decDish(item.dishId, mealType, date)
 }
 
-/** 取某菜品在购物车中的数量 */
-const getQuantity = (dishId: number, mealType: number) =>
-  dishQuantity(dishId, selectedDate.value, mealType)
+/** 取某菜品在指定日期 + 餐别下的购物车数量 */
+const getQuantity = (dishId: number, date: string, mealType: number) =>
+  dishQuantity(dishId, date, mealType)
+
+/* ============ 无极滑动切换日期(单页堆叠模式,对齐 H5 Order.vue) ============ */
+/** 设置日期 section 的 DOM 引用(供 v-for :ref 回调用) */
+const setDaySectionRef = (date: string, el: Element | null): void => {
+  daySectionRefs[date] = (el as HTMLElement) || null
+}
+
+/**
+ * 内容区滚动事件处理(单页堆叠模式):
+ * - 节流计算当前可视日期(触发线算法)→ 更新 visibleDate + selectedDate
+ * - 程序滚动期间(点击左侧栏跳转)忽略,避免与平滑滚动冲突
+ */
+const handleContentScroll = (): void => {
+  if (isProgrammaticScroll) return
+  const now = Date.now()
+  if (now - lastScrollCalcTime < 100) return // 100ms 节流
+  lastScrollCalcTime = now
+  updateVisibleDate()
+}
+
+/**
+ * 计算当前可视日期(触发线算法,稳定不跳动)。
+ * 触发线位于容器顶部下方 60px(sticky 日期指示器之下):
+ * - 若触发线落在某 section 内 → 选定该日期
+ * - 否则(触发线在 section 之间空隙)→ 选触发线上方最近的 section
+ */
+const updateVisibleDate = (): void => {
+  const container = contentRef.value
+  if (!container) return
+  const containerTop = container.getBoundingClientRect().top
+  const TRIGGER_Y = 60
+  let bestDate = ''
+  let bestTop = -Infinity
+  for (const d of dateList.value) {
+    const el = daySectionRefs[d]
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    const top = rect.top - containerTop
+    const bottom = rect.bottom - containerTop
+    // 触发线在 section 内:直接选定,跳出循环(稳定锚点)
+    if (top <= TRIGGER_Y && bottom > TRIGGER_Y) {
+      bestDate = d
+      break
+    }
+    // 否则记录"触发线上方的最后一个 section"(section 已完全滚过触发线)
+    if (top <= TRIGGER_Y && top >= bestTop) {
+      bestTop = top
+      bestDate = d
+    }
+  }
+  if (bestDate && bestDate !== visibleDate.value) {
+    visibleDate.value = bestDate
+    selectedDate.value = bestDate
+  }
+}
+
+/** sticky 日期指示器:当前可视日期的数字日期 + 相对标签 */
+const visibleDateNumber = computed(() => shortDate(visibleDate.value || selectedDate.value))
+const visibleDateRel = computed(() => dateRelLabel(visibleDate.value || selectedDate.value))
 
 const goCheckout = () => {
   if (cartCount.value === 0) return
@@ -373,20 +453,23 @@ onMounted(async () => {
   if (!orderStore.selectedDate || !allDates.value.includes(orderStore.selectedDate)) {
     orderStore.selectedDate = startDateKey.value
   }
-  // 并发加载菜单和已下单订单
+  // 并发加载菜单和已下单订单(全部就绪后统一渲染堆叠 section,避免布局抖动)
   await Promise.all([loadAllMenus(), fetchOrderedOrders()])
-  // 起始日期无菜单,自动选中第一个有菜单的日期
-  if (!availableSet.value.has(orderStore.selectedDate)) {
-    const first = allDates.value.find((d) => availableSet.value.has(d))
-    if (first) orderStore.selectedDate = first
+  allLoaded.value = true
+  // 初始可视日期:优先当前选中日期,否则第一个有菜单的日期
+  let initDate = orderStore.selectedDate
+  if (!availableSet.value.has(initDate)) {
+    initDate = allDates.value.find((d) => availableSet.value.has(d)) || ''
   }
-})
-
-/** 切换日期时自动滚动到顶部,确保每天首屏都是早餐 */
-watch(selectedDate, () => {
-  nextTick(() => {
-    if (contentRef.value) contentRef.value.scrollTop = 0
-  })
+  if (initDate) {
+    visibleDate.value = initDate
+    orderStore.selectedDate = initDate
+    // 即时滚动到初始日期(非平滑,避免初始动画抖动)
+    nextTick(() => {
+      const el = daySectionRefs[initDate]
+      if (el) el.scrollIntoView({ block: 'start' })
+    })
+  }
 })
 
 /**
@@ -416,7 +499,7 @@ watch(menuInvalidated, (v) => {
     <div class="select__body">
       <DateSidebar
         :dates="sidebarDates"
-        :selected-date="selectedDate"
+        :selected-date="visibleDate"
         :meal-types-for-date="mealTypesFor"
         :available-set="availableSet"
         @select="onSelectSidebar"
@@ -424,7 +507,7 @@ watch(menuInvalidated, (v) => {
         <template #header>
           <DatePicker
             :dates="allDates"
-            :selected-date="selectedDate"
+            :selected-date="visibleDate"
             :available-set="availableSet"
             :marked-set="orderedDateSet"
             @select="onSelectDate"
@@ -432,33 +515,66 @@ watch(menuInvalidated, (v) => {
         </template>
       </DateSidebar>
 
-      <div ref="contentRef" class="select__content no-scrollbar">
-        <!-- 加载中 -->
-        <div v-if="loading" class="select__loading">
+      <!-- 右侧内容区:所有可订餐日期垂直堆叠,上下滚动自然浏览,无切换动作 -->
+      <div
+        ref="contentRef"
+        class="select__content no-scrollbar"
+        @scroll.passive="handleContentScroll"
+      >
+        <!-- 全页加载态:并发加载所有日期菜单时显示 -->
+        <div v-if="!allLoaded" class="select__loading">
           <div class="select__spinner spinner"></div>
           <span>加载菜单中...</span>
         </div>
 
-        <!-- 空状态 -->
-        <div v-else-if="mealSections.length === 0" class="select__empty">
+        <!-- 空状态:无可订餐日期 -->
+        <div v-else-if="dateList.length === 0" class="select__empty">
           <div class="select__empty-icon">📭</div>
-          <div class="select__empty-title">该日期暂未配置菜单</div>
-          <div class="select__empty-hint">请在上方选择其他日期</div>
+          <div class="select__empty-title">暂无可订餐日期</div>
+          <div class="select__empty-hint">请稍后再试</div>
         </div>
 
-        <!-- 餐别区块列表 -->
+        <!-- 所有可订餐日期垂直堆叠(单页滚动,无切换;数据已全部就绪) -->
         <template v-else>
-          <MealSection
-            v-for="menu in mealSections"
-            :key="menu.id"
-            :meal-type="menu.mealType"
-            :items="menu.menuItems"
-            :get-quantity="getQuantity"
-            :locked="lockedMealTypes.has(menu.mealType)"
-            :ordered-items="orderedItemsFor(menu.mealType)"
-            @inc="(item) => onInc(item, menu.mealType)"
-            @dec="(item) => onDec(item, menu.mealType)"
-          />
+          <!-- 顶部 sticky 日期指示器:跟随当前可视日期吸顶显示 -->
+          <div class="select__sticky-date">
+            <span class="select__sticky-num">{{ visibleDateNumber }}</span>
+            <span class="select__sticky-rel">{{ visibleDateRel }}</span>
+          </div>
+
+          <section
+            v-for="d in dateList"
+            :key="d"
+            :ref="(el) => setDaySectionRef(d, el as Element | null)"
+            class="day-section"
+            :data-date="d"
+          >
+            <!-- 日期标题胶囊(数字日期 + 今天/明天/周X) -->
+            <div class="day-section__header">
+              <span class="day-section__date-num">{{ shortDate(d) }}</span>
+              <span class="day-section__date-rel">{{ dateRelLabel(d) }}</span>
+            </div>
+
+            <!-- 当日有菜单:渲染餐别区块 -->
+            <template v-if="mealSectionsFor(d).length > 0">
+              <MealSection
+                v-for="menu in mealSectionsFor(d)"
+                :key="menu.id"
+                :meal-type="menu.mealType"
+                :items="menu.menuItems"
+                :get-quantity="(dishId, mt) => getQuantity(dishId, d, mt)"
+                :locked="lockedMealTypesFor(d).has(menu.mealType)"
+                :ordered-items="orderedItemsFor(d, menu.mealType)"
+                @inc="(item) => onInc(item, menu.mealType, d)"
+                @dec="(item) => onDec(item, menu.mealType, d)"
+              />
+            </template>
+
+            <!-- 已加载但无菜品 -->
+            <div v-else class="day-section__empty">
+              <span>当日暂无可订餐菜品</span>
+            </div>
+          </section>
         </template>
       </div>
     </div>
@@ -600,8 +716,93 @@ watch(menuInvalidated, (v) => {
   flex: 1;
   overflow-y: auto;
   min-width: 0;
-  /* 底部 padding 防止最后菜品被悬浮购物车遮挡(购物车高约 64px + bottom 16px = 80px,留 120px 余量) */
-  padding: 20px 32px 120px;
+  /* 顶部无 padding:让 sticky 日期指示器吸顶;底部留白避开悬浮购物车 */
+  overscroll-behavior: contain;
+  padding: 0 32px 120px;
+}
+
+/* ============ 顶部 sticky 日期指示器(跟随当前可视日期吸顶) ============ */
+.select__sticky-date {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 0;
+  margin-bottom: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 70%, rgba(255, 255, 255, 0));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.select__sticky-num,
+.select__sticky-rel {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 16px;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+.select__sticky-num {
+  background: rgba(0, 101, 253, 0.12);
+  color: var(--doubao-primary);
+  border: 1px solid rgba(0, 101, 253, 0.25);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.select__sticky-rel {
+  background: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+  border: 1px solid var(--doubao-primary);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* ============ 日期 section(单页堆叠模式:每个日期一个 section) ============ */
+.day-section {
+  padding: 4px 0 8px;
+}
+.day-section__header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 16px 0 12px;
+}
+.day-section__date-num,
+.day-section__date-rel {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 18px;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  border-radius: 999px;
+}
+.day-section__date-num {
+  color: var(--doubao-secondary-foreground);
+  background: var(--doubao-card);
+  border: 1px solid var(--doubao-border);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.day-section__date-rel {
+  color: var(--doubao-primary);
+  background: rgba(0, 101, 253, 0.08);
+  border: 1px solid rgba(0, 101, 253, 0.2);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.day-section__empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 80px;
+  padding: 16px 0;
+  color: var(--doubao-muted-foreground);
+  font-size: var(--fs-sm);
 }
 .select__loading,
 .select__empty {

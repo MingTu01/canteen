@@ -6,10 +6,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.canteen.annotation.OperationLog;
 import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.dto.OrderCreateDTO;
+import com.example.canteen.entity.Department;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.entity.Order;
+import com.example.canteen.entity.OrderItem;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.exception.SecurityException;
+import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.OrderItemMapper;
 import com.example.canteen.mapper.OrderMapper;
@@ -21,9 +24,12 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
@@ -33,15 +39,18 @@ public class OrderController {
     private final OrderMapper orderMapper;
     private final EmployeeMapper employeeMapper;
     private final OrderItemMapper orderItemMapper;
+    private final DepartmentMapper departmentMapper;
     private final LoginRateLimiter rateLimiter;
 
     public OrderController(OrderService orderService, OrderMapper orderMapper,
                            EmployeeMapper employeeMapper, OrderItemMapper orderItemMapper,
+                           DepartmentMapper departmentMapper,
                            LoginRateLimiter rateLimiter) {
         this.orderService = orderService;
         this.orderMapper = orderMapper;
         this.employeeMapper = employeeMapper;
         this.orderItemMapper = orderItemMapper;
+        this.departmentMapper = departmentMapper;
         this.rateLimiter = rateLimiter;
     }
 
@@ -101,22 +110,42 @@ public class OrderController {
         }
         IPage<Order> p = orderMapper.selectPage(new Page<>(page, size), wrapper);
 
-        // 填充 employeeName 和 cardNo(批量查询避免 N+1)
+        // 批量填充 employeeName / cardNo / departmentName / items(避免 N+1)
         List<Long> empIds = p.getRecords().stream()
                 .map(Order::getEmployeeId)
                 .distinct()
                 .collect(Collectors.toList());
-        Map<Long, String> empNameMap = new HashMap<>();
-        Map<Long, String> empCardNoMap = new HashMap<>();
+        Map<Long, Employee> empMap = new HashMap<>();
         if (!empIds.isEmpty()) {
-            employeeMapper.selectBatchIds(empIds).forEach(e -> {
-                empNameMap.put(e.getId(), e.getName());
-                empCardNoMap.put(e.getId(), e.getCardNo());
-            });
+            employeeMapper.selectBatchIds(empIds).forEach(e -> empMap.put(e.getId(), e));
+        }
+        // 批量查询部门名称
+        Map<Long, String> deptNameMap = new HashMap<>();
+        Set<Long> deptIds = empMap.values().stream()
+                .map(Employee::getDepartmentId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (!deptIds.isEmpty()) {
+            departmentMapper.selectBatchIds(deptIds).forEach(d ->
+                    deptNameMap.put(d.getId(), d.getName()));
+        }
+        // 批量查询菜品列表
+        List<Long> orderIds = p.getRecords().stream()
+                .map(Order::getId)
+                .collect(Collectors.toList());
+        Map<Long, List<OrderItem>> itemMap = new HashMap<>();
+        if (!orderIds.isEmpty()) {
+            orderItemMapper.selectByOrderIds(orderIds).forEach(it ->
+                    itemMap.computeIfAbsent(it.getOrderId(), k -> new ArrayList<>()).add(it));
         }
         p.getRecords().forEach(o -> {
-            o.setEmployeeName(empNameMap.getOrDefault(o.getEmployeeId(), null));
-            o.setCardNo(empCardNoMap.getOrDefault(o.getEmployeeId(), null));
+            Employee emp = empMap.get(o.getEmployeeId());
+            o.setEmployeeName(emp != null ? emp.getName() : null);
+            o.setCardNo(emp != null ? emp.getCardNo() : null);
+            if (emp != null && emp.getDepartmentId() != null) {
+                o.setDepartmentName(deptNameMap.get(emp.getDepartmentId()));
+            }
+            o.setItems(itemMap.getOrDefault(o.getId(), List.of()));
         });
 
         Map<String, Object> result = new HashMap<>();

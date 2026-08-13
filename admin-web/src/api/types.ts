@@ -123,6 +123,10 @@ export interface Order {
   cardNo?: string
   /** 非数据库字段:员工姓名(列表展示用,由后端填充) */
   employeeName?: string
+  /** 非数据库字段:员工部门名称(列表展示用,由后端填充) */
+  departmentName?: string
+  /** 非数据库字段:订单菜品列表(列表展示用,由后端批量填充) */
+  items?: OrderItem[]
 }
 
 export interface OrderItem {

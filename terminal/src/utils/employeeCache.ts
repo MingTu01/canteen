@@ -167,19 +167,20 @@ async function preloadAvatars(employees: CachedEmployee[], myGen: number): Promi
  * @returns 员工信息;null=卡号不存在或已停用
  */
 export async function getEmployeeByCardNo(cardNo: string): Promise<CachedEmployee | null> {
-  // 1. 优先查本地缓存
-  const cached = await dbGetEmployeeByCardNo(cardNo)
-  if (cached) {
-    // 兜底校验:缓存可能过期(员工被停用后24小时内缓存仍存在)
-    if (cached.status !== 1) {
-      console.warn(`[employeeCache] 员工 ${cardNo} 已停用(status=${cached.status}),拒绝刷卡`)
-      return null
+  // 1. 优先查本地缓存(精确匹配 + 多格式兼容 HID 读卡器)
+  const variants = generateCardNoVariants(cardNo)
+  for (const variant of variants) {
+    const cached = await dbGetEmployeeByCardNo(variant)
+    if (cached) {
+      if (cached.status !== 1) {
+        console.warn(`[employeeCache] 员工 ${cardNo} 已停用(status=${cached.status}),拒绝刷卡`)
+        return null
+      }
+      return cached
     }
-    return cached
   }
 
-  // 2. 未命中:走网络(可能卡号是新员工,本地缓存还没更新)
-  //    后端 selectByCardNoAndStore 已过滤 status=1 AND is_deleted=0
+  // 2. 缓存未命中:走网络(后端已支持多格式卡号匹配)
   try {
     const resp = await api.get(`/terminal/employee/${encodeURIComponent(cardNo)}`)
     if (resp.data?.code === 200 && resp.data.data) {
@@ -199,6 +200,31 @@ export async function getEmployeeByCardNo(cardNo: string): Promise<CachedEmploye
     /* 网络错误返回 null */
   }
   return null
+}
+
+/**
+ * 生成卡号的多种格式变体,兼容 USB 读卡器(OUR_IDR.dll)和 HID 键盘模拟读卡器。
+ * 返回数组:原始卡号、去前导零、仅数字、后10位、后8位
+ */
+function generateCardNoVariants(cardNo: string): string[] {
+  if (!cardNo) return []
+  const trimmed = cardNo.trim()
+  const variants = [trimmed]
+  // 去除前导零
+  const noZeros = trimmed.replace(/^0+/, '')
+  if (noZeros && noZeros !== trimmed) variants.push(noZeros)
+  // 仅保留数字
+  const digitsOnly = trimmed.replace(/[^0-9]/g, '')
+  if (digitsOnly && digitsOnly !== trimmed) {
+    variants.push(digitsOnly)
+    const digitsNoZeros = digitsOnly.replace(/^0+/, '')
+    if (digitsNoZeros && digitsNoZeros !== digitsOnly) variants.push(digitsNoZeros)
+  }
+  // 后10位
+  if (digitsOnly.length > 10) variants.push(digitsOnly.substring(digitsOnly.length - 10))
+  // 后8位
+  if (digitsOnly.length > 8) variants.push(digitsOnly.substring(digitsOnly.length - 8))
+  return variants
 }
 
 /** 对外刷新接口(轮询定时器调用) */

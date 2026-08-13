@@ -64,9 +64,28 @@ export function dishIcon(category: string): Component {
 }
 
 const WEEK = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+const WEEK_SHORT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 export function pad2(n: number): string {
   return String(n).padStart(2, '0')
+}
+
+/** yyyy-MM-dd -> "周日"/"周一"/.../"周六" */
+export function weekdayLabel(s: string): string {
+  const d = parseDateKey(s)
+  return WEEK_SHORT[d.getDay()]
+}
+
+/**
+ * 相对日期标签:今天 / 明天 / 后天 / 周X。
+ * 用于 sticky 日期指示器(无极滑动切换日期时显示当前可视日期的相对标签)。
+ */
+export function dateRelLabel(s: string): string {
+  const today = toDateKey(new Date())
+  if (s === today) return '今天'
+  if (s === shiftKey(today, 1)) return '明天'
+  if (s === shiftKey(today, 2)) return '后天'
+  return weekdayLabel(s)
 }
 
 /** Date -> yyyy-MM-dd */
