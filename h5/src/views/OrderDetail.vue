@@ -374,8 +374,10 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
   }
 }
 
-/* 取消订单按钮:plain danger 文字色强制为红色(全局变量未覆盖 action-bar-button) */
+/* 取消订单按钮:plain danger 模式下 vant 未正确覆盖背景,
+   导致红底红字看不到文字,强制背景透明 + 文字红色 */
 :deep(.van-action-bar-button--danger.van-button--plain) {
-  color: #{$brand-danger};
+  color: #{$brand-danger} !important;
+  background: transparent !important;
 }
 </style>
