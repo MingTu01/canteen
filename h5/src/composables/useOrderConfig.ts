@@ -34,9 +34,9 @@ export function useOrderConfig() {
     if (!force && loaded && loadedStoreId === (storeId ?? null)) return config.value
     try {
       const params = storeId ? { storeId } : undefined
-      const res = await api.get('/system/order-config', { params })
-      if (res.data?.data) {
-        const d = res.data.data
+      // H5 axios 拦截器在 code===200 时已解包返回 body.data(即配置对象本身)
+      const d = await api.get('/system/order-config', { params })
+      if (d && typeof d === 'object') {
         config.value = {
           // 0=不限制提前天数;负数或异常回退默认 7
           order_advance_days: d.order_advance_days != null && d.order_advance_days !== ''
