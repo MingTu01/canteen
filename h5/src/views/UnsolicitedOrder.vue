@@ -284,50 +284,51 @@ onUnmounted(() => {
             :key="dish.id"
             class="unsolicited__dish"
             :class="{ 'unsolicited__dish--selected': getDishQty(dish.id) > 0 }"
-            @click="dish.status !== 0 && addToCart(dish)"
+            @click="dish.status !== 0 && getDishQty(dish.id) === 0 && addToCart(dish)"
           >
-            <!-- 辣度角标 -->
-            <div
-              v-if="dish.spiceLevel && dish.spiceLevel > 0"
-              class="unsolicited__dish-spice"
-            >
-              <span class="unsolicited__dish-spice-label">辣</span>
-              <ChiliIcon v-for="n in dish.spiceLevel" :key="n" :size="12" />
-            </div>
-            <!-- 左侧:菜名+价格 -->
-            <div class="unsolicited__dish-info">
+            <!-- 第一行:菜名(左) + 辣度(右) -->
+            <div class="unsolicited__dish-top">
               <h3 class="unsolicited__dish-name">{{ dish.name }}</h3>
-              <span class="unsolicited__dish-price">¥{{ formatMoney(dish.price) }}</span>
-            </div>
-            <!-- 右侧:操作区 -->
-            <span v-if="dish.status === 0" class="unsolicited__dish-soldout">已售罄</span>
-            <button
-              v-else-if="getDishQty(dish.id) === 0"
-              type="button"
-              class="unsolicited__dish-add"
-              aria-label="加入购物车"
-              @click.stop="addToCart(dish)"
-            >
-              <Plus :size="18" :stroke-width="2.5" />
-            </button>
-            <div v-else class="unsolicited__dish-stepper">
-              <button
-                type="button"
-                class="unsolicited__stepper-btn unsolicited__stepper-btn--minus"
-                aria-label="减少一份"
-                @click.stop="decreaseFromCart(dish)"
+              <div
+                v-if="dish.spiceLevel && dish.spiceLevel > 0"
+                class="unsolicited__dish-spice"
               >
-                <Minus :size="16" :stroke-width="2.5" />
-              </button>
-              <span class="unsolicited__stepper-val">{{ getDishQty(dish.id) }}</span>
+                <span class="unsolicited__dish-spice-label">辣</span>
+                <ChiliIcon v-for="n in dish.spiceLevel" :key="n" :size="12" />
+              </div>
+            </div>
+            <!-- 第二行:价格(左) + 操作区(右) -->
+            <div class="unsolicited__dish-bottom">
+              <span class="unsolicited__dish-price">¥{{ formatMoney(dish.price) }}</span>
+              <span v-if="dish.status === 0" class="unsolicited__dish-soldout">已售罄</span>
               <button
+                v-else-if="getDishQty(dish.id) === 0"
                 type="button"
-                class="unsolicited__stepper-btn unsolicited__stepper-btn--plus"
-                aria-label="增加一份"
+                class="unsolicited__dish-add"
+                aria-label="加入购物车"
                 @click.stop="addToCart(dish)"
               >
-                <Plus :size="16" :stroke-width="2.5" />
+                <Plus :size="18" :stroke-width="2.5" />
               </button>
+              <div v-else class="unsolicited__dish-stepper">
+                <button
+                  type="button"
+                  class="unsolicited__stepper-btn unsolicited__stepper-btn--minus"
+                  aria-label="减少一份"
+                  @click.stop="decreaseFromCart(dish)"
+                >
+                  <Minus :size="16" :stroke-width="2.5" />
+                </button>
+                <span class="unsolicited__stepper-val">{{ getDishQty(dish.id) }}</span>
+                <button
+                  type="button"
+                  class="unsolicited__stepper-btn unsolicited__stepper-btn--plus"
+                  aria-label="增加一份"
+                  @click.stop="addToCart(dish)"
+                >
+                  <Plus :size="16" :stroke-width="2.5" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -489,11 +490,9 @@ onUnmounted(() => {
 .unsolicited__dish {
   position: relative;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 12px 14px;
-  padding-right: 60px;
   background: #fff;
   border: 1px solid #eee;
   border-radius: 14px;
@@ -507,13 +506,25 @@ onUnmounted(() => {
 .unsolicited__dish--selected {
   border: 2px solid #1989fa;
   padding: 11px 13px;
-  padding-right: 59px;
+}
+/* 第一行:菜名(左) + 辣度(右) */
+.unsolicited__dish-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+/* 第二行:价格(左) + 操作区(右) */
+.unsolicited__dish-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 .unsolicited__dish-spice {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  transform: translateY(-50%);
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -528,10 +539,6 @@ onUnmounted(() => {
   font-weight: 700;
   line-height: 1;
 }
-.unsolicited__dish-info {
-  flex: 1;
-  min-width: 0;
-}
 .unsolicited__dish-name {
   font-size: 16px;
   font-weight: 600;
@@ -543,14 +550,15 @@ onUnmounted(() => {
   overflow: hidden;
   word-break: break-all;
   line-height: 1.35;
+  flex: 1;
+  min-width: 0;
 }
 .unsolicited__dish-price {
-  display: block;
-  margin-top: 4px;
   color: #ee0a24;
   font-weight: 700;
   font-size: 16px;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 .unsolicited__dish-soldout {
   flex-shrink: 0;

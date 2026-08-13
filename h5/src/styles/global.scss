@@ -32,6 +32,10 @@
   --van-radio-checked-icon-color: #{$brand-primary};
   --van-slider-active-background: #{$brand-primary};
   --van-action-bar-button-danger-color: #{$brand-danger};
+  // plain 模式下 action-bar-button 文字色默认继承白色(因通常有彩色背景),
+  // plain 背景透明后白字在白底不可见,显式指定为 danger 色
+  --van-button-plain-danger-color: #{$brand-danger};
+  --van-button-danger-color: #{$brand-danger};
   --van-cell-background: #{$brand-card};
   --van-cell-text-color: #{$brand-foreground};
   --van-cell-value-color: #{$brand-muted-foreground};

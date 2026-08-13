@@ -955,76 +955,77 @@ onBeforeUnmount(() => {
                       'dish-card--ordered': isMealLocked(d.date, section.type) && !!orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                       'dish-card--locked': isMealLocked(d.date, section.type) && !orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0),
                     }"
-                    @click="iv.dish && iv.dish.status !== 0 && !isMealLocked(d.date, section.type) && handleAdd(iv.dish, d.date, section.type)"
+                    @click="iv.dish && iv.dish.status !== 0 && !isMealLocked(d.date, section.type) && getQty(iv.dish.id, d.date, section.type) === 0 && handleAdd(iv.dish, d.date, section.type)"
                   >
-                    <!-- 辣度角标(卡片右上角,"辣"字 + 按级别显示1-3个辣椒) -->
-                    <div
-                      v-if="iv.dish?.spiceLevel && iv.dish.spiceLevel > 0"
-                      class="dish-card__spice-badge"
-                    >
-                      <span class="dish-card__spice-label">辣</span>
-                      <ChiliIcon
-                        v-for="n in iv.dish.spiceLevel"
-                        :key="n"
-                        :size="12"
-                      />
-                    </div>
-
-                    <!-- 左侧:菜名+价格(放大) -->
-                    <div class="dish-card__info">
+                    <!-- 第一行:菜名(左) + 辣度(右) -->
+                    <div class="dish-card__top">
                       <p class="dish-card__name">{{ iv.dish?.name || '未知菜品' }}</p>
-                      <p class="dish-card__price">¥{{ formatMoney(iv.dish?.price) }}</p>
+                      <div
+                        v-if="iv.dish?.spiceLevel && iv.dish.spiceLevel > 0"
+                        class="dish-card__spice-badge"
+                      >
+                        <span class="dish-card__spice-label">辣</span>
+                        <ChiliIcon
+                          v-for="n in iv.dish.spiceLevel"
+                          :key="n"
+                          :size="12"
+                        />
+                      </div>
                     </div>
 
-                    <!-- 右侧:操作区 -->
-                    <!-- 售罄 -->
-                    <span v-if="iv.dish?.status === 0 && !isMealLocked(d.date, section.type)" class="dish-card__soldout-tag">已售罄</span>
-                    <!-- 已订菜品:绿色 ✅ + 份数 -->
-                    <div
-                      v-else-if="isMealLocked(d.date, section.type) && orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0)"
-                      class="dish-card__ordered-qty"
-                    >
-                      <Check :size="15" :stroke-width="2.5" />
-                      <span>{{ orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0) }}</span>
-                    </div>
-                    <!-- 未订菜品(锁定餐别下):灰色占位 -->
-                    <div
-                      v-else-if="isMealLocked(d.date, section.type)"
-                      class="dish-card__locked-placeholder"
-                    ></div>
-                    <!-- 正常可选:整卡可点+1 -->
-                    <template v-else-if="iv.dish && iv.dish.status !== 0">
-                      <!-- 数量为0:显示"+"按钮 -->
-                      <button
-                        v-if="getQty(iv.dish.id, d.date, section.type) === 0"
-                        type="button"
-                        class="dish-card__add"
-                        aria-label="加入购物车"
-                        @click.stop="handleAdd(iv.dish, d.date, section.type)"
+                    <!-- 第二行:价格(左) + 操作区(右) -->
+                    <div class="dish-card__bottom">
+                      <p class="dish-card__price">¥{{ formatMoney(iv.dish?.price) }}</p>
+
+                      <!-- 售罄 -->
+                      <span v-if="iv.dish?.status === 0 && !isMealLocked(d.date, section.type)" class="dish-card__soldout-tag">已售罄</span>
+                      <!-- 已订菜品:绿色 ✅ + 份数 -->
+                      <div
+                        v-else-if="isMealLocked(d.date, section.type) && orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0)"
+                        class="dish-card__ordered-qty"
                       >
-                        <Plus :size="18" :stroke-width="2.5" />
-                      </button>
-                      <!-- 数量>0:显示"- 数量 +" -->
-                      <div v-else class="dish-card__stepper">
+                        <Check :size="15" :stroke-width="2.5" />
+                        <span>{{ orderedItemsFor(d.date, section.type).get(iv.dish?.id || 0) }}</span>
+                      </div>
+                      <!-- 未订菜品(锁定餐别下):灰色占位 -->
+                      <div
+                        v-else-if="isMealLocked(d.date, section.type)"
+                        class="dish-card__locked-placeholder"
+                      ></div>
+                      <!-- 正常可选 -->
+                      <template v-else-if="iv.dish && iv.dish.status !== 0">
+                        <!-- 数量为0:显示"+"按钮(整卡也可点) -->
                         <button
+                          v-if="getQty(iv.dish.id, d.date, section.type) === 0"
                           type="button"
-                          class="dish-card__stepper-btn dish-card__stepper-btn--minus"
-                          aria-label="减少一份"
-                          @click.stop="handleDecrease(iv.dish.id, d.date, section.type)"
-                        >
-                          <Minus :size="16" :stroke-width="2.5" />
-                        </button>
-                        <span class="dish-card__stepper-val">{{ getQty(iv.dish.id, d.date, section.type) }}</span>
-                        <button
-                          type="button"
-                          class="dish-card__stepper-btn dish-card__stepper-btn--plus"
-                          aria-label="增加一份"
+                          class="dish-card__add"
+                          aria-label="加入购物车"
                           @click.stop="handleAdd(iv.dish, d.date, section.type)"
                         >
-                          <Plus :size="16" :stroke-width="2.5" />
+                          <Plus :size="18" :stroke-width="2.5" />
                         </button>
-                      </div>
-                    </template>
+                        <!-- 数量>0:显示"- 数量 +"(只能点按钮,整卡不可点) -->
+                        <div v-else class="dish-card__stepper">
+                          <button
+                            type="button"
+                            class="dish-card__stepper-btn dish-card__stepper-btn--minus"
+                            aria-label="减少一份"
+                            @click.stop="handleDecrease(iv.dish.id, d.date, section.type)"
+                          >
+                            <Minus :size="16" :stroke-width="2.5" />
+                          </button>
+                          <span class="dish-card__stepper-val">{{ getQty(iv.dish.id, d.date, section.type) }}</span>
+                          <button
+                            type="button"
+                            class="dish-card__stepper-btn dish-card__stepper-btn--plus"
+                            aria-label="增加一份"
+                            @click.stop="handleAdd(iv.dish, d.date, section.type)"
+                          >
+                            <Plus :size="16" :stroke-width="2.5" />
+                          </button>
+                        </div>
+                      </template>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1593,16 +1594,13 @@ onBeforeUnmount(() => {
   }
 }
 
-/* ============ 菜品卡片(横条) ============ */
+/* ============ 菜品卡片(横条,两行布局) ============ */
 .dish-card {
   position: relative;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 12px 14px;
-  /* 给辣度角标留出空间 */
-  padding-right: 60px;
   background: $brand-card;
   border: 1px solid $brand-border;
   border-radius: 14px;
@@ -1617,7 +1615,6 @@ onBeforeUnmount(() => {
   &--selected {
     border: 2px solid $brand-primary;
     padding: 11px 13px;
-    padding-right: 59px;
   }
 
   &--disabled {
@@ -1630,7 +1627,6 @@ onBeforeUnmount(() => {
     border: 2px solid #16a34a;
     background: #f0fdf4;
     padding: 11px 13px;
-    padding-right: 59px;
     cursor: default;
   }
 
@@ -1642,9 +1638,21 @@ onBeforeUnmount(() => {
     cursor: not-allowed;
   }
 
-  /* 左侧:菜名+价格 */
-  &__info {
-    flex: 1;
+  /* 第一行:菜名(左) + 辣度(右) */
+  &__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  /* 第二行:价格(左) + 操作区(右) */
+  &__bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     min-width: 0;
   }
 
@@ -1660,23 +1668,22 @@ onBeforeUnmount(() => {
     overflow: hidden;
     word-break: break-all;
     line-height: 1.35;
+    flex: 1;
+    min-width: 0;
   }
 
   &__price {
-    margin: 4px 0 0;
+    margin: 0;
     font-size: 16px;
     font-weight: 700;
     color: $brand-primary;
     font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
   }
 
-  /* 辣度角标(卡片右上角,半透明白底 + "辣"字 + 红色辣椒图标) */
+  /* 辣度角标(第一行右侧,"辣"字 + 红色辣椒图标) */
   &__spice-badge {
-    position: absolute;
-    top: 50%;
-    right: 8px;
-    transform: translateY(-50%);
-    z-index: 3;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 2px;
