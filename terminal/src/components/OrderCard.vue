@@ -279,7 +279,6 @@ const isCompleted = computed(() => Number(props.order?.status) === 2)
   transition: background 0.15s ease, transform 0.12s ease;
 }
 .order-card__cancel:active {
-  transform: scale(0.97);
   background: rgba(239, 68, 68, 0.06);
 }
 .order-card__cancel:disabled {

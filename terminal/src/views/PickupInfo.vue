@@ -470,7 +470,6 @@ onUnmounted(() => {
   border-radius: var(--doubao-radius);
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
 }
 .pickup-info__meal-head {
   display: flex;

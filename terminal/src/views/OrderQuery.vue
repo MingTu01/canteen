@@ -447,8 +447,6 @@ watch(menuInvalidated, (v) => {
   padding: 10px 0;
   margin-bottom: 4px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 70%, rgba(255, 255, 255, 0));
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 .query__sticky-num,
 .query__sticky-rel {

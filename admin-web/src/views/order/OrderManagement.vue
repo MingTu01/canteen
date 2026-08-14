@@ -203,7 +203,7 @@ const handleExport = async () => {
       const items = o.items && o.items.length > 0
         ? o.items
         : [{ dishName: '', price: 0, quantity: 0 } as OrderItem]
-      items.forEach((item, idx) => {
+      items.forEach((item) => {
         seq++
         exportData.push({
           '序号': seq,
@@ -216,7 +216,7 @@ const handleExport = async () => {
           '菜名': item.dishName ?? '',
           '单价': item.price ?? 0,
           '数量': item.quantity ?? 0,
-          '合计价格': idx === 0 ? (o.totalAmount ?? 0) : '',
+          '合计价格': ((item.price ?? 0) * (item.quantity ?? 0)).toFixed(2),
           '结帐时间': o.status === 2 && o.updatedAt ? o.updatedAt.replace('T', ' ').substring(0, 19) : '',
           '订单状态': statusLabel(o.status),
           '订单来源': sourceLabel(o.orderSource),
@@ -389,8 +389,7 @@ watch(() => authStore.storeId, () => {
           </ElTableColumn>
           <ElTableColumn label="合计价格" width="110" align="right">
             <template #default="{ row }">
-              <span v-if="row.isFirstRow" class="font-medium tabular-nums text-text">¥{{ row.totalAmount }}</span>
-              <span v-else class="text-text-muted">—</span>
+              <span class="font-medium tabular-nums text-text">¥{{ (Number(row.price) * Number(row.quantity)).toFixed(2) }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn label="结帐时间" width="170" align="center">
@@ -400,17 +399,15 @@ watch(() => authStore.storeId, () => {
           </ElTableColumn>
           <ElTableColumn label="订单状态" width="100" align="center">
             <template #default="{ row }">
-              <StatusTag v-if="row.isFirstRow" :value="row.status" :map="ORDER_STATUS" />
-              <span v-else class="text-text-muted">—</span>
+              <StatusTag :value="row.status" :map="ORDER_STATUS" />
             </template>
           </ElTableColumn>
           <ElTableColumn label="订单来源" width="110" align="center">
             <template #default="{ row }">
-              <StatusTag v-if="row.isFirstRow" :value="row.orderSource ?? 0" :map="ORDER_SOURCE" />
-              <span v-else class="text-text-muted">—</span>
+              <StatusTag :value="row.orderSource ?? 0" :map="ORDER_SOURCE" />
             </template>
           </ElTableColumn>
-          <ElTableColumn label="操作" width="200" fixed="right" :show-overflow-tooltip="false">
+          <ElTableColumn label="操作" width="260" fixed="right" :show-overflow-tooltip="false">
             <template #default="{ row }">
               <template v-if="row.isFirstRow">
                 <ElButton size="small" :icon="Eye" @click.stop="openDetail(row._order as OrderRow)">详情</ElButton>
@@ -539,3 +536,18 @@ watch(() => authStore.storeId, () => {
     </PageContainer>
   </Layout>
 </template>
+
+<style scoped>
+/* 紧凑行样式:减少单元格内边距,避免过多空位 */
+:deep(.el-table .el-table__cell) {
+  padding: 4px 0;
+}
+:deep(.el-table .cell) {
+  padding: 0 8px;
+  line-height: 1.6;
+}
+/* 操作按钮不换行 */
+:deep(.el-table .cell .el-button + .el-button) {
+  margin-left: 6px;
+}
+</style>

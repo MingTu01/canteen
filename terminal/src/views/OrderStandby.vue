@@ -354,7 +354,6 @@ onUnmounted(() => {
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -413,7 +412,6 @@ onUnmounted(() => {
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
   color: rgba(255, 255, 255, 0.6);
   font-size: var(--fs-xs);
 }

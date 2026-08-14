@@ -165,7 +165,6 @@ onUnmounted(() => {
   border: 1.5px solid rgba(255, 255, 255, 0.15);
   cursor: pointer;
   font-family: inherit;
-  backdrop-filter: blur(8px);
   transition: transform 0.12s ease, background 0.15s ease;
 }
 .menu__card:hover { background: rgba(255, 255, 255, 0.15); }

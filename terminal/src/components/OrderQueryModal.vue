@@ -19,7 +19,7 @@ import { useMealConfig } from '@/composables/useMealConfig'
 import { formatMoney, formatDateTime } from '@/composables/useFormat'
 import { mealTypeLabel, toDateKey } from '@/utils'
 import {
-  Search, X, ChevronLeft, Loader2, FileText, RefreshCw,
+  Search, X, ChevronLeft, Loader2, FileText,
   CheckCircle2, Clock, Utensils,
 } from 'lucide-vue-next'
 
@@ -50,7 +50,7 @@ interface Order {
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
-const { mealBadgeStyle, mealIconMap, mealIconColor } = useMealConfig()
+const { mealBadgeStyle } = useMealConfig()
 
 /** 当前终端绑定的门店 */
 const storeId = computed(() => loadConfig()?.storeId ?? null)
@@ -273,7 +273,7 @@ watch(
             <header class="oqm__toolbar">
               <div class="oqm__toolbar-left">
                 <FileText :size="22" class="oqm__toolbar-icon" />
-                <span class="oqm__toolbar-title">菜品查询</span>
+                <span class="oqm__toolbar-title">订单查询</span>
               </div>
               <div class="oqm__toolbar-right">
                 <button class="oqm__btn oqm__btn--summary btn-press" @click="goSummary">
@@ -415,21 +415,17 @@ watch(
                 <span class="oqm__toolbar-title">订单汇总</span>
               </div>
               <div class="oqm__toolbar-right">
-                <button class="oqm__btn oqm__btn--summary btn-press" :disabled="summaryLoading" @click="fetchSummary">
-                  <RefreshCw :size="16" :class="{ spinner: summaryLoading }" />
-                  查询
-                </button>
                 <button class="oqm__btn oqm__btn--close btn-press" aria-label="关闭" @click="close">
                   <X :size="18" />
                 </button>
               </div>
             </header>
 
-            <!-- 汇总筛选条 -->
+            <!-- 汇总筛选条(日期选择后自动查询) -->
             <div class="oqm__filters">
               <label class="oqm__field oqm__field--date">
                 <span class="oqm__field-label">日期</span>
-                <input v-model="summaryDate" type="date" class="oqm__date-input" />
+                <input v-model="summaryDate" type="date" class="oqm__date-input" @change="fetchSummary" />
               </label>
               <div class="oqm__field oqm__field--store">
                 <span class="oqm__field-label">店铺</span>
@@ -441,8 +437,8 @@ watch(
               </div>
             </div>
 
-            <!-- 汇总列表(可滚动) -->
-            <div class="oqm__summary no-scrollbar">
+            <!-- 汇总小票(不滚动,所有菜一屏显示) -->
+            <div class="oqm__receipt-summary">
               <div v-if="summaryLoading" class="oqm__state">
                 <Loader2 :size="32" class="oqm__spin spinner" />
                 <span>统计中...</span>
@@ -454,43 +450,41 @@ watch(
               </div>
 
               <template v-else>
-                <section
-                  v-for="mt in MEAL_TYPES"
-                  :key="mt"
-                  class="oqm__meal-group"
-                >
-                  <!-- 餐别分组标题 -->
-                  <div class="oqm__meal-head" :style="mealBadgeStyle(mt)">
-                    <component
-                      :is="mealIconMap[mt]"
-                      :size="18"
-                      :stroke-width="2.5"
-                      :color="mealIconColor(mt)"
-                    />
-                    <span class="oqm__meal-name">{{ mealTypeLabel(mt) }}</span>
-                    <span class="oqm__meal-stat">
-                      剩余 {{ mealRemaining(mt) }} / 共 {{ mealTotal(mt) }} 份
-                    </span>
-                  </div>
+                <!-- 小票头部 -->
+                <div class="oqm__rs-head">
+                  <div class="oqm__rs-title">{{ storeName }}</div>
+                  <div class="oqm__rs-date">{{ summaryDate }}</div>
+                </div>
+                <div class="oqm__rs-divider"></div>
 
-                  <!-- 菜品行 -->
-                  <div v-if="(summaryMap[mt] || []).length" class="oqm__dish-list">
-                    <div
-                      v-for="(row, idx) in summaryMap[mt]"
-                      :key="`${mt}-${idx}`"
-                      class="oqm__dish-row"
-                      :class="{ 'oqm__dish-row--zero': row.remaining === 0 }"
-                    >
-                      <span class="oqm__dish-name oqm__ellipsis">{{ row.dishName }}</span>
-                      <span class="oqm__dish-qty">
-                        <span class="oqm__dish-remaining">{{ row.remaining }}</span>
-                        <span class="oqm__dish-total">/ {{ row.total }}</span>
-                        <span class="oqm__dish-unit">份</span>
-                      </span>
+                <!-- 按餐别分组(三列布局,紧凑小票风格) -->
+                <div class="oqm__rs-body">
+                  <section
+                    v-for="mt in MEAL_TYPES"
+                    :key="mt"
+                    class="oqm__rs-meal"
+                  >
+                    <div class="oqm__rs-meal-head">
+                      <span class="oqm__rs-meal-name">{{ mealTypeLabel(mt) }}</span>
+                      <span class="oqm__rs-meal-stat">{{ mealRemaining(mt) }}/{{ mealTotal(mt) }}</span>
                     </div>
-                  </div>
-                  <div v-else class="oqm__dish-empty">无订餐</div>
-                </section>
+                    <div v-if="(summaryMap[mt] || []).length" class="oqm__rs-dishes">
+                      <div
+                        v-for="(row, idx) in summaryMap[mt]"
+                        :key="`${mt}-${idx}`"
+                        class="oqm__rs-dish"
+                        :class="{ 'oqm__rs-dish--zero': row.remaining === 0 }"
+                      >
+                        <span class="oqm__rs-dish-name">{{ row.dishName }}</span>
+                        <span class="oqm__rs-dish-qty">{{ row.remaining }}</span>
+                      </div>
+                    </div>
+                    <div v-else class="oqm__rs-dish-empty">无</div>
+                  </section>
+                </div>
+
+                <div class="oqm__rs-divider"></div>
+                <div class="oqm__rs-foot">剩余份数 / 订购总份数</div>
               </template>
             </div>
           </template>
@@ -608,7 +602,6 @@ watch(
   justify-content: center;
   padding: 24px;
   background: rgba(14, 17, 21, 0.32);
-  backdrop-filter: blur(6px);
 }
 
 /* 主面板:自适应大小,最大 90vw × 85vh */
@@ -741,7 +734,23 @@ watch(
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.oqm__date-input { padding-right: 8px; }
+.oqm__date-input {
+  padding-right: 8px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+/* 日期选择器美化:日历图标样式 */
+.oqm__date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  filter: invert(0.5);
+  width: 18px;
+  height: 18px;
+}
+.oqm__date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
 .oqm__date-input:focus,
 .oqm__text-input:focus,
 .oqm__select:focus {
@@ -933,84 +942,119 @@ watch(
   color: var(--doubao-muted-foreground);
 }
 
-/* ============ 订单汇总 ============ */
-.oqm__summary {
+/* ============ 订单汇总(小票模式,不滚动) ============ */
+.oqm__receipt-summary {
   flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 16px 20px 24px;
-}
-.oqm__meal-group {
-  margin-bottom: 18px;
-  border: 1px solid var(--doubao-border);
-  border-radius: var(--doubao-radius-sm);
   overflow: hidden;
-  background: var(--doubao-card);
-}
-.oqm__meal-head {
+  min-height: 0;
+  padding: 12px 20px 16px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--doubao-border);
-  font-weight: 700;
+  flex-direction: column;
 }
-.oqm__meal-name {
+/* 小票头部 */
+.oqm__rs-head {
+  text-align: center;
+  padding: 2px 0 6px;
+}
+.oqm__rs-title {
   font-size: var(--fs-lg);
-  font-weight: 700;
-}
-.oqm__meal-stat {
-  margin-left: auto;
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.85;
-}
-.oqm__dish-list {
-  padding: 4px 0;
-}
-.oqm__dish-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px dashed var(--doubao-border);
-}
-.oqm__dish-row:last-child { border-bottom: none; }
-.oqm__dish-row--zero { opacity: 0.45; }
-.oqm__dish-name {
-  flex: 1;
-  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--doubao-foreground);
 }
-.oqm__dish-qty {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+.oqm__rs-date {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--doubao-muted-foreground);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
-.oqm__dish-remaining {
-  font-size: var(--fs-xl);
+.oqm__rs-divider {
+  height: 0;
+  border-top: 1px dashed var(--doubao-border);
+  margin: 4px 0;
+}
+/* 三列餐别布局 */
+.oqm__rs-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+.oqm__rs-meal {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--doubao-border);
+  border-radius: var(--doubao-radius-sm);
+  background: var(--doubao-card);
+  overflow: hidden;
+}
+.oqm__rs-meal-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--doubao-muted);
+  border-bottom: 1px solid var(--doubao-border);
+}
+.oqm__rs-meal-name {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--doubao-foreground);
+}
+.oqm__rs-meal-stat {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--doubao-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.oqm__rs-dishes {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+.oqm__rs-dish {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px dashed var(--doubao-border);
+  font-size: var(--fs-xs);
+}
+.oqm__rs-dish:last-child { border-bottom: none; }
+.oqm__rs-dish--zero { opacity: 0.4; }
+.oqm__rs-dish-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--doubao-foreground);
+  font-weight: 600;
+}
+.oqm__rs-dish-qty {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--doubao-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 24px;
+  text-align: right;
 }
-.oqm__dish-row--zero .oqm__dish-remaining { color: var(--doubao-muted-foreground); }
-.oqm__dish-total {
-  font-size: var(--fs-sm);
-  color: var(--doubao-muted-foreground);
-}
-.oqm__dish-unit {
+.oqm__rs-dish--zero .oqm__rs-dish-qty { color: var(--doubao-muted-foreground); }
+.oqm__rs-dish-empty {
+  padding: 12px 10px;
+  text-align: center;
   font-size: var(--fs-xs);
   color: var(--doubao-muted-foreground);
 }
-.oqm__dish-empty {
-  padding: 16px;
+.oqm__rs-foot {
   text-align: center;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   color: var(--doubao-muted-foreground);
+  padding: 2px 0;
 }
 
 /* ============ 订单详情(小票) ============ */
@@ -1023,7 +1067,6 @@ watch(
   justify-content: center;
   padding: 24px;
   background: rgba(14, 17, 21, 0.45);
-  backdrop-filter: blur(4px);
 }
 .oqm__receipt {
   position: relative;
@@ -1183,19 +1226,19 @@ watch(
 /* ============ 动画 ============ */
 .oqm-enter-active { transition: opacity 0.2s ease; }
 .oqm-enter-active .oqm__panel {
-  transition: transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1), opacity 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 .oqm-enter-from { opacity: 0; }
-.oqm-enter-from .oqm__panel { transform: scale(0.94) translateY(8px); opacity: 0; }
+.oqm-enter-from .oqm__panel { opacity: 0; }
 .oqm-leave-active { transition: opacity 0.15s ease; }
 .oqm-leave-to { opacity: 0; }
 
 .oqm-detail-enter-active { transition: opacity 0.18s ease; }
 .oqm-detail-enter-active .oqm__receipt {
-  transition: transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1), opacity 0.18s ease;
+  transition: opacity 0.18s ease;
 }
 .oqm-detail-enter-from { opacity: 0; }
-.oqm-detail-enter-from .oqm__receipt { transform: scale(0.92); opacity: 0; }
+.oqm-detail-enter-from .oqm__receipt { opacity: 0; }
 .oqm-detail-leave-active { transition: opacity 0.13s ease; }
 .oqm-detail-leave-to { opacity: 0; }
 

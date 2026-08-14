@@ -12,14 +12,22 @@
 5. 防抖:同一卡号 1.5 秒内不重复触发
 6. 通过 card_read 信号发送到主线程
 
+降级模式(读卡助手代理):
+  当 OUR_IDR.dll 加载失败(64位进程无法加载32位DLL)时,
+  自动降级为通过 HTTP/SSE 连接本机读卡助手(127.0.0.1:8765/events)
+  获取卡号。读卡助手是独立的32位进程,负责加载DLL和实际读卡,
+  X86终端通过SSE长连接接收卡号事件,实现间接读卡。
+
 返回码:
   0=成功  8=卡不在感应区  21=没有动态库  22=动态库或驱动异常
   23=驱动未装  24=超时  28=CRC校验错
 """
 import ctypes
+import json
 import os
 import threading
 import time
+import urllib.request
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
@@ -46,6 +54,9 @@ class CardReader(QObject):
     card_read = pyqtSignal(str)
     status = pyqtSignal(str)
 
+    # 读卡助手代理模式的默认端口
+    HELPER_PORT = 8765
+
     def __init__(self, card_interval=1.5):
         """
         Args:
@@ -59,6 +70,10 @@ class CardReader(QObject):
         # 最近一次 idr_read 返回码,用于判断真实硬件连接状态
         # 0=读到卡 8=卡不在感应区(正常) 22/23/24=设备异常(拔掉/驱动错)
         self._last_ret = None
+        # 读卡助手代理模式(DLL加载失败时自动启用)
+        self._proxy_mode = False
+        self._proxy_thread = None
+        self._helper_port = self.HELPER_PORT
 
     def set_interval(self, seconds):
         """动态更新防抖间隔(配置页修改后立即生效,无需重启读卡器)。"""
@@ -69,7 +84,8 @@ class CardReader(QObject):
     def start(self):
         """加载 DLL 并启动读卡器后台线程。
 
-        如果 DLL 不存在或设备未连接,静默失败(不影响主程序)。
+        如果 DLL 不存在或加载失败(64位进程无法加载32位DLL),
+        自动降级为读卡助手代理模式(通过HTTP/SSE连接本机读卡助手)。
         """
         if self._running:
             return
@@ -77,7 +93,8 @@ class CardReader(QObject):
         # 查找 DLL 路径
         dll_dir = self._find_dll_dir()
         if not dll_dir:
-            self.status.emit('OUR_IDR.dll 未找到,跳过读卡器初始化')
+            self.status.emit('OUR_IDR.dll 未找到,尝试读卡助手代理模式...')
+            self._start_proxy_mode()
             return
 
         our_idr_path = os.path.join(dll_dir, 'OUR_IDR.dll')
@@ -105,13 +122,97 @@ class CardReader(QObject):
             self._setup_prototypes()
             self.status.emit(f'OUR_IDR.dll 加载成功')
         except Exception as e:
-            self.status.emit(f'OUR_IDR.dll 加载失败: {e}')
+            self.status.emit(f'OUR_IDR.dll 加载失败(可能是64位进程加载32位DLL): {e}')
             self._dll = None
+            # 降级为读卡助手代理模式
+            self._start_proxy_mode()
             return
 
         self._running = True
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
+
+    def _start_proxy_mode(self):
+        """降级为读卡助手代理模式:通过HTTP/SSE连接本机读卡助手获取卡号。
+
+        读卡助手(card_helper)是独立的32位进程,负责加载OUR_IDR.dll和实际读卡,
+        并在127.0.0.1:8765提供SSE事件流(/events)。
+        X86终端通过SSE长连接接收卡号事件,实现间接读卡。
+        """
+        # 先检测读卡助手是否在线
+        if not self._check_helper_online():
+            self.status.emit('读卡助手未运行,无法启用代理模式(请先启动读卡助手)')
+            return
+
+        self._proxy_mode = True
+        self._running = True
+        self._last_ret = 0  # 代理模式下视为正常
+        self.status.emit('已启用读卡助手代理模式(通过SSE获取卡号)')
+        self._proxy_thread = threading.Thread(target=self._proxy_loop, daemon=True)
+        self._proxy_thread.start()
+
+    def _check_helper_online(self):
+        """检测读卡助手是否在线(请求/status接口)。"""
+        try:
+            url = f'http://127.0.0.1:{self._helper_port}/status'
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                return data.get('connected', False) or data.get('dll_loaded', False)
+        except Exception:
+            return False
+
+    def _proxy_loop(self):
+        """读卡助手代理模式后台线程:连接SSE接收卡号事件。
+
+        连接 http://127.0.0.1:8765/events,解析SSE data行,
+        提取卡号后通过card_read信号发送到主线程。
+        断线后自动重连(3秒间隔)。
+        """
+        last_card = ''
+        last_card_time = 0
+
+        while self._running:
+            try:
+                url = f'http://127.0.0.1:{self._helper_port}/events'
+                req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
+                self.status.emit('读卡助手SSE连接中...')
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    self.status.emit('读卡助手SSE已连接,等待刷卡...')
+                    buf = ''
+                    while self._running:
+                        chunk = resp.read(256)
+                        if not chunk:
+                            break
+                        buf += chunk.decode('utf-8', errors='replace')
+                        # SSE以双换行分隔事件
+                        while '\n\n' in buf:
+                            event_str, buf = buf.split('\n\n', 1)
+                            # 解析data行
+                            for line in event_str.split('\n'):
+                                if line.startswith('data:'):
+                                    raw = line[5:].strip()
+                                    if not raw or raw.startswith(':'):
+                                        continue
+                                    try:
+                                        msg = json.loads(raw)
+                                        if msg.get('type') == 'card' and msg.get('data'):
+                                            card_no = msg['data'].get('card_no', '')
+                                            if card_no:
+                                                # 防抖
+                                                now = time.time()
+                                                if card_no == last_card and (now - last_card_time) < self._card_interval:
+                                                    continue
+                                                last_card = card_no
+                                                last_card_time = now
+                                                self.status.emit(f'读到卡号(代理): {card_no}')
+                                                self.card_read.emit(card_no)
+                                    except (json.JSONDecodeError, KeyError):
+                                        pass
+            except Exception as e:
+                if self._running:
+                    self.status.emit(f'读卡助手SSE断开: {e},3秒后重连...')
+                    time.sleep(3)
 
     def stop(self):
         """停止读卡器线程。"""
@@ -119,7 +220,11 @@ class CardReader(QObject):
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
         self._thread = None
+        if self._proxy_thread and self._proxy_thread.is_alive():
+            self._proxy_thread.join(timeout=2)
+        self._proxy_thread = None
         self._dll = None
+        self._proxy_mode = False
 
     def restart(self):
         """重启读卡器(前端设置页可调用)。"""
@@ -131,10 +236,9 @@ class CardReader(QObject):
     def status_info(self):
         """返回读卡器状态字典(供前端设备状态页展示)。
 
-        connected 判定基于最近一次 idr_read 返回码:
-            0=读到卡, 8=卡不在感应区(正常轮询) → 已连接
-            22/23/24=设备异常(拔掉/驱动错) → 未连接
-            None=尚未开始读卡 → 未连接
+        代理模式下:
+            dll_loaded=False(本进程未加载DLL),但connected=True(读卡助手在线)
+            mode='PROXY',description标注代理模式
 
         Returns:
             dict: {
@@ -149,6 +253,18 @@ class CardReader(QObject):
                 last_ret_desc: 返回码描述,
             }
         """
+        if self._proxy_mode:
+            return {
+                'running': self._running,
+                'dll_loaded': False,
+                'connected': self._running,
+                'driver_ok': True,
+                'description': '读卡助手代理模式(通过SSE连接读卡助手)',
+                'mode': 'PROXY',
+                'interval': self._card_interval,
+                'last_ret': self._last_ret,
+                'last_ret_desc': '代理模式-正常运行' if self._running else '代理模式-未连接',
+            }
         dll_loaded = self._dll is not None
         last = self._last_ret
         # 连接判定:最近一次读卡返回码为 0 或 8(感应区正常轮询)

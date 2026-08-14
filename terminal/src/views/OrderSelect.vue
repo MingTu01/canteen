@@ -732,8 +732,6 @@ watch(menuInvalidated, (v) => {
   padding: 10px 0;
   margin-bottom: 4px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 70%, rgba(255, 255, 255, 0));
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 .select__sticky-num,
 .select__sticky-rel {
@@ -933,7 +931,6 @@ watch(menuInvalidated, (v) => {
   justify-content: center;
   padding: 32px;
   background: rgba(14, 17, 21, 0.3);
-  backdrop-filter: blur(6px);
 }
 .cart-modal__panel {
   width: 100%;
@@ -1096,7 +1093,7 @@ watch(menuInvalidated, (v) => {
   border: none;
   cursor: pointer;
   font-family: inherit;
-  transition: transform 0.12s ease, opacity 0.15s ease;
+  transition: opacity 0.15s ease;
 }
 .cart-modal__qty-btn:active { transform: scale(0.92); }
 .cart-modal__qty-btn--inc {
@@ -1163,10 +1160,9 @@ watch(menuInvalidated, (v) => {
   font-weight: 700;
   cursor: pointer;
   font-family: inherit;
-  transition: transform 0.12s ease, opacity 0.15s ease;
+  transition: opacity 0.15s ease;
 }
 .cart-modal__checkout:active {
-  transform: scale(0.97);
   opacity: 0.85;
 }
 
@@ -1181,7 +1177,6 @@ watch(menuInvalidated, (v) => {
   opacity: 0;
 }
 .cart-modal-enter-from .cart-modal__panel {
-  transform: scale(0.92) translateY(8px);
   opacity: 0;
 }
 .cart-modal-leave-active {

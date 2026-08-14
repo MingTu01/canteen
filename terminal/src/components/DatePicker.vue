@@ -283,7 +283,6 @@ watch(showPicker, (open) => {
   justify-content: center;
   padding: 24px;
   background: rgba(14, 17, 21, 0.5);
-  backdrop-filter: blur(4px);
 }
 
 /* 弹窗面板 */

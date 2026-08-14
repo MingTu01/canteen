@@ -48,7 +48,7 @@ const sizeClass = (s: string) => ({
   font-weight: 700;
   border: none;
   cursor: pointer;
-  transition: transform 0.12s ease, opacity 0.15s ease, background 0.15s ease;
+  transition: opacity 0.15s ease, background 0.15s ease;
   font-family: inherit;
   border-radius: var(--doubao-radius);
   white-space: nowrap;

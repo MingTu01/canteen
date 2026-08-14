@@ -301,7 +301,6 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: var(--doubao-radius);
   min-width: 360px;
-  backdrop-filter: blur(8px);
 }
 .verify__avatar {
   display: flex;

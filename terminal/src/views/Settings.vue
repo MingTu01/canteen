@@ -1304,10 +1304,9 @@ onBeforeUnmount(() => {
   font-size: var(--fs-base);
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.12s ease, opacity 0.15s ease;
+  transition: opacity 0.15s ease;
 }
 .settings__runtime-save:active {
-  transform: scale(0.97);
   opacity: 0.85;
 }
 .settings__runtime-save:disabled {

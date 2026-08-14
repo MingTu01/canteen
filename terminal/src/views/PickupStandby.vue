@@ -320,17 +320,17 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- 右下角浮动按钮:菜品查询 -->
+    <!-- 右下角浮动按钮:订单查询 -->
     <button
       class="pickup-standby__query-btn btn-press"
-      aria-label="菜品查询"
+      aria-label="订单查询"
       @click="showOrderQuery = true"
     >
       <Search :size="26" />
-      <span class="pickup-standby__query-text">菜品查询</span>
+      <span class="pickup-standby__query-text">订单查询</span>
     </button>
 
-    <!-- 菜品查询弹窗 -->
+    <!-- 订单查询弹窗 -->
     <OrderQueryModal v-model="showOrderQuery" />
 
     <!-- 错误提示弹窗(5 秒自动消失,下一位刷卡也会关闭) -->
@@ -437,7 +437,6 @@ onUnmounted(() => {
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -480,7 +479,6 @@ onUnmounted(() => {
   font-size: var(--fs-lg);
   font-weight: 700;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(8px);
 }
 
 /* 摄像头后台扫码:隐藏 video 元素(ZXing 解码用,用户不可见) */
@@ -506,7 +504,6 @@ onUnmounted(() => {
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
   color: rgba(255, 255, 255, 0.6);
   font-size: var(--fs-xs);
 }
@@ -540,7 +537,6 @@ onUnmounted(() => {
   border: 1.5px solid rgba(255, 255, 255, 0.25);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(10px);
   color: #ffffff;
   font-family: inherit;
   font-size: var(--fs-base);

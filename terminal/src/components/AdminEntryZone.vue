@@ -315,7 +315,6 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: 32px;
   background: rgba(14, 17, 21, 0.55);
-  backdrop-filter: blur(6px);
 }
 
 /* 弹窗面板 */
@@ -473,7 +472,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
-  transition: transform 0.12s ease, opacity 0.15s ease, background 0.15s ease;
+  transition: opacity 0.15s ease, background 0.15s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -584,7 +583,6 @@ onBeforeUnmount(() => {
 }
 .modal-enter-from { opacity: 0; }
 .modal-enter-from .modal__panel {
-  transform: scale(0.92) translateY(8px);
   opacity: 0;
 }
 .modal-leave-active { transition: opacity 0.15s ease; }
