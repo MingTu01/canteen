@@ -469,7 +469,9 @@ onUnmounted(() => {
   padding: 28px 24px 24px;
   border-radius: var(--doubao-radius);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.08);
+  /* 降低透明度(更不透明),让菜品名称等内容在品牌背景上更清晰 */
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
 }
 .pickup-info__meal-head {
   display: flex;
@@ -530,8 +532,9 @@ onUnmounted(() => {
   gap: 16px;
   padding: 18px 22px;
   border-radius: var(--doubao-radius-sm);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* 降低透明度(更不透明),菜品行背景更实,菜品名更清晰 */
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 /* 辣度角标(仅有辣度时显示) */
 .pickup-info__spice-tag {
