@@ -245,6 +245,16 @@ def main():
     print(f'{Color.CYAN}企业智慧食堂终端 - 安装包打包脚本{Color.NC}')
     print(f'{Color.CYAN}{"=" * 60}{Color.NC}')
 
+    # 强制检查:必须用 32 位 Python 打包(兼容 Win7 32 位 + OUR_IDR.dll 32 位)
+    import ctypes
+    bits = ctypes.sizeof(ctypes.c_void_p) * 8
+    info(f'当前 Python: {sys.version.split()[0]} ({bits} 位)')
+    if bits != 32:
+        err(f'必须使用 32 位 Python 打包(当前 {bits} 位),兼容 Win7 32 位系统')
+        err(f'请使用: C:\\Python310-32\\python.exe build_installer.py')
+        sys.exit(1)
+    ok('Python 位数检查通过(32 位,兼容 Win7 32 位)')
+
     try:
         # 0. 检查驱动文件
         check_drivers()

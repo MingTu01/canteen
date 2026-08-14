@@ -1,17 +1,24 @@
 """
 读卡器集成(X86 终端)- HID 键盘注入模式(读卡助手在线检测)
 
-X86 终端不再直接加载 OUR_IDR.dll(64 位 Python 无法加载 32 位 DLL),
-也不使用 SSE 代理(效率低、不稳定)。
+架构选择(单一硬件访问者):
+  X86 终端虽为 32 位 Python 打包(可直接加载 OUR_IDR.dll),
+  但为避免读卡器硬件被多进程同时访问导致冲突/失灵,
+  统一由读卡助手(card_helper.exe)独占 OUR_IDR.dll 硬件访问。
+  这样无论 X86 终端、admin-web 还是其他程序需要刷卡,
+  都通过同一个读卡助手进程,彻底杜绝抢占问题。
 
 工作原理(HID 键盘注入):
-  读卡助手(card_helper.exe, 32 位进程)独占 OUR_IDR.dll 硬件访问,
+  读卡助手独占 OUR_IDR.dll 硬件访问,
   刷卡后将卡号模拟键盘输入(SendInput)到当前前台窗口。
   X86 终端保持绝对前台,前端 useCardReader.ts 通过 keydown 监听
   拼接卡号(Enter 结束),实现直接读卡,效率最高最稳定。
 
   本模块仅负责检测读卡助手是否在线(/status 接口),
   不再通过 SSE 接收卡号(卡号由前端 keydown 直接捕获)。
+
+兼容性:
+  X86 终端 + 读卡助手均使用 32 位 Python 打包,全面兼容 Win7 32 位及以上。
 
 信号:
   card_read(str): 兼容保留(HID 模式下不触发,卡号由前端 keydown 捕获)
