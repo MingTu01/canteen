@@ -2,14 +2,17 @@
  * 菜品/菜单本地缓存管理器
  *
  * 职责:
- * 1. 启动时拉取本门店所有菜品 → 存 IndexedDB → 拉取菜品图片 Blob → 存 IndexedDB
+ * 1. 启动时拉取本门店所有菜品 → 存 IndexedDB(仅元数据,不含图片)
  * 2. 建立 SSE 长连接,接收变更事件,增量更新本地缓存
- * 3. 对外提供同步 API:getDish(id) / getDishImageUrl(url),命中本地缓存
+ * 3. 对外提供同步 API:getDish(id),命中本地缓存
+ *
+ * 注:菜品图片 Blob 缓存已移除(终端不再渲染菜品图),仅保留员工头像缓存。
+ * images store 共用:菜品图已不再写入,残留的旧菜品 Blob 会在 refreshDishes 时
+ * 通过 dbClearUnusedImages(仅员工头像 URL)清理。
  *
  * 容错策略:
  * - IndexedDB 不可用:所有 get* 返回 null,调用方降级直查后端
  * - SSE 断开:自动重连(指数退避 + 随机抖动),断开期间用轮询兜底(每 5 分钟全量校验)
- * - 图片下载失败:跳过,渲染时降级走后端 URL
  *
  * 安全说明:
  * - SSE 不再通过 URL query 传递 token(会进浏览器历史/Referer/代理日志)
@@ -21,8 +24,6 @@ import api, { loadConfig } from '@/api'
 import {
   dbPutDishes,
   dbGetAllDishes,
-  dbPutImage,
-  dbGetImage,
   dbPutMenu,
   dbGetMenu,
   dbDeleteMenu,
@@ -32,8 +33,6 @@ import {
   dbClearMenus,
   dbClearEmployees,
   dbGetAllEmployees,
-  getDishImageBlob,
-  clearObjectUrlCache,
   type CachedDish,
 } from '@/utils/db'
 
@@ -177,18 +176,10 @@ async function doRefreshDishes(storeId: number): Promise<void> {
   await dbPutDishes(cached)
   console.log(`[cache] 已缓存 ${cached.length} 个菜品`)
 
-  // 并发下载图片(限并发 5)
-  // 支持两种图片源:
-  //   /uploads/xxx.jpg      - 后端上传的本地图(相对路径,需拼 baseUrl)
-  //   https://xxx.com/xxx.jpg - 外部图床(如 themealdb 测试图),绝对 URL 直接下载
-  const imageUrls = cached
-    .map((d) => d.image)
-    .filter((u): u is string => !!u && (u.startsWith('/uploads/') || /^https?:\/\//.test(u)))
-  await downloadImages(imageUrls)
-
-  // 清理不再使用的图片 Blob(菜品下架或图片 URL 变更后,旧 Blob 残留)
-  // 注意:images store 与员工头像共用,必须合并员工头像 URL,否则会误删头像
-  const usedUrls = new Set(cached.map((d) => d.image).filter(Boolean) as string[])
+  // 清理 IndexedDB 中残留的旧菜品图片 Blob(菜品图已不再下载/渲染)
+  // 注意:images store 与员工头像共用,仅传员工头像 URL 作为白名单,
+  // 这样旧的菜品图 Blob 会被清掉,头像保留
+  const usedUrls = new Set<string>()
   try {
     const employees = await dbGetAllEmployees()
     for (const e of employees) {
@@ -196,65 +187,6 @@ async function doRefreshDishes(storeId: number): Promise<void> {
     }
   } catch { /* 静默 */ }
   await dbClearUnusedImages(usedUrls).catch(() => {})
-}
-
-/** 批量下载图片到 IndexedDB,限并发 5,带重试和日志 */
-async function downloadImageUrls(urls: string[], baseUrl: string): Promise<void> {
-  const CONCURRENCY = 5
-  const MAX_RETRIES = 3
-  const queue = [...new Set(urls)]
-  let completed = 0
-  let failed = 0
-  const total = queue.length
-
-  async function downloadOne(url: string): Promise<boolean> {
-    // 已缓存则跳过
-    const existing = await dbGetImage(url)
-    if (existing) return true
-
-    const fullUrl = url.startsWith('http') ? url : baseUrl + url
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        // 用 axios 下载(带 token + 签名 URL),responseType=blob
-        const resp = await api.get(fullUrl, { responseType: 'blob', timeout: 15000 })
-        const blob = resp.data as Blob
-        // 校验:blob 太小可能是错误页面
-        if (!blob || blob.size < 100) {
-          console.warn(`[cache] 图片下载异常(大小 ${blob?.size || 0}B),尝试 ${attempt}/${MAX_RETRIES}: ${url}`)
-          continue
-        }
-        await dbPutImage(url, blob)
-        return true
-      } catch (e) {
-        if (attempt === MAX_RETRIES) {
-          console.error(`[cache] 图片下载失败(重试 ${MAX_RETRIES} 次): ${url}`, e)
-        }
-      }
-    }
-    return false
-  }
-
-  async function worker() {
-    while (queue.length > 0) {
-      const url = queue.shift()!
-      const ok = await downloadOne(url)
-      if (ok) completed++
-      else failed++
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: CONCURRENCY }, () => worker()),
-  )
-  console.log(`[cache] 图片下载完成:成功 ${completed}/${total},失败 ${failed}`)
-}
-
-/** 兼容方法:从终端配置中拿 serverUrl 拼接绝对路径 */
-async function downloadImages(urls: string[]): Promise<void> {
-  const config = loadConfig()
-  const baseUrl = config?.serverUrl || ''
-  await downloadImageUrls(urls, baseUrl)
 }
 
 /**
@@ -410,29 +342,10 @@ export async function getLocalDish(id: number): Promise<CachedDish | null> {
   return all.find((d) => d.id === id) || null
 }
 
-/**
- * 获取菜品图片 URL(优先本地 Blob,降级直查后端)。
- *
- * 返回的 blob: URL 由调用方独占管理,在组件卸载/数据更新时 revokeObjectURL。
- * 每次调用都创建新的 ObjectURL(不缓存),避免双重所有权导致裂图。
- * 同一图片被多个组件使用时各持独立 ObjectURL,revoke 互不影响。
- */
-export async function getDishImgUrl(imageUrl: string | null | undefined): Promise<string | null> {
-  if (!imageUrl) return null
-  // 1. 查本地 Blob 缓存,命中则创建新的 ObjectURL(由调用方独占管理)
-  const blob = await getDishImageBlob(imageUrl)
-  if (blob) return URL.createObjectURL(blob)
-  // 2. 降级:返回后端原始 URL(非 blob:,无需 revoke)
-  const config = loadConfig()
-  const baseUrl = config?.serverUrl || ''
-  return imageUrl.startsWith('http') ? imageUrl : baseUrl + imageUrl
-}
-
 /** 销毁缓存管理器(切换门店/解绑时调用) */
 export function destroyLocalCache(): void {
   stopSse()
   stopFallbackPoll()
-  clearObjectUrlCache()
   sseRetryCount = 0
   refreshInFlight = null
   currentStoreId = null
@@ -444,7 +357,6 @@ export function destroyLocalCache(): void {
 export async function purgeLocalCache(): Promise<void> {
   stopSse()
   stopFallbackPoll()
-  clearObjectUrlCache()
   sseRetryCount = 0
   refreshInFlight = null
   await dbClearDishesByStore(0).catch(() => {})

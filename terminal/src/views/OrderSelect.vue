@@ -94,7 +94,8 @@ const selectedDate = computed({
 /**
  * 将后端菜单响应拍平为前端结构。
  * 后端返回 [{menu:{id,mealType,...}, items:[{item,dish}]}]
- * 前端拍平成 [{id, mealType, menuItems:[{dishId,dishName,price,category,image,spiceLevel}]}]
+ * 前端拍平成 [{id, mealType, menuItems:[{dishId,dishName,price,category,spiceLevel}]}]
+ * 注:image 字段已不再使用(菜品图片移除),不再传递避免触发 imageSign 签名请求拖慢加载。
  */
 const transformMenu = (raw: any[]) =>
   raw.map((m: any) => ({
@@ -105,7 +106,6 @@ const transformMenu = (raw: any[]) =>
       dishName: it.dish?.name,
       price: it.dish?.price,
       category: it.dish?.category,
-      image: it.dish?.image,
       spiceLevel: it.dish?.spiceLevel,
     })),
   }))
@@ -260,6 +260,12 @@ const cartCount = cartTotalCount
 const cartTotal = cartTotalAmount
 /** 全部菜单是否加载完成(完成后统一渲染堆叠 section,杜绝布局抖动) */
 const allLoaded = ref(false)
+/**
+ * 是否完成初始化(仅等 loadConfig 配置加载完)。
+ * 一旦 initialized=true 即显示菜品堆叠区域,各日期菜单加载完就增量渲染,
+ * 不再阻塞首屏等待 30 天菜单 + 订单详情回填。
+ */
+const initialized = ref(false)
 
 /**
  * 某日期已订餐的餐别列表:
@@ -453,23 +459,33 @@ onMounted(async () => {
   if (!orderStore.selectedDate || !allDates.value.includes(orderStore.selectedDate)) {
     orderStore.selectedDate = startDateKey.value
   }
-  // 并发加载菜单和已下单订单(全部就绪后统一渲染堆叠 section,避免布局抖动)
-  await Promise.all([loadAllMenus(), fetchOrderedOrders()])
-  allLoaded.value = true
-  // 初始可视日期:优先当前选中日期,否则第一个有菜单的日期
-  let initDate = orderStore.selectedDate
-  if (!availableSet.value.has(initDate)) {
-    initDate = allDates.value.find((d) => availableSet.value.has(d)) || ''
-  }
-  if (initDate) {
-    visibleDate.value = initDate
-    orderStore.selectedDate = initDate
-    // 即时滚动到初始日期(非平滑,避免初始动画抖动)
+  // 关键优化:仅等 config 完成立即显示页面,菜单与订单后台并发加载增量渲染。
+  // 之前是 await Promise.all([30天菜单, 订单items回填]) 全部就绪才显示,
+  // 在 X86 + 内网下首屏要等好几秒,体验极差。
+  initialized.value = true
+  visibleDate.value = orderStore.selectedDate
+
+  // 后台并发:优先加载当前选中日期(秒开当前页),再加载其余日期
+  const initialDate = orderStore.selectedDate
+  Promise.all([
+    loadMenu(initialDate).then(() => loadAllMenus()),
+    fetchOrderedOrders(),
+  ]).finally(() => {
+    allLoaded.value = true
+    // 全部就绪后,若初始可视日期仍无菜单,滚动到第一个有菜单的日期
     nextTick(() => {
-      const el = daySectionRefs[initDate]
+      let initDate = visibleDate.value
+      if (!availableSet.value.has(initDate)) {
+        initDate = allDates.value.find((d) => availableSet.value.has(d)) || ''
+        if (initDate) {
+          visibleDate.value = initDate
+          orderStore.selectedDate = initDate
+        }
+      }
+      const el = initDate ? daySectionRefs[initDate] : null
       if (el) el.scrollIntoView({ block: 'start' })
     })
-  }
+  })
 })
 
 /**
@@ -521,17 +537,23 @@ watch(menuInvalidated, (v) => {
         class="select__content no-scrollbar"
         @scroll.passive="handleContentScroll"
       >
-        <!-- 全页加载态:并发加载所有日期菜单时显示 -->
-        <div v-if="!allLoaded" class="select__loading">
+        <!-- 全页初始化态:仅 loadConfig 阶段(极快) -->
+        <div v-if="!initialized" class="select__loading">
           <div class="select__spinner spinner"></div>
           <span>加载菜单中...</span>
         </div>
 
-        <!-- 空状态:无可订餐日期 -->
-        <div v-else-if="dateList.length === 0" class="select__empty">
+        <!-- 空状态:所有日期都无菜单(全部加载完后才确定) -->
+        <div v-else-if="allLoaded && dateList.length === 0" class="select__empty">
           <div class="select__empty-icon">📭</div>
           <div class="select__empty-title">暂无可订餐日期</div>
           <div class="select__empty-hint">请稍后再试</div>
+        </div>
+
+        <!-- 当前页加载中:已初始化但还没有任何日期就绪 -->
+        <div v-else-if="dateList.length === 0" class="select__loading">
+          <div class="select__spinner spinner"></div>
+          <span>加载菜单中...</span>
         </div>
 
         <!-- 所有可订餐日期垂直堆叠(单页滚动,无切换;数据已全部就绪) -->

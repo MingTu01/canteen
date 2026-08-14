@@ -10,9 +10,14 @@
  * 注意:签名接口 /file/sign 本身不带 /uploads/ 路径,不会触发拦截器,无循环风险。
  */
 
-/** 需要自动签名的图片字段名(覆盖后端返回的所有图片字段) */
+/**
+ * 需要自动签名的图片字段名(覆盖后端返回的所有图片字段)。
+ * 注:菜品图片字段 'image' / 'dishImage' 已不再使用(终端菜品图移除),
+ * 移除后菜单响应不再触发签名请求,大幅降低拦截器递归扫描开销。
+ * 保留:avatar(员工头像)、logoUrl(品牌logo)等仍需签名的字段。
+ */
 const IMAGE_FIELDS = [
-  'imageUrl', 'avatar', 'logoUrl', 'image', 'dishImage',
+  'imageUrl', 'avatar', 'logoUrl',
   'coverImage', 'iconUrl', 'photo', 'thumbnail', 'picUrl',
 ]
 

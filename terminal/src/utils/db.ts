@@ -240,26 +240,6 @@ export async function dbClearMenus(): Promise<void> {
   }
 }
 
-/* ============ 工具:从 IndexedDB 获取 Blob(组件自行 createObjectURL) ============ */
-
-/**
- * 获取菜品图片 Blob(组件自行 createObjectURL 并管理生命周期)。
- *
- * 设计说明:原先 db.ts 维护全局 objectUrlCache 缓存 ObjectURL,
- * 但组件 onUnmounted 时会 revoke 同一 URL,导致全局缓存返回死 URL → 裂图。
- * 现改为:db.ts 只返回 Blob,组件独占 createObjectURL/revokeObjectURL,
- * 彻底消除双重所有权问题。
- */
-export async function getDishImageBlob(url: string): Promise<Blob | null> {
-  if (!url) return null
-  return dbGetImage(url)
-}
-
-/** 兼容旧调用:清空 ObjectURL 缓存(现为空操作,ObjectURL 由组件独占管理) */
-export function clearObjectUrlCache(): void {
-  /* 空操作:ObjectURL 由组件独占管理,db.ts 不再缓存 */
-}
-
 /* ============ 员工数据缓存 ============ */
 
 /** 缓存的员工信息(精简版,仅刷卡识别所需) */

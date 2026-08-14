@@ -759,12 +759,12 @@ watch(
   font-family: inherit;
   font-size: var(--fs-base);
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  /* X86 终端禁用 box-shadow 过渡:0 -> 3px 会触发合成层重建,低端机闪烁 */
+  transition: border-color 0.15s ease;
 }
 .oqm__text-input:focus,
 .oqm__select:focus {
   border-color: var(--doubao-primary);
-  box-shadow: 0 0 0 3px rgba(0, 101, 253, 0.12);
 }
 
 /* ============ 日期选择器(复用 DatePicker 月历组件) ============

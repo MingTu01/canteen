@@ -1173,11 +1173,11 @@ onBeforeUnmount(() => {
   font-size: var(--fs-base);
   font-family: inherit;
   outline: none;
-  transition: border-color 0.16s ease, background 0.16s ease;
+  /* X86 终端禁用 background 过渡:灰 -> 白切换会触发整片背景重绘闪烁 */
+  transition: border-color 0.16s ease;
 }
 .settings__input:focus {
   border-color: var(--doubao-primary);
-  background: var(--doubao-card);
 }
 .settings__input--code {
   letter-spacing: 4px;

@@ -25,7 +25,7 @@
 #define MyAppNameEn "CanteenTerminal"
 ; 版本号默认值;build_installer.py 会从 VERSIONS.json 读取并通过 /DMyAppVersion 覆盖
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.27"
+  #define MyAppVersion "1.0.28"
 #endif
 #define MyAppPublisher "Enterprise Canteen System"
 #define MyAppExeName "canteen-terminal.exe"

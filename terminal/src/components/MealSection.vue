@@ -21,8 +21,6 @@ interface MenuItem {
   dishName: string
   price: number | string
   category?: string
-  image?: string
-  imageUrl?: string
   /** 辣度: 0-不辣, 1-微辣, 2-中辣, 3-重辣 */
   spiceLevel?: number
 }
