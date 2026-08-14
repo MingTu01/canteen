@@ -9,12 +9,17 @@
  * - 不可选日期:暗色不可点击,点击时网格闪烁红光提示
  * - 选择后关闭弹窗,触发 select 事件
  *
+ * unrestricted 模式(用于纯筛选场景,如订单查询):
+ *   传入 unrestricted=true 后,忽略 dates/availableSet 限制,
+ *   任意日期均可点击选中并关闭,无"暗色不可选"状态。
+ *
  * Props:
- *   dates: 日期字符串数组(yyyy-MM-dd),决定哪些日期在范围内
+ *   dates: 日期字符串数组(yyyy-MM-dd),决定哪些日期在范围内(unrestricted 时可省略)
  *   selectedDate: 当前选中的日期
- *   availableSet: 可选日期集合(Set<string>)
+ *   availableSet: 可选日期集合(Set<string>)(unrestricted 时可省略)
  *   markedSet: 已订餐日期集合(Set<string>),这些日期下方显示蓝色圆点标记;
  *              未传时回退到 availableSet(向后兼容)
+ *   unrestricted: 是否无限制模式(任意日期可选,用作纯筛选器)
  */
 import { ref, computed, watch, nextTick } from 'vue'
 import { parseDateKey, relativeLabel, pad2, toDateKey } from '@/utils'
@@ -31,11 +36,16 @@ interface DateCell {
 }
 
 const props = withDefaults(defineProps<{
-  dates: string[]
+  dates?: string[]
   selectedDate: string
-  availableSet: Set<string>
+  availableSet?: Set<string>
   markedSet?: Set<string>
-}>(), {})
+  unrestricted?: boolean
+}>(), {
+  dates: () => [],
+  availableSet: () => new Set<string>(),
+  unrestricted: false,
+})
 
 const emit = defineEmits<{ (e: 'select', key: string): void }>()
 
@@ -81,12 +91,15 @@ const grid = computed<DateCell[]>(() => {
   const markedSet = props.markedSet ?? props.availableSet
   for (let day = 1; day <= daysInMonth; day++) {
     const key = `${y}-${pad2(m)}-${pad2(day)}`
+    // unrestricted 模式:任意日期均可选(纯筛选器,不做限制)
+    const available = props.unrestricted || props.availableSet.has(key)
+    const inDates = props.unrestricted || datesSet.value.has(key)
     cells.push({
       key,
       md: `${pad2(m)}-${pad2(day)}`,
       rel: relativeLabel(key),
-      available: props.availableSet.has(key),
-      inDates: datesSet.value.has(key),
+      available,
+      inDates,
       marked: markedSet.has(key),
       isPlaceholder: false,
     })
@@ -138,6 +151,12 @@ const triggerFlash = () => {
 
 const onItemClick = (it: DateCell) => {
   if (it.isPlaceholder) return
+  // unrestricted 模式:任意日期均可选,直接选中并关闭
+  if (props.unrestricted) {
+    emit('select', it.key)
+    showPicker.value = false
+    return
+  }
   if (!it.inDates || !it.available) {
     triggerFlash()
     return
@@ -147,7 +166,7 @@ const onItemClick = (it: DateCell) => {
 }
 
 watch(showPicker, (open) => {
-  if (open && props.selectedDate && !props.availableSet.has(props.selectedDate)) {
+  if (open && !props.unrestricted && props.selectedDate && !props.availableSet.has(props.selectedDate)) {
     triggerFlash()
   }
 })
@@ -225,8 +244,9 @@ watch(showPicker, (open) => {
 
         <!-- 底部提示 -->
         <div class="date-picker__footer">
-          <span>暗色不可选</span>
-          <span class="date-picker__footer-sub">可选范围 {{ dates.length }} 天</span>
+          <span v-if="unrestricted">任意日期可选</span>
+          <span v-else>暗色不可选</span>
+          <span v-if="!unrestricted" class="date-picker__footer-sub">可选范围 {{ dates.length }} 天</span>
         </div>
       </div>
     </div>

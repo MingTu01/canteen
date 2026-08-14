@@ -18,7 +18,7 @@ import api, { loadConfig } from '@/api'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { formatMoney, formatDateTime } from '@/composables/useFormat'
 import {
-  mealTypeLabel, toDateKey, dateWindow, shiftKey,
+  mealTypeLabel, toDateKey,
 } from '@/utils'
 import {
   Search, X, ChevronLeft, Loader2, FileText,
@@ -64,18 +64,12 @@ const view = ref<'list' | 'summary'>('list')
 
 const today = toDateKey(new Date())
 
-/* ============ 日期选择器(复用订餐页月历组件) ============
- * 提供近 90 天可选日期,点击触发按钮弹出月历模态选择,
- * 与订餐页面日历交互/视觉完全一致。
+/* ============ 日期选择器(复用订餐页月历组件,无限制筛选模式) ============
+ * 作为纯筛选器使用,不做任何日期限制:
+ *   - 默认今天,可翻月历查看任意过去/未来日期
+ *   - 任意日期均可点击选中并立即查询(不管当天有没有菜)
+ *   - 传入 unrestricted=true,DatePicker 忽略 dates/availableSet 限制
  */
-const DATE_RANGE_DAYS = 90
-/** 日期列表:今天往前推 89 天(共 90 天,含今天) */
-const dateList = computed(() => {
-  const startKey = shiftKey(today, -(DATE_RANGE_DAYS - 1))
-  return dateWindow(startKey, DATE_RANGE_DAYS, 1)
-})
-/** 可选日期集合(近 90 天均可点击) */
-const availableSet = computed(() => new Set(dateList.value))
 
 /* ============ 查询主界面 ============ */
 const queryDate = ref(today)
@@ -319,13 +313,12 @@ watch(
 
             <!-- 筛选条(含日期选择器,复用订餐页月历) -->
             <div class="oqm__filters">
-              <!-- 日期选择(点击弹出月历,与订餐页一致) -->
+              <!-- 日期选择(点击弹出月历,无限制筛选模式,任意日期可选) -->
               <label class="oqm__field oqm__field--date">
                 <span class="oqm__field-label">日期</span>
                 <DatePicker
-                  :dates="dateList"
                   :selected-date="queryDate"
-                  :available-set="availableSet"
+                  unrestricted
                   @select="onSelectQueryDate"
                 />
               </label>
@@ -454,13 +447,12 @@ watch(
 
             <!-- 汇总信息条(含日期选择器,复用订餐页月历) -->
             <div class="oqm__filters">
-              <!-- 日期选择(点击弹出月历,与订餐页一致) -->
+              <!-- 日期选择(点击弹出月历,无限制筛选模式,任意日期可选) -->
               <label class="oqm__field oqm__field--date">
                 <span class="oqm__field-label">日期</span>
                 <DatePicker
-                  :dates="dateList"
                   :selected-date="summaryDate"
-                  :available-set="availableSet"
+                  unrestricted
                   @select="onSelectSummaryDate"
                 />
               </label>
@@ -779,6 +771,9 @@ watch(
  * DatePicker 原为 DateSidebar 竖向触发按钮,此处覆盖为横向紧凑布局,
  * 使其在筛选条内与其它字段(姓名/餐别/状态)高度对齐、视觉协调。
  * 仅作用于本组件作用域,不影响订餐页原 DatePicker。
+ *
+ * z-index 提高:OrderQueryModal overlay=200 / 详情 overlay=210,
+ * DatePicker 弹窗 overlay 提高到 300,确保关闭按钮/蒙版可点击,不被遮挡。
  */
 .oqm__field--date {
   flex-shrink: 0;
@@ -803,6 +798,10 @@ watch(
 }
 .oqm__field--date :deep(.date-picker__trigger-rel) {
   font-size: var(--fs-xs);
+}
+/* 弹窗蒙版提到 OrderQueryModal 各层之上,确保关闭按钮/蒙版点击生效 */
+.oqm__field--date :deep(.date-picker__overlay) {
+  z-index: 300;
 }
 .oqm__search-wrap {
   position: relative;
