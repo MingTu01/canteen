@@ -165,6 +165,11 @@ const onItemClick = (it: DateCell) => {
   showPicker.value = false
 }
 
+/** 关闭月历弹窗(供模板的蒙版 @click.self 与关闭按钮 @click 调用) */
+const closePicker = () => {
+  showPicker.value = false
+}
+
 watch(showPicker, (open) => {
   if (open && !props.unrestricted && props.selectedDate && !props.availableSet.has(props.selectedDate)) {
     triggerFlash()
@@ -186,70 +191,74 @@ watch(showPicker, (open) => {
       <span class="date-picker__trigger-rel">{{ triggerRel || '\u00A0' }}</span>
     </button>
 
-    <!-- 弹出月历模态 -->
-    <div
-      v-if="showPicker"
-      class="date-picker__overlay"
-      @click.self="showPicker = false"
-    >
-      <div class="date-picker__panel">
-        <!-- 顶部:月份导航 + 关闭 -->
-        <div class="date-picker__head">
-          <button class="date-picker__nav btn-press" aria-label="上一月" @click="prevMonth">
-            <ChevronLeft :size="22" />
-          </button>
-          <span class="date-picker__month">{{ monthLabel }}</span>
-          <button class="date-picker__nav btn-press" aria-label="下一月" @click="nextMonth">
-            <ChevronRight :size="22" />
-          </button>
-          <button class="date-picker__close btn-press" aria-label="关闭" @click="showPicker = false">
-            <X :size="18" />
-          </button>
-        </div>
+    <!-- 弹出月历模态(用 Teleport 传送到 body,
+         彻底脱离父级堆叠上下文/transform/scoped 干扰,
+         确保蒙版点击、关闭按钮在任何嵌套层级下都能正常工作) -->
+    <Teleport to="body">
+      <div
+        v-if="showPicker"
+        class="date-picker__overlay"
+        @click.self="closePicker"
+      >
+        <div class="date-picker__panel">
+          <!-- 顶部:月份导航 + 关闭 -->
+          <div class="date-picker__head">
+            <button class="date-picker__nav btn-press" aria-label="上一月" @click="prevMonth">
+              <ChevronLeft :size="22" />
+            </button>
+            <span class="date-picker__month">{{ monthLabel }}</span>
+            <button class="date-picker__nav btn-press" aria-label="下一月" @click="nextMonth">
+              <ChevronRight :size="22" />
+            </button>
+            <button class="date-picker__close btn-press" aria-label="关闭" @click="closePicker">
+              <X :size="18" />
+            </button>
+          </div>
 
-        <!-- 表头 -->
-        <div class="date-picker__week-header">
-          <span v-for="w in WEEK_HEADER" :key="w" class="date-picker__week-cell">{{ w }}</span>
-        </div>
+          <!-- 表头 -->
+          <div class="date-picker__week-header">
+            <span v-for="w in WEEK_HEADER" :key="w" class="date-picker__week-cell">{{ w }}</span>
+          </div>
 
-        <!-- 月历网格 -->
-        <div ref="flashRef" class="date-picker__grid">
-          <button
-            v-for="it in grid"
-            :key="it.key"
-            type="button"
-            :class="[
-              'date-cell',
-              {
-                'date-cell--placeholder': it.isPlaceholder,
-                'date-cell--on': !it.isPlaceholder && it.inDates && it.available,
-                'date-cell--off': !it.isPlaceholder && (!it.inDates || !it.available),
-                'date-cell--active': !it.isPlaceholder && it.key === selectedDate,
-              },
-            ]"
-            :disabled="it.isPlaceholder"
-            @click="onItemClick(it)"
-          >
-            <template v-if="!it.isPlaceholder">
-              <span class="date-cell__md">{{ it.md }}</span>
-              <span
-                class="date-cell__label"
-                :class="{ 'date-cell__label--rel': !!it.rel }"
-              >{{ it.rel }}</span>
-              <!-- 已订餐蓝色圆点标记 -->
-              <span v-if="it.marked" class="date-cell__dot"></span>
-            </template>
-          </button>
-        </div>
+          <!-- 月历网格 -->
+          <div ref="flashRef" class="date-picker__grid">
+            <button
+              v-for="it in grid"
+              :key="it.key"
+              type="button"
+              :class="[
+                'date-cell',
+                {
+                  'date-cell--placeholder': it.isPlaceholder,
+                  'date-cell--on': !it.isPlaceholder && it.inDates && it.available,
+                  'date-cell--off': !it.isPlaceholder && (!it.inDates || !it.available),
+                  'date-cell--active': !it.isPlaceholder && it.key === selectedDate,
+                },
+              ]"
+              :disabled="it.isPlaceholder"
+              @click="onItemClick(it)"
+            >
+              <template v-if="!it.isPlaceholder">
+                <span class="date-cell__md">{{ it.md }}</span>
+                <span
+                  class="date-cell__label"
+                  :class="{ 'date-cell__label--rel': !!it.rel }"
+                >{{ it.rel }}</span>
+                <!-- 已订餐蓝色圆点标记 -->
+                <span v-if="it.marked" class="date-cell__dot"></span>
+              </template>
+            </button>
+          </div>
 
-        <!-- 底部提示 -->
-        <div class="date-picker__footer">
-          <span v-if="unrestricted">任意日期可选</span>
-          <span v-else>暗色不可选</span>
-          <span v-if="!unrestricted" class="date-picker__footer-sub">可选范围 {{ dates.length }} 天</span>
+          <!-- 底部提示 -->
+          <div class="date-picker__footer">
+            <span v-if="unrestricted">任意日期可选</span>
+            <span v-else>暗色不可选</span>
+            <span v-if="!unrestricted" class="date-picker__footer-sub">可选范围 {{ dates.length }} 天</span>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
