@@ -175,7 +175,7 @@ const onRestartCardReader = async () => {
 const cardReaderStatusText = (): string => {
   if (!isPythonShell.value) return '浏览器环境(不支持检测)'
   if (!cardReaderStatus.value) return '未检测'
-  if (cardReaderStatus.value.connected) return '已连接(读卡助手代理)'
+  if (cardReaderStatus.value.connected) return '已连接(读卡助手 HID 模式)'
   if (!cardReaderStatus.value.connected) return '读卡助手未运行(请先启动读卡助手)'
   return '未连接'
 }

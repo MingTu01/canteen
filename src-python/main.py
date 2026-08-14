@@ -504,6 +504,46 @@ def start_update_check(window, card_reader):
 
 
 # ===== 守护定时器回调:读卡器线程监控 / 网络连通性检测 =====
+def keep_foreground(window):
+    """强制将 X86 终端窗口置顶到前台(SetForegroundWindow + AttachThreadInput)。
+
+    HID 键盘注入模式下,读卡助手将卡号模拟键盘输入到当前前台窗口,
+    X86 终端必须保持前台才能接收到刷卡输入。
+    使用 AttachThreadInput 技巧绕过 Windows 前台锁定限制。
+
+    仅在全屏模式(_is_fullscreen=True)时强制前台,
+    配置页(窗口模式)不干扰用户其他操作。
+    """
+    # 仅全屏模式才保持前台(配置页窗口模式不干扰)
+    if not getattr(window, '_is_fullscreen', True):
+        return
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = int(window.winId())
+
+        # 已前台则跳过
+        if user32.GetForegroundWindow() == hwnd:
+            return
+
+        # AttachThreadInput 技巧:附加前台线程输入到本线程,
+        # 绕过 Windows 前台锁定(SetForegroundWindow 的 BlockInput 限制)
+        fg_hwnd = user32.GetForegroundWindow()
+        fg_tid = user32.GetWindowThreadProcessId(fg_hwnd, None)
+        cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        if fg_tid != cur_tid:
+            user32.AttachThreadInput(cur_tid, fg_tid, True)
+
+        # Qt 激活 + Win API 强制前台
+        window.activateWindow()
+        window.raise_()
+        user32.SetForegroundWindow(hwnd)
+
+        if fg_tid != cur_tid:
+            user32.AttachThreadInput(cur_tid, fg_tid, False)
+    except Exception as e:
+        print(f'[Foreground] 置顶失败: {e}')
+
+
 def check_card_reader(reader):
     """检查读卡器线程是否存活,异常退出则自动重启。
 
@@ -735,6 +775,15 @@ def main():
     net_watchdog.timeout.connect(lambda: check_network(window))
     net_watchdog.start(60000)
     print('[Init] 已启动网络心跳定时器(60秒/次)')
+
+    # 10.3 守护定时器:保持窗口绝对前台(每 2 秒一次)
+    #     HID 键盘注入模式下,读卡助手刷卡后模拟键盘输入到前台窗口,
+    #     X86 终端必须保持前台才能接收刷卡输入(前端 keydown 监听)。
+    #     仅全屏模式生效,配置页(窗口模式)不干扰。
+    fg_timer = QTimer(window)
+    fg_timer.timeout.connect(lambda: keep_foreground(window))
+    fg_timer.start(2000)
+    print('[Init] 已启动前台保持定时器(2秒/次,HID 读卡模式)')
 
     print('[Init] 初始化完成,进入事件循环')
     print('-' * 60)

@@ -2,9 +2,8 @@
 """
 读卡助手(后台静默程序) - 把 OUR_IDR.dll 读卡器变成"模拟键盘输入+回车"
 
-让 CH375/CH372 读卡器刷卡后,卡号像键盘打字一样自动输入到当前聚焦的输入框,
-并按可选设置追加回车。这样任何网页 / 任意程序只要聚焦输入框就能刷卡,
-前端无需再依赖复杂的 SSE 接通。
+让 CH375/CH372 读卡器刷卡后,卡号像键盘打字一样自动输入到当前前台窗口,
+并按可选设置追加回车。X86 终端保持前台时直接接收卡号,无需 SSE。
 
 同时在本机 127.0.0.1:8765 开放一个状态接口(带 CORS),供 admin-web 显示
 绿色/红色读卡状态图标、连接详情与驱动下载引导。
@@ -15,7 +14,6 @@
 
 本机状态接口:
   GET /status    -> JSON 状态(connected / mode / driver_ok / version / auto_start)
-  GET /events    -> SSE 推送读卡事件(可选,admin-web 默认用键盘注入,不依赖它)
   GET /beep      -> 蜂鸣测试
 
 参数:
@@ -29,7 +27,6 @@ import ctypes
 import datetime
 import json
 import os
-import queue
 import sys
 import threading
 import time
@@ -38,7 +35,7 @@ from ctypes import wintypes
 # ---------------------------------------------------------------------------
 # 0. 常量
 # ---------------------------------------------------------------------------
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 ERROR_CODES = {
     0: '操作成功',
     8: '卡不在感应区',
@@ -180,51 +177,8 @@ class CardReader:
         self._interval = max(0.5, float(interval))
         self._send_enter = bool(send_enter)
         self._replace_field = bool(replace_field)
-        self._subscribers = []
-        self._lock = threading.Lock()
         self._last_ret = None  # 最近一次读卡返回码(用于状态)
         self._active = True    # 是否处于读卡状态(False 时暂停,让出读卡器给其他程序)
-        # SSE 订阅者计数:有订阅者(X86 终端)时自动跳过键盘注入,避免抢占
-        self._sse_clients = 0
-
-    # ---- 订阅 / 广播 ----
-    def subscribe(self):
-        q = queue.Queue()
-        with self._lock:
-            self._subscribers.append(q)
-            self._sse_clients += 1
-            client_count = self._sse_clients
-        if client_count == 1:
-            log('SSE 订阅者接入,自动暂停键盘注入(交由 X86 终端处理卡号)')
-            self._broadcast('status', 'SSE 客户端已连接,键盘注入已暂停')
-        return q
-
-    def unsubscribe(self, q):
-        with self._lock:
-            if q in self._subscribers:
-                self._subscribers.remove(q)
-                if self._sse_clients > 0:
-                    self._sse_clients -= 1
-                client_count = self._sse_clients
-            else:
-                client_count = self._sse_clients
-        if client_count == 0:
-            log('所有 SSE 订阅者已断开,恢复键盘注入')
-            self._broadcast('status', 'SSE 客户端全部断开,键盘注入已恢复')
-
-    def sse_client_count(self):
-        """返回当前 SSE 订阅者数量。"""
-        with self._lock:
-            return self._sse_clients
-
-    def _broadcast(self, event_type, data):
-        msg = json.dumps({'type': event_type, 'data': data}, ensure_ascii=False)
-        with self._lock:
-            for q in self._subscribers:
-                try:
-                    q.put_nowait(msg)
-                except queue.Full:
-                    pass
 
     # ---- DLL 加载 ----
     def _find_dll_dir(self):
@@ -293,23 +247,20 @@ class CardReader:
         last = self._last_ret
         connected = dll_loaded and last is not None and last in (0, 8)
         driver_ok = dll_loaded and last is not None and last != 23
-        sse_clients = self.sse_client_count()
         return {
             'running': self._running,
             'dll_loaded': dll_loaded,
             'connected': connected,
             'driver_ok': driver_ok,
-            'mode': 'OUR_IDR',
+            'mode': 'HID',
             'active': self._active,
-            'description': 'CH375/CH372 USB 读卡器(OUR_IDR.dll 模拟键盘)',
+            'description': 'CH375/CH372 USB 读卡器(OUR_IDR.dll 模拟键盘,HID 模式)',
             'last_ret': last,
             'last_ret_desc': ERROR_CODES.get('' if last is None else last, '未知'),
             'interval': self._interval,
             'send_enter': self._send_enter,
             'python_bits': ctypes.sizeof(ctypes.c_void_p) * 8,
             'version': VERSION,
-            'sse_clients': sse_clients,
-            'keyboard_inject_enabled': sse_clients == 0,
         }
 
     def start(self):
@@ -318,7 +269,7 @@ class CardReader:
         ok, msg = self.load()
         if not ok:
             self._last_ret = 23
-            self._broadcast('status', msg)
+            log(msg)
             return
         self._running = True
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
@@ -334,32 +285,37 @@ class CardReader:
         """暂停/恢复读卡。暂停时不再调用 idr_read,读卡器让给其他程序。"""
         self._active = bool(active)
         if self._active:
-            self._broadcast('status', '读卡已启用')
+            log('读卡已启用')
         else:
-            self._broadcast('status', '读卡已暂停,读卡器已让出')
+            log('读卡已暂停,读卡器已让出')
 
     def _read_loop(self):
+        """纯 HID 键盘注入模式:刷卡后始终模拟键盘输入到当前前台窗口。
+
+        X86 终端通过保持绝对前台接收键盘输入(useCardReader keydown 监听),
+        无需 SSE 通道,效率更高更稳定。
+        """
         # 蜂鸣确认
         try:
             ret = self.beep(38)
             self._last_ret = ret
             if ret == 0:
-                self._broadcast('status', '读卡器连接成功(蜂鸣确认)')
+                log('读卡器连接成功(蜂鸣确认)')
             else:
-                self._broadcast('status', f'读卡器蜂鸣失败: {ret} ({ERROR_CODES.get(ret, "未知")})')
+                log(f'读卡器蜂鸣失败: {ret} ({ERROR_CODES.get(ret, "未知")})')
         except Exception as e:
-            self._broadcast('status', f'读卡器蜂鸣异常: {e}')
+            log(f'读卡器蜂鸣异常: {e}')
 
         # 设备号
         try:
             dev_buf = (ctypes.c_ubyte * 4)()
             ret = self._dll.pcdgetdevicenumber(dev_buf)
             if ret == 0:
-                self._broadcast('status', f'设备号: {"-".join(str(dev_buf[i]) for i in range(4))}')
+                log(f'设备号: {"-".join(str(dev_buf[i]) for i in range(4))}')
         except Exception:
             pass
 
-        self._broadcast('status', '开始监听刷卡(模拟键盘)...')
+        log('开始监听刷卡(HID 键盘注入模式)...')
 
         card_buf = (ctypes.c_ubyte * 5)()
         last_card = ''
@@ -374,7 +330,7 @@ class CardReader:
             try:
                 ret = self._dll.idr_read(card_buf)
             except Exception as e:
-                self._broadcast('status', f'idr_read 异常: {e}')
+                log(f'idr_read 异常: {e}')
                 time.sleep(1)
                 continue
             self._last_ret = ret
@@ -395,23 +351,15 @@ class CardReader:
                     except Exception:
                         pass
                     log(f'刷卡: {card_no}')
-                    # 有 SSE 订阅者(X86 终端)时跳过键盘注入,避免抢占;
-                    # 卡号仅通过 SSE 广播给订阅者处理
-                    if self.sse_client_count() == 0:
-                        self._inject(card_no)
-                    else:
-                        log(f'检测到 SSE 订阅者,跳过键盘注入: {card_no}')
-                    self._broadcast('card', {
-                        'card_no': card_no,
-                        'ts': datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3],
-                    })
+                    # 始终键盘注入(纯 HID 模式)
+                    self._inject(card_no)
             elif ret == 8:
                 error_count = 0
             else:
                 error_count += 1
                 err_msg = ERROR_CODES.get(ret, f'未知错误 {ret}')
                 if error_count <= 3:
-                    self._broadcast('status', f'读卡异常: {ret} ({err_msg})')
+                    log(f'读卡异常: {ret} ({err_msg})')
                 if ret in (22, 23, 24):
                     time.sleep(2)
                 else:
@@ -420,7 +368,7 @@ class CardReader:
 
             time.sleep(0.1)
 
-        self._broadcast('status', '读卡器线程退出')
+        log('读卡器线程退出')
 
     def _inject(self, card_no):
         """把卡号模拟成键盘输入到当前聚焦输入框。"""
@@ -444,7 +392,7 @@ def parse_card_number(data):
 
 
 # ---------------------------------------------------------------------------
-# 4. HTTP + SSE 状态服务
+# 4. HTTP 状态服务(纯状态接口,无 SSE)
 # ---------------------------------------------------------------------------
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -476,29 +424,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif path == '/events':
-            self.send_response(200)
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
-            self.end_headers()
-            q = _reader.subscribe()
-            try:
-                self.wfile.write(b': connected\n\n')
-                self.wfile.flush()
-                while True:
-                    try:
-                        msg = q.get(timeout=15)
-                        self.wfile.write(f'data: {msg}\n\n'.encode('utf-8'))
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(b': keepalive\n\n')
-                        self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                pass
-            finally:
-                _reader.unsubscribe(q)
         elif path == '/beep':
             ret = _reader.beep(38)
             body = json.dumps({'ok': ret == 0, 'ret': ret}).encode('utf-8')
@@ -587,25 +512,32 @@ class TrayController:
         icon.update_menu()
 
     def _show_detail(self, icon, item):
-        sse = self._reader.sse_client_count()
-        kb_status = '已暂停(X86 终端已接管)' if sse > 0 else '已启用'
+        """在新线程中显示详情弹窗,避免阻塞 pystray 菜单线程。
+
+        pystray 菜单回调在同一线程执行,如果直接调用阻塞式 MessageBoxW,
+        可能导致菜单无法正常关闭、MessageBox 窗口无法获得焦点。
+        新线程 + 延迟 0.15s 等菜单关闭后再弹窗,确保可点击关闭。
+        """
+        threading.Thread(target=self._do_show_detail, daemon=True).start()
+
+    def _do_show_detail(self):
+        time.sleep(0.15)  # 等待 pystray 菜单关闭
+        active = self._reader._active
+        kb_status = '已启用' if active else '已暂停(手动暂停中)'
         text = (
             f'读卡助手 v{VERSION}(开机静默自启)\n\n'
             '作用:\n'
             '在本机加载 CH375/CH372 读卡器(OUR_IDR.dll)。\n'
-            '刷卡后自动把卡号填入当前聚焦的输入框并追加回车,\n'
-            '方便在「员工管理」等网页里录入卡号。\n\n'
-            '自动协调:\n'
-            f'· 当前 SSE 订阅者: {sse} 个\n'
-            f'· 键盘注入状态: {kb_status}\n'
-            '· 当 X86 终端通过 SSE 连接时,自动暂停键盘注入,\n'
-            '  卡号仅发送给 X86 终端处理,避免抢占\n\n'
+            '刷卡后自动把卡号模拟键盘输入到当前前台窗口,\n'
+            'X86 终端保持前台时直接接收卡号,无需 SSE。\n\n'
+            '当前状态:\n'
+            f'· 键盘注入: {kb_status}\n'
+            f'· 运行中: {"是" if self._reader._running else "否"}\n\n'
             '托盘操作:\n'
             '· 暂停使用: 暂时让出读卡器给其他程序,\n'
             '  再点「继续使用」恢复刷卡\n'
             '· 退出: 结束读卡助手\n\n'
-            '日常使用: 打开新增/编辑员工弹窗,\n'
-            '光标放卡号框后刷卡即可自动填入。'
+            '注意: X86 终端必须在前台才能接收到刷卡输入。'
         )
         message_box('读卡助手', text)
 

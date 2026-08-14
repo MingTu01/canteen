@@ -293,11 +293,14 @@ watch(showPicker, (open) => {
   line-height: 1;
 }
 
-/* 模态遮罩 */
+/* 模态遮罩
+ * z-index 1000:确保在所有弹窗(OrderQueryModal=200,详情层=210 等)之上,
+ * 点击蒙版/关闭按钮都能正常生效,不会被父级堆叠上下文遮挡。
+ */
 .date-picker__overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;

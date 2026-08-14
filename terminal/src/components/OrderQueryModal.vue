@@ -772,8 +772,7 @@ watch(
  * 使其在筛选条内与其它字段(姓名/餐别/状态)高度对齐、视觉协调。
  * 仅作用于本组件作用域,不影响订餐页原 DatePicker。
  *
- * z-index 提高:OrderQueryModal overlay=200 / 详情 overlay=210,
- * DatePicker 弹窗 overlay 提高到 300,确保关闭按钮/蒙版可点击,不被遮挡。
+ * z-index: DatePicker overlay 已在组件内设为 1000,无需再覆盖。
  */
 .oqm__field--date {
   flex-shrink: 0;
@@ -798,10 +797,6 @@ watch(
 }
 .oqm__field--date :deep(.date-picker__trigger-rel) {
   font-size: var(--fs-xs);
-}
-/* 弹窗蒙版提到 OrderQueryModal 各层之上,确保关闭按钮/蒙版点击生效 */
-.oqm__field--date :deep(.date-picker__overlay) {
-  z-index: 300;
 }
 .oqm__search-wrap {
   position: relative;

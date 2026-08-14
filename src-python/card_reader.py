@@ -1,21 +1,20 @@
 """
-读卡器集成(X86 终端)- 读卡助手代理模式
+读卡器集成(X86 终端)- HID 键盘注入模式(读卡助手在线检测)
 
 X86 终端不再直接加载 OUR_IDR.dll(64 位 Python 无法加载 32 位 DLL),
-而是通过 HTTP/SSE 连接本机读卡助手(127.0.0.1:8765)获取卡号。
+也不使用 SSE 代理(效率低、不稳定)。
 
-架构:
+工作原理(HID 键盘注入):
   读卡助手(card_helper.exe, 32 位进程)独占 OUR_IDR.dll 硬件访问,
-  在本机 127.0.0.1:8765 开放:
-    GET /status  -> JSON 状态(connected / driver_ok / version / sse_clients)
-    GET /events  -> SSE 推送读卡事件
-    GET /beep    -> 蜂鸣测试
+  刷卡后将卡号模拟键盘输入(SendInput)到当前前台窗口。
+  X86 终端保持绝对前台,前端 useCardReader.ts 通过 keydown 监听
+  拼接卡号(Enter 结束),实现直接读卡,效率最高最稳定。
 
-  X86 终端通过 SSE 长连接接收卡号事件,实现间接读卡。
-  当 X86 终端订阅 SSE 后,读卡助手会自动暂停键盘注入,避免抢占。
+  本模块仅负责检测读卡助手是否在线(/status 接口),
+  不再通过 SSE 接收卡号(卡号由前端 keydown 直接捕获)。
 
 信号:
-  card_read(str): 读到卡号(已去重防抖,十进制格式)
+  card_read(str): 兼容保留(HID 模式下不触发,卡号由前端 keydown 捕获)
   status(str): 状态信息(用于调试)
 """
 import json
@@ -27,22 +26,22 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 
 class CardReader(QObject):
-    """读卡器封装(读卡助手代理模式)。
+    """读卡器封装(HID 键盘注入模式 + 读卡助手在线检测)。
 
     信号:
-        card_read(str): 读到卡号(已去重防抖,十进制格式)
+        card_read(str): 兼容保留(HID 模式下不触发)
         status(str): 状态信息(用于调试)
     """
     card_read = pyqtSignal(str)
     status = pyqtSignal(str)
 
-    # 读卡助手代理模式的默认端口
+    # 读卡助手状态接口端口
     HELPER_PORT = 8765
 
     def __init__(self, card_interval=1.5):
         """
         Args:
-            card_interval: 同卡号防抖间隔(秒),同一张卡在此间隔内不重复触发
+            card_interval: 同卡号防抖间隔(秒,前端 keydown 监听使用)
         """
         super().__init__()
         self._running = False
@@ -61,24 +60,23 @@ class CardReader(QObject):
             self.status.emit(f'防抖间隔已更新: {self._card_interval} 秒')
 
     def start(self):
-        """启动读卡助手代理模式(通过 HTTP/SSE 连接本机读卡助手)。
+        """启动读卡助手在线检测。
 
-        读卡助手(card_helper)是独立的 32 位进程,负责加载 OUR_IDR.dll
-        和实际读卡,并在 127.0.0.1:8765 提供 SSE 事件流(/events)。
-        X86 终端通过 SSE 长连接接收卡号事件,实现间接读卡。
+        HID 模式下卡号由前端 keydown 监听直接捕获(读卡助手键盘注入),
+        本模块仅启动后台线程定期检测读卡助手是否在线,
+        不再通过 SSE 接收卡号。
         """
         if self._running:
             return
 
         # 先检测读卡助手是否在线
         if not self._check_helper_online():
-            self.status.emit('读卡助手未运行,无法读卡(请先启动读卡助手)')
-            return
+            self.status.emit('读卡助手未运行(请先启动读卡助手,刷卡输入依赖读卡助手)')
+        else:
+            self.status.emit('读卡助手已在线(HID 键盘注入模式,前端 keydown 监听就绪)')
 
         self._running = True
-        self._last_ret = 0  # 代理模式下视为正常
-        self.status.emit('已启用读卡助手代理模式(通过 SSE 获取卡号)')
-        self._thread = threading.Thread(target=self._proxy_loop, daemon=True)
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
 
     def _check_helper_online(self):
@@ -94,66 +92,24 @@ class CardReader(QObject):
             self._helper_online = False
             return False
 
-    def _proxy_loop(self):
-        """读卡助手代理模式后台线程:连接 SSE 接收卡号事件。
+    def _monitor_loop(self):
+        """后台监控线程:定期检测读卡助手在线状态(每 15 秒一次)。
 
-        连接 http://127.0.0.1:8765/events,解析 SSE data 行,
-        提取卡号后通过 card_read 信号发送到主线程。
-        断线后自动重连(3 秒间隔),并重新检测读卡助手在线状态。
+        HID 模式下不接收卡号(前端 keydown 直接捕获),
+        仅监控读卡助手在线状态,掉线时通知前端。
         """
-        last_card = ''
-        last_card_time = 0
-
         while self._running:
-            try:
-                url = f'http://127.0.0.1:{self._helper_port}/events'
-                req = urllib.request.Request(url, headers={'Accept': 'text/event-stream'})
-                self.status.emit('读卡助手 SSE 连接中...')
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    self.status.emit('读卡助手 SSE 已连接,等待刷卡...')
-                    buf = ''
-                    while self._running:
-                        chunk = resp.read(256)
-                        if not chunk:
-                            break
-                        buf += chunk.decode('utf-8', errors='replace')
-                        # SSE 以双换行分隔事件
-                        while '\n\n' in buf:
-                            event_str, buf = buf.split('\n\n', 1)
-                            # 解析 data 行
-                            for line in event_str.split('\n'):
-                                if line.startswith('data:'):
-                                    raw = line[5:].strip()
-                                    if not raw or raw.startswith(':'):
-                                        continue
-                                    try:
-                                        msg = json.loads(raw)
-                                        if msg.get('type') == 'status' and isinstance(msg.get('data'), str):
-                                            # 转发读卡助手状态消息
-                                            self.status.emit(f'[读卡助手] {msg["data"]}')
-                                        elif msg.get('type') == 'card' and msg.get('data'):
-                                            card_no = msg['data'].get('card_no', '')
-                                            if card_no:
-                                                # 防抖
-                                                now = time.time()
-                                                if card_no == last_card and (now - last_card_time) < self._card_interval:
-                                                    continue
-                                                last_card = card_no
-                                                last_card_time = now
-                                                self.status.emit(f'读到卡号: {card_no}')
-                                                self.card_read.emit(card_no)
-                                    except (json.JSONDecodeError, KeyError):
-                                        pass
-            except Exception as e:
-                self._helper_online = False
-                if self._running:
-                    self.status.emit(f'读卡助手 SSE 断开: {e},3 秒后重连...')
-                    time.sleep(3)
-                    # 重连前再次检测读卡助手是否在线
-                    self._check_helper_online()
+            time.sleep(15)
+            if not self._running:
+                break
+            online = self._check_helper_online()
+            if not online and self._helper_online:
+                self.status.emit('读卡助手已离线,刷卡可能无效(请检查读卡助手)')
+            elif online and not self._helper_online:
+                self.status.emit('读卡助手已恢复在线')
 
     def stop(self):
-        """停止读卡器线程。"""
+        """停止监控线程。"""
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
@@ -170,9 +126,10 @@ class CardReader(QObject):
     def status_info(self):
         """返回读卡器状态字典(供前端设备状态页展示)。
 
-        代理模式下:
-            dll_loaded=False(本进程未加载 DLL),但 connected=True(读卡助手在线)
-            mode='PROXY',description 标注代理模式
+        HID 模式下:
+            dll_loaded=False(本进程未加载 DLL)
+            connected=True(读卡助手在线)
+            mode='HID',description 标注 HID 键盘注入模式
 
         Returns:
             dict: 状态信息
@@ -184,11 +141,11 @@ class CardReader(QObject):
             'dll_loaded': False,
             'connected': online,
             'driver_ok': online,
-            'description': '读卡助手代理模式(通过 SSE 连接读卡助手)',
-            'mode': 'PROXY',
+            'description': 'HID 键盘注入模式(读卡助手模拟键盘,前端 keydown 捕获)',
+            'mode': 'HID',
             'interval': self._card_interval,
             'last_ret': 0 if online else None,
-            'last_ret_desc': '代理模式-正常运行' if online else '代理模式-读卡助手未运行',
+            'last_ret_desc': 'HID 模式-读卡助手在线' if online else 'HID 模式-读卡助手未运行',
             'helper_online': online,
             'helper_port': self._helper_port,
         }
