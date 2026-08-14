@@ -38,7 +38,7 @@ from ctypes import wintypes
 # ---------------------------------------------------------------------------
 # 0. 常量
 # ---------------------------------------------------------------------------
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 ERROR_CODES = {
     0: '操作成功',
     8: '卡不在感应区',
@@ -184,18 +184,38 @@ class CardReader:
         self._lock = threading.Lock()
         self._last_ret = None  # 最近一次读卡返回码(用于状态)
         self._active = True    # 是否处于读卡状态(False 时暂停,让出读卡器给其他程序)
+        # SSE 订阅者计数:有订阅者(X86 终端)时自动跳过键盘注入,避免抢占
+        self._sse_clients = 0
 
     # ---- 订阅 / 广播 ----
     def subscribe(self):
         q = queue.Queue()
         with self._lock:
             self._subscribers.append(q)
+            self._sse_clients += 1
+            client_count = self._sse_clients
+        if client_count == 1:
+            log('SSE 订阅者接入,自动暂停键盘注入(交由 X86 终端处理卡号)')
+            self._broadcast('status', 'SSE 客户端已连接,键盘注入已暂停')
         return q
 
     def unsubscribe(self, q):
         with self._lock:
             if q in self._subscribers:
                 self._subscribers.remove(q)
+                if self._sse_clients > 0:
+                    self._sse_clients -= 1
+                client_count = self._sse_clients
+            else:
+                client_count = self._sse_clients
+        if client_count == 0:
+            log('所有 SSE 订阅者已断开,恢复键盘注入')
+            self._broadcast('status', 'SSE 客户端全部断开,键盘注入已恢复')
+
+    def sse_client_count(self):
+        """返回当前 SSE 订阅者数量。"""
+        with self._lock:
+            return self._sse_clients
 
     def _broadcast(self, event_type, data):
         msg = json.dumps({'type': event_type, 'data': data}, ensure_ascii=False)
@@ -273,6 +293,7 @@ class CardReader:
         last = self._last_ret
         connected = dll_loaded and last is not None and last in (0, 8)
         driver_ok = dll_loaded and last is not None and last != 23
+        sse_clients = self.sse_client_count()
         return {
             'running': self._running,
             'dll_loaded': dll_loaded,
@@ -287,6 +308,8 @@ class CardReader:
             'send_enter': self._send_enter,
             'python_bits': ctypes.sizeof(ctypes.c_void_p) * 8,
             'version': VERSION,
+            'sse_clients': sse_clients,
+            'keyboard_inject_enabled': sse_clients == 0,
         }
 
     def start(self):
@@ -371,9 +394,13 @@ class CardReader:
                         self._dll.idr_beep(38)
                     except Exception:
                         pass
-                    log(f'刷卡: {card_no},模拟键盘输入')
-                    # 核心:模拟键盘输入卡号(+可选回车)
-                    self._inject(card_no)
+                    log(f'刷卡: {card_no}')
+                    # 有 SSE 订阅者(X86 终端)时跳过键盘注入,避免抢占;
+                    # 卡号仅通过 SSE 广播给订阅者处理
+                    if self.sse_client_count() == 0:
+                        self._inject(card_no)
+                    else:
+                        log(f'检测到 SSE 订阅者,跳过键盘注入: {card_no}')
                     self._broadcast('card', {
                         'card_no': card_no,
                         'ts': datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3],
@@ -560,20 +587,25 @@ class TrayController:
         icon.update_menu()
 
     def _show_detail(self, icon, item):
+        sse = self._reader.sse_client_count()
+        kb_status = '已暂停(X86 终端已接管)' if sse > 0 else '已启用'
         text = (
             f'读卡助手 v{VERSION}(开机静默自启)\n\n'
             '作用:\n'
             '在本机加载 CH375/CH372 读卡器(OUR_IDR.dll)。\n'
             '刷卡后自动把卡号填入当前聚焦的输入框并追加回车,\n'
             '方便在「员工管理」等网页里录入卡号。\n\n'
+            '自动协调:\n'
+            f'· 当前 SSE 订阅者: {sse} 个\n'
+            f'· 键盘注入状态: {kb_status}\n'
+            '· 当 X86 终端通过 SSE 连接时,自动暂停键盘注入,\n'
+            '  卡号仅发送给 X86 终端处理,避免抢占\n\n'
             '托盘操作:\n'
             '· 暂停使用: 暂时让出读卡器给其他程序,\n'
             '  再点「继续使用」恢复刷卡\n'
             '· 退出: 结束读卡助手\n\n'
             '日常使用: 打开新增/编辑员工弹窗,\n'
-            '光标放卡号框后刷卡即可自动填入。\n\n'
-            '提示: 若你的读卡器是通用模拟键盘/HID 类型,\n'
-            '无需读卡助手,直接聚焦卡号框刷卡即可。'
+            '光标放卡号框后刷卡即可自动填入。'
         )
         message_box('读卡助手', text)
 

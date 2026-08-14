@@ -23,7 +23,7 @@
 ; =============================================================================
 #define MyAppName "读卡助手"
 #define MyAppNameEn "CanteenCardHelper"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Enterprise Canteen System"
 #define MyAppExeName "card-helper.exe"
 

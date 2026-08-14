@@ -17,10 +17,13 @@ import { ref, computed, watch } from 'vue'
 import api, { loadConfig } from '@/api'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { formatMoney, formatDateTime } from '@/composables/useFormat'
-import { mealTypeLabel, toDateKey } from '@/utils'
+import {
+  mealTypeLabel, toDateKey, shortDate, weekdayLabel, dateRelLabel,
+  dateWindow, shiftKey,
+} from '@/utils'
 import {
   Search, X, ChevronLeft, Loader2, FileText,
-  CheckCircle2, Clock, Utensils,
+  CheckCircle2, Clock, Utensils, ChevronRight,
 } from 'lucide-vue-next'
 
 interface OrderItem {
@@ -60,6 +63,18 @@ const storeName = computed(() => loadConfig()?.storeName || '当前门店')
 const view = ref<'list' | 'summary'>('list')
 
 const today = toDateKey(new Date())
+
+/* ============ 日期选择器(横向日历条,近 14 天) ============
+ * 显示今天及过去 13 天共 14 天,横向滚动,今天高亮,
+ * 点击日期后立即查询,无需点查询按钮。
+ * 可通过左右箭头按钮快速翻动日期。
+ */
+const DATE_RANGE_DAYS = 14
+/** 日期列表:今天往前推 13 天(共 14 天,含今天) */
+const dateList = computed(() => {
+  const startKey = shiftKey(today, -(DATE_RANGE_DAYS - 1))
+  return dateWindow(startKey, DATE_RANGE_DAYS, 1)
+})
 
 /* ============ 查询主界面 ============ */
 const queryDate = ref(today)
@@ -152,6 +167,52 @@ const loadMore = () => {
 const onFilterChange = () => fetchOrders(true)
 /** 关键字回车查询 */
 const onKeywordEnter = () => fetchOrders(true)
+
+/* ============ 日期选择器交互 ============ */
+/** 日期条横向滚动容器引用 */
+const dateStripRef = ref<HTMLElement | null>(null)
+/** 单个日期项宽度(含 margin),用于翻页滚动 */
+const DATE_ITEM_WIDTH = 86
+
+/** 选择日期(主界面):立即查询 */
+const onSelectQueryDate = (d: string) => {
+  if (queryDate.value === d) return
+  queryDate.value = d
+  fetchOrders(true)
+}
+
+/** 选择日期(汇总):立即查询 */
+const onSelectSummaryDate = (d: string) => {
+  if (summaryDate.value === d) return
+  summaryDate.value = d
+  fetchSummary()
+}
+
+/** 日期条向左滚动(看更早的日期) */
+const scrollDateLeft = () => {
+  const el = dateStripRef.value
+  if (!el) return
+  el.scrollBy({ left: -DATE_ITEM_WIDTH * 3, behavior: 'smooth' })
+}
+
+/** 日期条向右滚动(看更晚的日期) */
+const scrollDateRight = () => {
+  const el = dateStripRef.value
+  if (!el) return
+  el.scrollBy({ left: DATE_ITEM_WIDTH * 3, behavior: 'smooth' })
+}
+
+/** 滚动到选中日期(弹窗打开时调用,让今天可见) */
+const scrollSelectedIntoView = () => {
+  setTimeout(() => {
+    const el = dateStripRef.value
+    if (!el) return
+    const active = el.querySelector('.oqm__date-item--active') as HTMLElement | null
+    if (active) {
+      active.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' })
+    }
+  }, 30)
+}
 
 /* ============ 订单汇总:客户端聚合 ============ */
 /**
@@ -255,6 +316,7 @@ watch(
       statusFilter.value = 'all'
       detailOrder.value = null
       fetchOrders(true)
+      scrollSelectedIntoView()
     } else {
       detailOrder.value = null
     }
@@ -286,19 +348,43 @@ watch(
               </div>
             </header>
 
+            <!-- 日期选择器(横向日历条,点击即查询) -->
+            <div class="oqm__date-strip-wrap">
+              <button
+                class="oqm__date-nav btn-press"
+                aria-label="向前"
+                @click="scrollDateLeft"
+              >
+                <ChevronLeft :size="18" />
+              </button>
+              <div ref="dateStripRef" class="oqm__date-strip no-scrollbar">
+                <button
+                  v-for="d in dateList"
+                  :key="d"
+                  type="button"
+                  class="oqm__date-item btn-press"
+                  :class="{
+                    'oqm__date-item--active': d === queryDate,
+                    'oqm__date-item--today': d === today,
+                  }"
+                  @click="onSelectQueryDate(d)"
+                >
+                  <span class="oqm__date-item-rel">{{ dateRelLabel(d) }}</span>
+                  <span class="oqm__date-item-num">{{ shortDate(d) }}</span>
+                  <span class="oqm__date-item-week">{{ weekdayLabel(d) }}</span>
+                </button>
+              </div>
+              <button
+                class="oqm__date-nav btn-press"
+                aria-label="向后"
+                @click="scrollDateRight"
+              >
+                <ChevronRight :size="18" />
+              </button>
+            </div>
+
             <!-- 筛选条 -->
             <div class="oqm__filters">
-              <!-- 日期选择器 -->
-              <label class="oqm__field oqm__field--date">
-                <span class="oqm__field-label">日期</span>
-                <input
-                  v-model="queryDate"
-                  type="date"
-                  class="oqm__date-input"
-                  @change="onFilterChange"
-                />
-              </label>
-
               <!-- 姓名/卡号搜索 -->
               <label class="oqm__field oqm__field--search">
                 <span class="oqm__field-label">姓名/卡号</span>
@@ -421,12 +507,43 @@ watch(
               </div>
             </header>
 
-            <!-- 汇总筛选条(日期选择后自动查询) -->
+            <!-- 汇总日期选择器(横向日历条,点击即查询) -->
+            <div class="oqm__date-strip-wrap">
+              <button
+                class="oqm__date-nav btn-press"
+                aria-label="向前"
+                @click="scrollDateLeft"
+              >
+                <ChevronLeft :size="18" />
+              </button>
+              <div ref="dateStripRef" class="oqm__date-strip no-scrollbar">
+                <button
+                  v-for="d in dateList"
+                  :key="d"
+                  type="button"
+                  class="oqm__date-item btn-press"
+                  :class="{
+                    'oqm__date-item--active': d === summaryDate,
+                    'oqm__date-item--today': d === today,
+                  }"
+                  @click="onSelectSummaryDate(d)"
+                >
+                  <span class="oqm__date-item-rel">{{ dateRelLabel(d) }}</span>
+                  <span class="oqm__date-item-num">{{ shortDate(d) }}</span>
+                  <span class="oqm__date-item-week">{{ weekdayLabel(d) }}</span>
+                </button>
+              </div>
+              <button
+                class="oqm__date-nav btn-press"
+                aria-label="向后"
+                @click="scrollDateRight"
+              >
+                <ChevronRight :size="18" />
+              </button>
+            </div>
+
+            <!-- 汇总信息条 -->
             <div class="oqm__filters">
-              <label class="oqm__field oqm__field--date">
-                <span class="oqm__field-label">日期</span>
-                <input v-model="summaryDate" type="date" class="oqm__date-input" @change="fetchSummary" />
-              </label>
               <div class="oqm__field oqm__field--store">
                 <span class="oqm__field-label">店铺</span>
                 <span class="oqm__store-name oqm__ellipsis">{{ storeName }}</span>
@@ -711,7 +828,6 @@ watch(
   gap: 5px;
   min-width: 0;
 }
-.oqm__field--date { width: 168px; }
 .oqm__field--search { flex: 1; min-width: 220px; }
 .oqm__field--store { flex: 1; min-width: 160px; }
 .oqm__field--total { width: auto; }
@@ -720,7 +836,6 @@ watch(
   font-weight: 700;
   color: var(--doubao-muted-foreground);
 }
-.oqm__date-input,
 .oqm__text-input,
 .oqm__select {
   height: 40px;
@@ -734,28 +849,106 @@ watch(
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.oqm__date-input {
-  padding-right: 8px;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-/* 日期选择器美化:日历图标样式 */
-.oqm__date-input::-webkit-calendar-picker-indicator {
-  cursor: pointer;
-  opacity: 0.6;
-  filter: invert(0.5);
-  width: 18px;
-  height: 18px;
-}
-.oqm__date-input::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
-}
-.oqm__date-input:focus,
 .oqm__text-input:focus,
 .oqm__select:focus {
   border-color: var(--doubao-primary);
   box-shadow: 0 0 0 3px rgba(0, 101, 253, 0.12);
+}
+
+/* ============ 日期选择器(横向日历条) ============ */
+.oqm__date-strip-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: var(--doubao-card);
+  border-bottom: 1px solid var(--doubao-border);
+}
+.oqm__date-nav {
+  flex-shrink: 0;
+  width: 32px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--doubao-border);
+  border-radius: var(--doubao-radius-sm);
+  background: var(--doubao-background);
+  color: var(--doubao-secondary-foreground);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.oqm__date-nav:hover {
+  background: var(--doubao-muted);
+  color: var(--doubao-foreground);
+}
+.oqm__date-strip {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  padding: 2px 0;
+}
+.oqm__date-item {
+  flex-shrink: 0;
+  width: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border: 1.5px solid var(--doubao-border);
+  border-radius: var(--doubao-radius-sm);
+  background: var(--doubao-background);
+  color: var(--doubao-foreground);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.oqm__date-item:hover {
+  background: var(--doubao-muted);
+  border-color: var(--doubao-primary);
+}
+.oqm__date-item:active {
+  transform: scale(0.96);
+}
+.oqm__date-item--today {
+  border-color: var(--doubao-primary);
+  border-width: 2px;
+}
+.oqm__date-item--active {
+  background: var(--doubao-primary);
+  border-color: var(--doubao-primary);
+  color: var(--doubao-primary-foreground);
+}
+.oqm__date-item--active:hover {
+  background: var(--doubao-primary);
+}
+.oqm__date-item-rel {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--doubao-primary);
+  line-height: 1.1;
+}
+.oqm__date-item--active .oqm__date-item-rel {
+  color: var(--doubao-primary-foreground);
+}
+.oqm__date-item-num {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.oqm__date-item-week {
+  font-size: 10px;
+  color: var(--doubao-muted-foreground);
+  line-height: 1;
+}
+.oqm__date-item--active .oqm__date-item-week {
+  color: rgba(255, 255, 255, 0.85);
 }
 .oqm__search-wrap {
   position: relative;
@@ -1246,7 +1439,6 @@ watch(
 @media (max-width: 768px) {
   .oqm__panel { width: 96vw; height: 90vh; }
   .oqm__filters { gap: 10px; padding: 12px 14px; }
-  .oqm__field--date { width: 100%; }
   .oqm__field--search { min-width: 100%; }
   .oqm__list-head { display: none; }
   .oqm__row {
@@ -1254,5 +1446,6 @@ watch(
     gap: 6px;
     padding: 12px 8px;
   }
+  .oqm__date-item { width: 70px; padding: 6px 2px; }
 }
 </style>

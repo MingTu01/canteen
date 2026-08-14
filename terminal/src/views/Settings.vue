@@ -175,9 +175,8 @@ const onRestartCardReader = async () => {
 const cardReaderStatusText = (): string => {
   if (!isPythonShell.value) return '浏览器环境(不支持检测)'
   if (!cardReaderStatus.value) return '未检测'
-  if (cardReaderStatus.value.connected) return '已连接'
-  if (cardReaderStatus.value.dll_loaded && !cardReaderStatus.value.running) return '驱动已加载,线程未运行'
-  if (!cardReaderStatus.value.dll_loaded) return '驱动未加载(DLL 未找到)'
+  if (cardReaderStatus.value.connected) return '已连接(读卡助手代理)'
+  if (!cardReaderStatus.value.connected) return '读卡助手未运行(请先启动读卡助手)'
   return '未连接'
 }
 
@@ -732,7 +731,7 @@ onBeforeUnmount(() => {
                       点击"刷新"重新检测
                     </template>
                   </div>
-                  <!-- 读卡器异常时显示重启按钮 -->
+                  <!-- 读卡器异常时显示重连按钮(重新连接读卡助手) -->
                   <button
                     v-if="isPythonShell && !cardReaderOk()"
                     class="settings__device-action btn-press"
@@ -741,7 +740,7 @@ onBeforeUnmount(() => {
                   >
                     <Loader2 v-if="cardReaderRestarting" class="spinner" :size="14" />
                     <RotateCcw v-else :size="14" />
-                    <span>{{ cardReaderRestarting ? '重启中...' : '重启读卡器' }}</span>
+                    <span>{{ cardReaderRestarting ? '重连中...' : '重新连接读卡助手' }}</span>
                   </button>
                 </div>
               </div>
