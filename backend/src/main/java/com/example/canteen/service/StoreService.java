@@ -1,7 +1,6 @@
 package com.example.canteen.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.canteen.entity.Store;
 import com.example.canteen.mapper.AdminMapper;
 import com.example.canteen.mapper.DailySettlementMapper;
@@ -155,7 +154,7 @@ public class StoreService {
      *    孤儿明细行,重新插入备份主键时冲突导致恢复失败。
      *
      * 清理策略:
-     * 1) admin:将该店管理员的 store_id 置 0 并禁用账号,防止残留旧值登录
+     * 1) admin:物理删除该店管理员账号(禁用会产生不可见/不可登录/不可重建的孤儿账号)
      * 2) employee/dish:软删除(is_deleted=1),保留审计痕迹
      * 3) 明细子表先删,其余关联表物理删除,避免 id 复用导致跨店数据串扰
      * 4) 最后物理删除 store 表记录
@@ -172,12 +171,20 @@ public class StoreService {
         }
         log.warn("开始删除食堂 id={}, name={} 并清理关联数据", id, store.getName());
 
-        // 1) admin:该店管理员账号 store_id 置 0 并禁用,防止残留旧值登录
-        Admin adminUpdate = new Admin();
-        adminUpdate.setStoreId(0L);
-        adminUpdate.setStatus(0);
-        adminMapper.update(adminUpdate,
-                new LambdaUpdateWrapper<Admin>().eq(Admin::getStoreId, id));
+        // 1) admin:物理删除该店管理员账号
+        // 修复 BUG:原实现"store_id 置 0 + 禁用"会产生三死孤儿账号——
+        // 账号列表/登录均过滤 status=1 导致不可见、不可登录;
+        // 创建同名账号时用户名查重不过滤 status 导致"用户名已存在"无法重建;
+        // 且备份不包含 admin 表,恢复备份也无法救回。
+        // 物理删除后用户名立即可重建;被删账号记入日志便于追溯。
+        List<Admin> storeAdmins = adminMapper.selectList(
+                new LambdaQueryWrapper<Admin>().eq(Admin::getStoreId, id));
+        if (!storeAdmins.isEmpty()) {
+            List<String> deletedUsernames = storeAdmins.stream()
+                    .map(Admin::getUsername).toList();
+            log.warn("删除食堂 id={} 同时删除其管理员账号: {}", id, deletedUsernames);
+            adminMapper.delete(new LambdaQueryWrapper<Admin>().eq(Admin::getStoreId, id));
+        }
 
         // 2) employee:软删除(is_deleted=1),保留审计痕迹
         employeeMapper.delete(new LambdaQueryWrapper<Employee>().eq(Employee::getStoreId, id));

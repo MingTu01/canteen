@@ -81,9 +81,12 @@ public class AdminService {
         if (!SecurityContext.isSuperAdmin()) {
             throw new SecurityException("仅超级管理员可创建管理员账号");
         }
-        Long count = adminMapper.selectCount(new LambdaQueryWrapper<Admin>()
+        Admin existingByUsername = adminMapper.selectOne(new LambdaQueryWrapper<Admin>()
                 .eq(Admin::getUsername, admin.getUsername()));
-        if (count > 0) {
+        if (existingByUsername != null) {
+            if (existingByUsername.getStatus() != null && existingByUsername.getStatus() == 0) {
+                throw new BusinessException("用户名已存在(该账号当前为禁用状态,可在账号管理中启用或删除后重建)");
+            }
             throw new BusinessException("用户名已存在");
         }
         if (admin.getPassword() == null) {
@@ -146,6 +149,14 @@ public class AdminService {
                 }
             }
             existing.setStatus(admin.getStatus());
+        }
+        // 超管重置密码:前端编辑弹窗密码字段"留空则不修改",此前后端忽略该字段,
+        // 导致被禁用救回后若忘记原密码将无入口重置(改密接口需本人旧密码)。
+        if (SecurityContext.isSuperAdmin() && admin.getPassword() != null && !admin.getPassword().isBlank()) {
+            PasswordValidator.validate(admin.getPassword());
+            existing.setPassword(passwordEncoder.encode(admin.getPassword()));
+            // 同步更新密码修改时间,使旧 token 失效
+            existing.setPasswordUpdatedAt(LocalDateTime.now());
         }
         adminMapper.updateById(existing);
         return AdminVO.from(existing);

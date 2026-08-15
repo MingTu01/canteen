@@ -57,6 +57,9 @@ const fetchStores = async () => {
 
 const storeName = (id?: number) => stores.value.find((s) => s.id === id)?.name ?? '—'
 
+/** 禁用账号整行弱化,提示超管可编辑启用救回 */
+const rowClassName = ({ row }: { row: Admin }) => (row.status === 1 ? '' : 'row-disabled')
+
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const dialogLoading = ref(false)
@@ -155,7 +158,7 @@ onMounted(() => {
       </template>
 
       <div class="card overflow-hidden">
-        <ElTable v-loading="loading" :data="admins" style="width: 100%" row-key="id">
+        <ElTable v-loading="loading" :data="admins" style="width: 100%" row-key="id" :row-class-name="rowClassName">
           <ElTableColumn prop="username" label="登录账号" min-width="140" />
           <ElTableColumn prop="name" label="姓名" min-width="120" />
           <ElTableColumn label="角色" width="120" align="center">
@@ -236,7 +239,7 @@ onMounted(() => {
               v-model="form.password"
               type="password"
               show-password
-              :placeholder="isEdit ? '留空则不修改密码' : '请输入初始密码'"
+              :placeholder="isEdit ? '留空则不修改密码；填写则重置密码' : '请输入初始密码'"
             />
           </ElFormItem>
           <ElFormItem label="状态">
@@ -254,3 +257,10 @@ onMounted(() => {
     </PageContainer>
   </Layout>
 </template>
+
+<style scoped>
+/* 禁用账号整行弱化:提示超管可编辑启用救回 */
+:deep(.row-disabled) {
+  opacity: 0.55;
+}
+</style>

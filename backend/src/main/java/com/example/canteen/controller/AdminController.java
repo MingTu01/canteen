@@ -109,7 +109,12 @@ public class AdminController {
         if (!SecurityContext.isSuperAdmin()) {
             throw new SecurityException("仅超级管理员可查看管理员列表");
         }
-        List<Admin> admins = adminMapper.selectList(new LambdaQueryWrapper<Admin>().eq(Admin::getStatus, 1));
+        // 不再过滤 status=1:显示含禁用在内的全部账号。
+        // 修复 BUG:历史"删除食堂"禁用的店铺管理员因列表过滤而不可见,
+        // 导致既无法启用救回、也无法确认账号存在(创建同名又提示已存在)。
+        // 前端状态列已区分"启用/禁用"标签,超管可编辑救回(重新启用+绑定食堂)。
+        List<Admin> admins = adminMapper.selectList(
+                new LambdaQueryWrapper<Admin>().orderByDesc(Admin::getStatus).orderByAsc(Admin::getId));
         List<AdminVO> voList = admins.stream().map(AdminVO::from).collect(Collectors.toList());
         return ApiResponse.success(voList);
     }

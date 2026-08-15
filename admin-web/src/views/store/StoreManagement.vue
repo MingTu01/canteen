@@ -111,7 +111,7 @@ const handleDelete = (row: Store) => {
   if (!row.id) return
   passwordConfirmRef.value?.open({
     title: '删除食堂',
-    message: `确定要删除食堂「${row.name}」吗?该食堂的菜品、订单、员工等全部数据将被清理且不可访问(已有备份文件保留,可用于恢复)。此操作需输入管理员密码验证。`,
+    message: `确定要删除食堂「${row.name}」吗？该食堂的管理员账号、菜品、订单、员工等全部数据将被清理且不可访问（已有备份文件保留，可用于恢复数据，但管理员账号不含在备份中、需重新创建）。此操作需输入管理员密码验证。`,
     confirmText: '验证并删除',
     onConfirm: async (password) => {
       await storeApi.delete(row.id!, password)
