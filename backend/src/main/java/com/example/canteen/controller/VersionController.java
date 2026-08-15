@@ -220,16 +220,18 @@ public class VersionController {
 
     /**
      * 公开接口(免登录):返回订餐配置,供 H5/terminal 前端读取截止时间等规则。
-     * 只返回订餐相关的 5 个 key,不暴露其他敏感配置。
+     * 只返回订餐相关的 9 个 key(5 个订餐规则 + 4 个未订餐用餐手续费),不暴露其他敏感配置。
      * 支持按门店读取:传 storeId 时优先读 store_config,未传或读不到回退 sys_config 全局配置。
      */
     @GetMapping("/order-config")
     public ApiResponse<Map<String, Object>> getOrderConfig(@RequestParam(required = false) Long storeId) {
         Map<String, Object> result = new HashMap<>();
-        // 订餐配置的 5 个 key
+        // 订餐配置 key(含未订餐用餐手续费,H5 未订餐用餐页读取)
         String[] orderKeys = {
             "order_advance_days", "order_deadline_time", "cancel_deadline_time",
-            "max_order_quantity", "allow_cross_day_order"
+            "max_order_quantity", "allow_cross_day_order",
+            "unsolicited_fee_enabled", "unsolicited_fee_breakfast",
+            "unsolicited_fee_lunch", "unsolicited_fee_dinner"
         };
         try {
             for (String key : orderKeys) {
@@ -264,6 +266,8 @@ public class VersionController {
                         case "order_deadline_time", "cancel_deadline_time" -> "15:00";
                         case "max_order_quantity" -> "10";
                         case "allow_cross_day_order" -> "true";
+                        case "unsolicited_fee_enabled" -> "false";
+                        case "unsolicited_fee_breakfast", "unsolicited_fee_lunch", "unsolicited_fee_dinner" -> "0";
                         default -> "";
                     };
                 }
@@ -276,6 +280,10 @@ public class VersionController {
             result.put("cancel_deadline_time", "15:00");
             result.put("max_order_quantity", "10");
             result.put("allow_cross_day_order", "true");
+            result.put("unsolicited_fee_enabled", "false");
+            result.put("unsolicited_fee_breakfast", "0");
+            result.put("unsolicited_fee_lunch", "0");
+            result.put("unsolicited_fee_dinner", "0");
         }
         return ApiResponse.success(result);
     }
