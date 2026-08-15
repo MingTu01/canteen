@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import nprogress from 'nprogress'
 
@@ -192,9 +193,15 @@ router.beforeEach((to, _from, next) => {
 
   if (to.meta.roles && to.meta.roles.length > 0) {
     if (!authStore.hasRole(...to.meta.roles)) {
-      // 角色不匹配:跳转登录页,避免在 dashboard(可能无权限)和受保护页面间死循环
-      authStore.clearState()
-      next({ path: '/login', query: { redirect: to.fullPath } })
+      // 角色不匹配:与 API 层 403 行为(仅提示不登出)保持一致,仅提示并重定向首页,
+      // 不清登录态、不跳登录页
+      ElMessage.warning('无权访问该页面')
+      // 首页 '/' 会重定向到 /dashboard;若正是 dashboard 无权限则终止本次导航,避免无限重定向
+      if (to.path === '/dashboard') {
+        next(false)
+      } else {
+        next('/dashboard')
+      }
       return
     }
   }

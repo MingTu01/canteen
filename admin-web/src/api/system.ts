@@ -8,6 +8,11 @@ export interface OrderConfig {
   cancel_deadline_time: string
   max_order_quantity: string | number
   allow_cross_day_order: string | boolean
+  /** 未订餐用餐手续费开关/金额(按餐别) */
+  unsolicited_fee_enabled: string | boolean
+  unsolicited_fee_breakfast: string | number
+  unsolicited_fee_lunch: string | number
+  unsolicited_fee_dinner: string | number
 }
 
 export const systemApi = {

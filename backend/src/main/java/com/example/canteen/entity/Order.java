@@ -25,6 +25,8 @@ public class Order {
     private Integer status;
     /** 订单来源: 0-正常订餐, 1-未订餐用餐 */
     private Integer orderSource;
+    /** 未订餐用餐手续费(包含在 totalAmount 中,正常订餐为 0) */
+    private BigDecimal serviceFee;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

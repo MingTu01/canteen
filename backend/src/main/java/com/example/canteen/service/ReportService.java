@@ -42,30 +42,35 @@ public class ReportService {
 
     public Map<String, Object> dailyReport(Long storeId, LocalDate date) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = date.atStartOfDay();
-        LocalDateTime end = date.plusDays(1).atStartOfDay();
-        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, start, end);
-        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId, start, end);
+        // 口径统一:订单按订餐日期统计;充值按下单时间(created_at)统计
+        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, date, date.plusDays(1));
+        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId,
+                date.atStartOfDay(), date.plusDays(1).atStartOfDay());
         return buildReport(orders, recharges, "daily", date.toString());
     }
 
     public Map<String, Object> weeklyReport(Long storeId, LocalDate startDate) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = startDate.atStartOfDay();
-        LocalDateTime end = startDate.plusDays(7).atStartOfDay();
-        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, start, end);
-        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId, start, end);
+        // 口径统一:订单按订餐日期统计;充值按下单时间(created_at)统计
+        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, startDate, startDate.plusDays(7));
+        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId,
+                startDate.atStartOfDay(), startDate.plusDays(7).atStartOfDay());
         return buildReport(orders, recharges, "weekly", startDate.toString());
     }
 
     public Map<String, Object> monthlyReport(Long storeId, String month) {
         SecurityContext.checkStoreAccess(storeId);
         YearMonth ym = YearMonth.parse(month, DateTimeFormatter.ofPattern("yyyy-MM"));
-        LocalDateTime start = ym.atDay(1).atStartOfDay();
-        LocalDateTime end = ym.plusMonths(1).atDay(1).atStartOfDay();
-        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, start, end);
-        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId, start, end);
-        return buildReport(orders, recharges, "monthly", month);
+        LocalDate start = ym.atDay(1);
+        LocalDate end = ym.plusMonths(1).atDay(1);
+        // SQL 聚合下推:月报订单量为整月数据,不再整段 SELECT * 拉 JVM stream 聚合;
+        // 口径统一:订单按订餐日期统计;充值按下单时间(created_at)统计。
+        // 输出结构与 buildReport(日/周报)完全一致,前端零改动。
+        Map<String, Object> agg = reportQueryHelper.aggregateActiveOrdersByRange(storeId, start, end);
+        List<Map<String, Object>> topDishes = reportQueryHelper.topDishesByRange(storeId, start, end, 5);
+        BigDecimal totalRecharge = reportQueryHelper.sumRechargeAmount(storeId,
+                start.atStartOfDay(), end.atStartOfDay());
+        return buildReportFromAgg("monthly", month, agg, topDishes, totalRecharge);
     }
 
     /**
@@ -74,15 +79,14 @@ public class ReportService {
      */
     public Map<String, Object> financeReport(Long storeId, LocalDate startDate, LocalDate endDate) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = startDate.atStartOfDay();
-        LocalDateTime end = endDate.plusDays(1).atStartOfDay();
 
-        // 充值总额(从 recharge_record 表)
-        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId, start, end);
+        // 充值总额(从 recharge_record 表,按 created_at 统计)
+        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId,
+                startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
         BigDecimal totalRecharge = reportQueryHelper.sumAmount(recharges);
 
-        // 订单数据:消费/退款均从 order 表统计
-        List<Order> orders = reportQueryHelper.findOrdersByRange(storeId, start, end);
+        // 订单数据:消费/退款均从 order 表统计(口径统一:按订餐日期统计)
+        List<Order> orders = reportQueryHelper.findOrdersByRange(storeId, startDate, endDate.plusDays(1));
         // 消费总额(排除已取消 status=3)
         BigDecimal totalConsumption = orders.stream()
                 .filter(o -> o.getStatus() == null || o.getStatus() != OrderStatus.CANCELED.getCode())
@@ -116,11 +120,9 @@ public class ReportService {
      */
     public Map<String, Object> employeeConsumptionReport(Long storeId, LocalDate startDate, LocalDate endDate) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = startDate.atStartOfDay();
-        LocalDateTime end = endDate.plusDays(1).atStartOfDay();
 
-        // 排除已取消订单
-        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, start, end);
+        // 排除已取消订单(口径统一:按订餐日期统计)
+        List<Order> orders = reportQueryHelper.findActiveOrdersByRange(storeId, startDate, endDate.plusDays(1));
 
         // 按员工聚合消费总额与订单数
         Map<Long, BigDecimal> consumptionByEmp = new LinkedHashMap<>();
@@ -181,13 +183,12 @@ public class ReportService {
      */
     public Map<String, Object> dailyCloseReport(Long storeId, LocalDate date) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = date.atStartOfDay();
-        LocalDateTime end = date.plusDays(1).atStartOfDay();
 
-        // 当日订单(包含已取消,用于统计已取消数)
-        List<Order> orders = reportQueryHelper.findOrdersByRange(storeId, start, end);
-        // 当日充值
-        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId, start, end);
+        // 当日订单(包含已取消,用于统计已取消数;口径统一:按订餐日期统计)
+        List<Order> orders = reportQueryHelper.findOrdersByRange(storeId, date, date.plusDays(1));
+        // 当日充值(按 created_at 统计)
+        List<RechargeRecord> recharges = reportQueryHelper.findRechargesByRange(storeId,
+                date.atStartOfDay(), date.plusDays(1).atStartOfDay());
 
         // 订单统计
         long totalOrders = orders.size();
@@ -196,7 +197,7 @@ public class ReportService {
         long pendingOrders = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.PENDING.getCode()).count();
         long missedOrders = orders.stream().filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.MISSED.getCode()).count();
 
-        // 营业额:已完成(2) + 未就餐(4) 的金额之和(均已收款未退款,与 DailyCloseService 口径一致)
+        // 营业额:已完成(2) + 未就餐(4) 的金额之和(均已收款未退款,与 DailySettlementService 口径一致)
         BigDecimal totalRevenue = orders.stream()
                 .filter(o -> o.getStatus() != null && (o.getStatus() == OrderStatus.COMPLETED.getCode() || o.getStatus() == OrderStatus.MISSED.getCode()))
                 .map(Order::getTotalAmount)
@@ -333,6 +334,52 @@ public class ReportService {
         return result;
     }
 
+    /**
+     * 月报组装(SQL 聚合结果版):输出结构与 buildReport 完全一致,前端零改动。
+     * agg 来自 aggregateActiveOrdersByRange(已排除已取消订单),
+     * topDishes 来自 topDishesByRange(同样基于有效订单聚合)。
+     */
+    private Map<String, Object> buildReportFromAgg(String periodType, String period,
+                                                   Map<String, Object> agg,
+                                                   List<Map<String, Object>> topDishes,
+                                                   BigDecimal totalRecharge) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("periodType", periodType);
+        result.put("period", period);
+
+        long totalOrders = (Long) agg.get("totalOrders");
+        BigDecimal totalRevenue = (BigDecimal) agg.get("totalRevenue");
+        long breakfast = (Long) agg.get("breakfast");
+        long lunch = (Long) agg.get("lunch");
+        long dinner = (Long) agg.get("dinner");
+
+        // 各餐次占比(与 buildReport 相同的结构:count + ratio)
+        Map<String, Long> mealTypeCount = new LinkedHashMap<>();
+        mealTypeCount.put("breakfast", breakfast);
+        mealTypeCount.put("lunch", lunch);
+        mealTypeCount.put("dinner", dinner);
+        Map<String, Object> mealTypeRatio = new LinkedHashMap<>();
+        mealTypeRatio.put("count", mealTypeCount);
+        Map<String, String> ratio = new LinkedHashMap<>();
+        if (totalOrders > 0) {
+            ratio.put("breakfast", String.format("%.2f%%", breakfast * 100.0 / totalOrders));
+            ratio.put("lunch", String.format("%.2f%%", lunch * 100.0 / totalOrders));
+            ratio.put("dinner", String.format("%.2f%%", dinner * 100.0 / totalOrders));
+        } else {
+            ratio.put("breakfast", "0.00%");
+            ratio.put("lunch", "0.00%");
+            ratio.put("dinner", "0.00%");
+        }
+        mealTypeRatio.put("ratio", ratio);
+
+        result.put("totalOrders", totalOrders);
+        result.put("totalRevenue", totalRevenue);
+        result.put("mealTypeStats", mealTypeRatio);
+        result.put("topDishes", topDishes);
+        result.put("totalRecharge", totalRecharge);
+        return result;
+    }
+
     /* ============================================================
      * 同比环比 YoY / MoM
      * ============================================================ */
@@ -343,19 +390,17 @@ public class ReportService {
      * 营业额:已完成订单(status=2)的 totalAmount 合计;
      * 退款额:已取消订单(status=3)的 totalAmount 合计。
      * 增长率 = (今年 - 去年) / 去年 * 100,去年为 0 时返回 null。
+     *
+     * SQL 聚合下推:两段各一次聚合查询,不拉订单明细进 JVM。
      */
     public Map<String, Object> getYearOverYear(Long storeId, LocalDate startDate, LocalDate endDate) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime currStart = startDate.atStartOfDay();
-        LocalDateTime currEnd = endDate.plusDays(1).atStartOfDay();
-        LocalDateTime prevStart = startDate.minusYears(1).atStartOfDay();
-        LocalDateTime prevEnd = endDate.minusYears(1).plusDays(1).atStartOfDay();
+        // 口径统一:按订餐日期统计
+        Map<String, Object> current = reportQueryHelper.aggregateOrdersByRange(storeId,
+                startDate, endDate.plusDays(1));
+        Map<String, Object> previous = reportQueryHelper.aggregateOrdersByRange(storeId,
+                startDate.minusYears(1), endDate.minusYears(1).plusDays(1));
 
-        List<Order> currOrders = reportQueryHelper.findOrdersByRange(storeId, currStart, currEnd);
-        List<Order> prevOrders = reportQueryHelper.findOrdersByRange(storeId, prevStart, prevEnd);
-
-        Map<String, Object> current = aggregateYoyMom(currOrders);
-        Map<String, Object> previous = aggregateYoyMom(prevOrders);
         Map<String, Object> growth = buildGrowth(current, previous);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("current", current);
@@ -366,22 +411,20 @@ public class ReportService {
 
     /**
      * 环比分析:对比指定月份与上月数据。
+     *
+     * SQL 按月分组一次查回两月聚合(两期均为完整自然月),不拉订单明细进 JVM。
      */
     public Map<String, Object> getMonthOverMonth(Long storeId, int year, int month) {
         SecurityContext.checkStoreAccess(storeId);
         YearMonth ym = YearMonth.of(year, month);
         YearMonth prevYm = ym.minusMonths(1);
 
-        LocalDateTime currStart = ym.atDay(1).atStartOfDay();
-        LocalDateTime currEnd = ym.plusMonths(1).atDay(1).atStartOfDay();
-        LocalDateTime prevStart = prevYm.atDay(1).atStartOfDay();
-        LocalDateTime prevEnd = prevYm.plusMonths(1).atDay(1).atStartOfDay();
+        // 口径统一:按订餐日期统计;一次分组查询覆盖上月月初 ~ 当月月末
+        Map<String, Map<String, Object>> byMonth = reportQueryHelper.aggregateOrdersByMonth(storeId,
+                prevYm.atDay(1), ym.plusMonths(1).atDay(1));
+        Map<String, Object> current = byMonth.getOrDefault(ym.toString(), emptyComparisonAgg());
+        Map<String, Object> previous = byMonth.getOrDefault(prevYm.toString(), emptyComparisonAgg());
 
-        List<Order> currOrders = reportQueryHelper.findOrdersByRange(storeId, currStart, currEnd);
-        List<Order> prevOrders = reportQueryHelper.findOrdersByRange(storeId, prevStart, prevEnd);
-
-        Map<String, Object> current = aggregateYoyMom(currOrders);
-        Map<String, Object> previous = aggregateYoyMom(prevOrders);
         Map<String, Object> growth = buildGrowth(current, previous);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("current", current);
@@ -390,25 +433,12 @@ public class ReportService {
         return result;
     }
 
-    /** 聚合订单数/营业额/退款额(同/环比口径一致) */
-    private Map<String, Object> aggregateYoyMom(List<Order> orders) {
-        long orderCount = orders.stream()
-                .filter(o -> o.getStatus() == null || o.getStatus() != OrderStatus.CANCELED.getCode())
-                .count();
-        BigDecimal revenue = orders.stream()
-                .filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.COMPLETED.getCode())
-                .map(Order::getTotalAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal refund = orders.stream()
-                .filter(o -> o.getStatus() != null && o.getStatus() == OrderStatus.CANCELED.getCode())
-                .map(Order::getTotalAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    /** 无订单月份的空聚合(分组结果缺失时补零) */
+    private Map<String, Object> emptyComparisonAgg() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("orderCount", orderCount);
-        m.put("revenue", revenue);
-        m.put("refund", refund);
+        m.put("orderCount", 0L);
+        m.put("revenue", BigDecimal.ZERO);
+        m.put("refund", BigDecimal.ZERO);
         return m;
     }
 
@@ -465,9 +495,9 @@ public class ReportService {
      */
     public Map<String, Object> getHourlyDistribution(Long storeId, LocalDate date) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = date.atStartOfDay();
-        LocalDateTime end = date.plusDays(1).atStartOfDay();
-        List<Order> orders = reportQueryHelper.findOrdersByRange(storeId, start, end);
+        // 时段分布本来就是按下单时间:保持 created_at 口径
+        List<Order> orders = reportQueryHelper.findOrdersByCreatedAtRange(storeId,
+                date.atStartOfDay(), date.plusDays(1).atStartOfDay());
 
         // 按小时聚合(包含全部状态订单,反映实际下单流量)
         Map<Integer, Long> hourCount = new HashMap<>();
@@ -507,9 +537,9 @@ public class ReportService {
      */
     public Map<String, Object> getPeakHours(Long storeId, LocalDate startDate, LocalDate endDate) {
         SecurityContext.checkStoreAccess(storeId);
-        LocalDateTime start = startDate.atStartOfDay();
-        LocalDateTime end = endDate.plusDays(1).atStartOfDay();
-        List<Order> orders = reportQueryHelper.findOrdersByRange(storeId, start, end);
+        // 高峰时段分布与 getHourlyDistribution 同口径:按下单时间 created_at 统计
+        List<Order> orders = reportQueryHelper.findOrdersByCreatedAtRange(storeId,
+                startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
 
         long days = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) + 1;
         if (days <= 0) days = 1;

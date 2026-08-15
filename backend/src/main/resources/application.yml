@@ -86,8 +86,8 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}
   # 员工 token 过期时间(默认 30 天,H5 长期登录不失效)
   employee-expiration: ${JWT_EMPLOYEE_EXPIRATION:2592000000}
-  # 终端 token 过期时间(默认 365 天,避免 7x24 终端频繁失绑)
-  terminal-expiration: ${JWT_TERMINAL_EXPIRATION:31536000000}
+  # 终端 token 过期时间(默认 30 天,配合 refreshTerminalToken 滚动续期;泄露后风险窗口大幅缩短)
+  terminal-expiration: ${JWT_TERMINAL_EXPIRATION:2592000000}
 
 # 微信公众号配置(可选,未配置时微信功能不可用,手机号登录正常)
 # 2025-12-01 起开发接口管理迁移至微信开发者平台(developers.weixin.qq.com)
@@ -119,7 +119,8 @@ logging:
     com.example.canteen: INFO
 
 # P0-5: CORS 允许的 Origin 白名单(逗号分隔)
-# 留空(默认)则放行所有 origin(兼容内网多 origin 部署)
+# 留空(默认)则放行所有 origin 但 allowCredentials=false(兼容内网多 origin 部署,不携带凭证;
+# 终端走 Authorization 头不受影响,浏览器跨源 Cookie 需配置白名单)
 # 配置示例:https://dm.canteen.example.com,https://admin.canteen.example.com
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:}

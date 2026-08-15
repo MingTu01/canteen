@@ -442,8 +442,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: #ffffff;
+  /* X86 低端集显:animation 与 transition 并存会反复重建合成层导致闪烁,
+     删除 transition 仅保留 pulse 动画(transform/opacity,见 style.css keyframes) */
   animation: pulse-ring 2.4s ease-in-out infinite;
-  transition: transform 0.2s ease, background 0.2s ease;
 }
 .pickup-standby__scan-btn:active { transform: scale(0.95); }
 .pickup-standby__scan-btn--loading {
@@ -457,7 +458,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+  /* X86 低端集显禁用 filter:drop-shadow:GPU 逐帧重绘导致闪烁 */
 }
 .pickup-standby__scan-hint {
   font-size: var(--fs-lg);
@@ -545,8 +546,11 @@ onUnmounted(() => {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   transition: transform 0.15s ease, background 0.2s ease;
 }
-.pickup-standby__query-btn:hover {
-  background: rgba(255, 255, 255, 0.24);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .pickup-standby__query-btn:hover {
+    background: rgba(255, 255, 255, 0.24);
+  }
 }
 .pickup-standby__query-text {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);

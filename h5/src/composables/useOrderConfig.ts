@@ -7,6 +7,11 @@ export interface OrderConfig {
   cancel_deadline_time: string // "15:00"
   max_order_quantity: number
   allow_cross_day_order: boolean
+  /** 未订餐用餐手续费开关/金额(按餐别) */
+  unsolicited_fee_enabled: boolean
+  unsolicited_fee_breakfast: number
+  unsolicited_fee_lunch: number
+  unsolicited_fee_dinner: number
 }
 
 const config = ref<OrderConfig>({
@@ -15,6 +20,10 @@ const config = ref<OrderConfig>({
   cancel_deadline_time: '15:00',
   max_order_quantity: 10,
   allow_cross_day_order: true,
+  unsolicited_fee_enabled: false,
+  unsolicited_fee_breakfast: 0,
+  unsolicited_fee_lunch: 0,
+  unsolicited_fee_dinner: 0,
 })
 let loaded = false
 let loadedStoreId: number | null = null
@@ -26,6 +35,12 @@ let loadedStoreId: number | null = null
 export function resetOrderConfigCache() {
   loaded = false
   loadedStoreId = null
+}
+
+/** 解析手续费金额:非法/负数回退 0 */
+function parseFeeValue(v: unknown): number {
+  const n = Number(v)
+  return v != null && v !== '' && !isNaN(n) && n > 0 ? n : 0
 }
 
 export function useOrderConfig() {
@@ -50,6 +65,11 @@ export function useOrderConfig() {
             ? (parseInt(d.max_order_quantity) || 0)
             : 10,
           allow_cross_day_order: d.allow_cross_day_order === 'true',
+          // 未订餐用餐手续费("true"/"false" 转 boolean,金额转 number)
+          unsolicited_fee_enabled: d.unsolicited_fee_enabled === 'true' || d.unsolicited_fee_enabled === true,
+          unsolicited_fee_breakfast: parseFeeValue(d.unsolicited_fee_breakfast),
+          unsolicited_fee_lunch: parseFeeValue(d.unsolicited_fee_lunch),
+          unsolicited_fee_dinner: parseFeeValue(d.unsolicited_fee_dinner),
         }
         loaded = true
         loadedStoreId = storeId ?? null

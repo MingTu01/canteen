@@ -1,6 +1,7 @@
 package com.example.canteen.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.canteen.dto.PurchaseCreateDTO;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -221,13 +223,16 @@ public class PurchaseService {
                             .eq(PurchaseItem::getPurchaseId, id));
             for (PurchaseItem item : items) {
                 if (item.getMaterialId() != null) {
-                    // 已有食材:增加库存
+                    // 读校验 + 原子累加:并发入库不再丢失更新
+                    // 先只读校验食材存在且属于本门店(不改库存),再用 SQL 原子累加库存
                     Material material = materialMapper.selectById(item.getMaterialId());
-                    if (material != null && material.getStoreId().equals(existing.getStoreId())) {
-                        BigDecimal currentStock = material.getStockQty() == null
-                                ? BigDecimal.ZERO : material.getStockQty();
-                        material.setStockQty(currentStock.add(item.getQuantity()));
-                        materialMapper.updateById(material);
+                    if (material == null || material.getStoreId() == null
+                            || !material.getStoreId().equals(existing.getStoreId())) {
+                        throw new BusinessException("食材不存在或不属于本门店");
+                    }
+                    int rows = materialMapper.addStockQty(item.getMaterialId(), item.getQuantity());
+                    if (rows == 0) {
+                        throw new BusinessException("食材不存在或不属于本门店");
                     }
                 } else if (item.getMaterialName() != null && !item.getMaterialName().isBlank()) {
                     // 新物品:创建库存记录,初始库存 = 采购数量
@@ -246,8 +251,18 @@ public class PurchaseService {
             }
         }
 
+        // 原子状态流转:仅 PENDING 可入库/取消,防止并发重复入库(重复累加库存)
+        LocalDateTime now = LocalDateTime.now();
+        int statusRows = purchaseMapper.update(null, new UpdateWrapper<Purchase>()
+                .eq("id", id)
+                .eq("status", STATUS_PENDING)
+                .set("status", targetStatus)
+                .set("updated_at", now));
+        if (statusRows == 0) {
+            throw new BusinessException("采购单状态已变更");
+        }
         existing.setStatus(targetStatus);
-        purchaseMapper.updateById(existing);
+        existing.setUpdatedAt(now);
         return existing;
     }
 

@@ -5,6 +5,7 @@ import com.example.canteen.exception.SecurityException;
 import com.example.canteen.security.SecurityContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -21,17 +22,22 @@ import java.util.Set;
  * 备份恢复服务。
  *
  * 从原 BackupService 拆分,专门负责数据恢复相关逻辑:
- * - restoreBackup:在事务内执行"删除目标范围数据 + 按备份插入 + 行数校验"
- * - createPreRestoreSnapshot:恢复前自动快照(便于回滚)
- * - verifyRestoredData:恢复后只读校验,行数不一致则抛异常回滚事务
- * - deleteAllBusinessData / deleteStoreData / insertRows:删除与插入的具体实现
+ * - restoreBackup:加载备份 → 恢复前快照 → 逐表恢复(每表独立事务)
+ * - restoreSingleTable:单表恢复的独立事务单元(删除目标范围数据 + 按备份插入 + 行数校验)
+ * - createPreRestoreSnapshot:恢复前自动快照(拆分事务后的回滚兜底)
+ * - insertRows / deleteTableData:删除与插入的具体实现
  * - evictCache:恢复成功后清理 Redis 缓存(dish/menu),避免前端读到旧数据
  *
- * 关键修复:原 BackupService.importBackup 通过 this.restoreBackup() 自调用,
- * Spring AOP 代理不生效,@Transactional 注解失效,恢复失败时已 DELETE 的数据无法回滚,
- * 导致数据丢失。现由独立的 RestoreService Bean 承载 @Transactional restoreBackup 方法,
- * BackupService.importBackup 改为注入 RestoreService 调用 restoreService.restoreBackup(),
- * 通过 Spring 代理让事务生效,失败自动回滚。
+ * 事务设计(拆分大事务):
+ * - 原实现为单个大事务内 DELETE+INSERT 全部 20+ 张表,长事务持锁时间长;
+ *   现改为每张表一个独立事务(同表的 DELETE+INSERT+校验在同一事务内),
+ *   任一表失败立即停止后续表,已成功表不回滚——恢复前快照就是全量兜底。
+ * - 单表事务必须经 Spring 代理调用(直接 this.xxx() 自调用会绕过 AOP 代理,
+ *   @Transactional 失效),参考 BackupService 注入 RestoreService 经代理调用的先例,
+ *   此处通过 ObjectProvider<RestoreService> 注入自身代理。
+ *
+ * 快照策略:恢复前快照失败必须中止恢复(抛 BusinessException),
+ * 不允许静默继续——拆分事务后快照是唯一的全量回滚手段。
  */
 @Service
 public class RestoreService {
@@ -45,23 +51,29 @@ public class RestoreService {
     private final JdbcTemplate jdbcTemplate;
     private final BackupService backupService;
     private final RedisTemplate<String, Object> redisTemplate;
+    /** 自身代理:单表恢复的 @Transactional 需经 Spring 代理调用才生效 */
+    private final ObjectProvider<RestoreService> selfProvider;
 
     public RestoreService(JdbcTemplate jdbcTemplate, BackupService backupService,
-                          RedisTemplate<String, Object> redisTemplate) {
+                          RedisTemplate<String, Object> redisTemplate,
+                          ObjectProvider<RestoreService> selfProvider) {
         this.jdbcTemplate = jdbcTemplate;
         this.backupService = backupService;
         this.redisTemplate = redisTemplate;
+        this.selfProvider = selfProvider;
     }
 
     /**
-     * 从备份文件恢复。在事务内执行:先删除目标范围数据,再按备份插入。
+     * 从备份文件恢复。
      * 超管可恢复任意备份;门店管理员仅可恢复本门店备份。
      *
-     * 加固:
-     * - 恢复前自动创建 pre_restore_ 快照(便于回滚)
-     * - 恢复后做只读校验(关键表行数与备份声明一致)
+     * 流程(拆分大事务,不再整体 @Transactional):
+     * 1. 加载并校验备份文件(复用文件名白名单 / 路径穿越防护)
+     * 2. 恢复前自动创建 pre_restore_ 快照——失败立即中止恢复
+     * 3. 按 TABLES_IN_ORDER 逐表恢复,每表独立事务(DELETE+INSERT 同事务);
+     *    任一表失败立即停止后续表,记录失败表与原因
+     * 4. 清理 Redis 缓存(部分恢复同样需要,避免读到旧数据)
      */
-    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> restoreBackup(String backupName) {
         // 通过 BackupService 加载并校验备份文件(复用文件名白名单 / 路径穿越防护 / GZIP 读取逻辑)
         Map<String, Object> document = backupService.loadBackupDocument(backupName);
@@ -85,40 +97,52 @@ public class RestoreService {
             }
         }
 
-        // 恢复前自动快照(失败不影响恢复流程)
-        String snapshotName = null;
+        // 恢复前自动快照:拆分事务后快照是唯一的全量回滚兜底,失败必须中止恢复
+        String snapshotName;
         try {
             snapshotName = createPreRestoreSnapshot(type, docStoreId);
         } catch (Exception e) {
-            log.warn("恢复前快照失败(忽略): {}", e.getMessage());
+            log.error("恢复前快照失败,中止恢复: {}", e.getMessage(), e);
+            throw new BusinessException("恢复前快照失败,已中止恢复: " + e.getMessage());
         }
 
         @SuppressWarnings("unchecked")
         Map<String, List<Map<String, Object>>> data =
                 (Map<String, List<Map<String, Object>>>) document.getOrDefault("data", new LinkedHashMap<>());
 
-        // 先删除目标范围数据
-        if ("full".equals(type)) {
-            deleteAllBusinessData();
-        } else if (docStoreId != null) {
-            deleteStoreData(docStoreId);
-        }
-
-        // 按顺序插入
-        int restoredRows = 0;
+        // 逐表恢复:每张表一个独立事务,失败即停,不再全量回滚(快照兜底)
+        RestoreService proxy = self();
+        Map<String, Object> tableResults = new LinkedHashMap<>();
         List<String> restoredTables = new ArrayList<>();
+        int restoredRows = 0;
+        String failedTable = null;
+        String failureReason = null;
         for (String table : BackupConstants.TABLES_IN_ORDER) {
             List<Map<String, Object>> rows = data.get(table);
-            if (rows == null || rows.isEmpty()) continue;
-            int inserted = insertRows(table, rows);
-            restoredRows += inserted;
-            restoredTables.add(table);
+            try {
+                int inserted = proxy.restoreSingleTable(table, rows, type, docStoreId);
+                if (rows != null && !rows.isEmpty()) {
+                    restoredTables.add(table);
+                    restoredRows += inserted;
+                }
+                tableResults.put(table, "成功:插入 " + inserted + " 行");
+            } catch (Exception ex) {
+                // 本表事务已在 restoreSingleTable 内回滚;停止后续表,返回已完成清单与失败原因
+                failedTable = table;
+                failureReason = ex.getMessage();
+                tableResults.put(table, "失败:" + failureReason + "(本表事务已回滚)");
+                log.error("恢复表 {} 失败,停止恢复后续表: {}", table, failureReason, ex);
+                break;
+            }
+        }
+        if (failedTable == null) {
+            log.info("备份 {} 恢复完成:共 {} 张表有数据,合计 {} 行", backupName, restoredTables.size(), restoredRows);
+        } else {
+            log.warn("备份 {} 恢复中断:表 {} 失败({}),已完成 {} 张表;可用快照 {} 兜底回滚",
+                    backupName, failedTable, failureReason, restoredTables.size(), snapshotName);
         }
 
-        // 恢复后只读校验:关键表行数应与备份声明一致(不一致则抛异常回滚事务)
-        verifyRestoredData(document, data);
-
-        // 恢复成功后清理 Redis 缓存(dish/menu),避免前端读到旧数据
+        // 恢复后清理 Redis 缓存(dish/menu),避免前端读到旧数据
         // 全库恢复清理所有门店缓存;门店恢复只清理该门店缓存
         evictCache("full".equals(type) ? null : docStoreId);
 
@@ -130,7 +154,56 @@ public class RestoreService {
         result.put("restoredTables", restoredTables);
         result.put("restoredRows", restoredRows);
         result.put("preRestoreSnapshot", snapshotName);
+        // 新增字段(原 key 全保留):逐表恢复状态与失败信息,供前端展示拆分事务后的部分恢复结果
+        result.put("tableResults", tableResults);
+        result.put("failedTable", failedTable);
+        result.put("failureReason", failureReason);
         return result;
+    }
+
+    /** 获取自身 Spring 代理;代理不可用时回退 this(仅出现在无容器的单元测试场景,事务注解不生效) */
+    private RestoreService self() {
+        if (selfProvider != null) {
+            RestoreService proxy = selfProvider.getIfAvailable();
+            if (proxy != null) {
+                return proxy;
+            }
+        }
+        return this;
+    }
+
+    /**
+     * 单表恢复(独立事务单元):删除该表目标范围数据 + 按备份插入 + 全库行数校验。
+     * 必须经 Spring 代理调用(见 self()),否则 @Transactional 不生效。
+     * 任一步失败抛异常 → 本表事务回滚,由调用方记录并停止后续表。
+     *
+     * @return 实际插入行数
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public int restoreSingleTable(String table, List<Map<String, Object>> rows,
+                                  String type, Long storeId) {
+        // 1. 删除该表现有数据(全库:整表清空;门店:按门店范围,子表经关联父表过滤)
+        deleteTableData(table, type, storeId);
+        // 2. 按备份插入(保留备份原始值,含 id)
+        int inserted = (rows == null || rows.isEmpty()) ? 0 : insertRows(table, rows);
+        // 3. 全库恢复:行数校验(同事务内可见本表未提交插入)
+        //    门店恢复跳过 COUNT 校验:多门店场景下全表总数不等于该门店备份行数,
+        //    插入失败会抛异常触发本表回滚。
+        if ("full".equals(type) && rows != null && !rows.isEmpty()) {
+            Integer count;
+            try {
+                count = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM " + backupService.quoteTable(table), Integer.class);
+            } catch (Exception ex) {
+                throw new BusinessException("恢复表 " + table + " 校验失败:无法查询表 - " + ex.getMessage());
+            }
+            int actual = count == null ? 0 : count;
+            if (actual != rows.size()) {
+                throw new BusinessException(String.format(
+                        "恢复表 %s 校验失败:预期 %d 行,实际 %d 行(本表事务已回滚)", table, rows.size(), actual));
+            }
+        }
+        return inserted;
     }
 
     /**
@@ -165,75 +238,28 @@ public class RestoreService {
     }
 
     /**
-     * 恢复后只读校验。
-     *
-     * 全库恢复:对 TABLES_IN_ORDER 中每个表执行 COUNT(*),应与备份声明行数一致。
-     * 门店恢复:多门店场景下全表 COUNT 不等于备份行数(其他门店数据仍在),
-     *          仅依赖 insertRows 返回的插入行数校验(插入失败会抛异常触发回滚)。
-     *
-     * 仅校验当前版本备份的表(TABLES_IN_ORDER),旧版备份中可能包含 admin 等已移除的表,
-     * 这些表不会被恢复也不会被校验,确保向后兼容。
+     * 删除单表现有数据。
+     * 全库恢复:整表清空;门店恢复:按门店范围删除(无 store_id 列的子表经关联父表过滤,
+     * store 表按主键删,与原 deleteStoreData 的语句保持一致)。
      */
-    private void verifyRestoredData(Map<String, Object> document,
-                                    Map<String, List<Map<String, Object>>> data) {
-        String type = (String) document.getOrDefault("type", "full");
-        // 门店恢复跳过 COUNT 校验:多门店场景下全表总数不等于该门店备份行数
-        if (!"full".equals(type)) return;
-        for (String table : BackupConstants.TABLES_IN_ORDER) {
-            List<Map<String, Object>> rows = data.get(table);
-            if (rows == null) continue;
-            int expected = rows.size();
-            int actual;
-            try {
-                Integer count = jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM " + backupService.quoteTable(table), Integer.class);
-                actual = count == null ? 0 : count;
-            } catch (Exception ex) {
-                throw new BusinessException("恢复后校验失败:无法查询表 " + table + " - " + ex.getMessage());
-            }
-            if (actual != expected) {
-                throw new BusinessException(String.format(
-                        "恢复后校验失败:表 %s 预期 %d 行,实际 %d 行(事务已回滚)", table, expected, actual));
-            }
-        }
-    }
-
-    /** 删除全库业务数据(按子表在前顺序)。 */
-    private void deleteAllBusinessData() {
-        for (String table : BackupConstants.DELETE_ORDER) {
+    private void deleteTableData(String table, String type, Long storeId) {
+        if ("full".equals(type)) {
             jdbcTemplate.update("DELETE FROM " + backupService.quoteTable(table));
+            return;
         }
-    }
-
-    /** 删除指定门店的业务数据(含级联子表 + store 记录)。
-     *  store 记录一并删除,以便从备份还原门店配置(名称/logo/安全码等)。 */
-    private void deleteStoreData(Long storeId) {
-        // 子表先删(通过 JOIN 过滤的子表)
-        jdbcTemplate.update("DELETE oi FROM order_item oi INNER JOIN `order` o ON oi.order_id = o.id WHERE o.store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM `order` WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM recharge_record WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE mi FROM menu_item mi INNER JOIN menu m ON mi.menu_id = m.id WHERE m.store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM menu WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE pi FROM purchase_item pi INNER JOIN purchase p ON pi.purchase_id = p.id WHERE p.store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM purchase WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE goi FROM group_order_item goi INNER JOIN group_order go ON goi.group_order_id = go.id WHERE go.store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM group_order WHERE store_id = ?", storeId);
-        // 带_store_id_的表直接按 store_id 删
-        jdbcTemplate.update("DELETE FROM stock_count WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM daily_close WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM daily_settlement WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM notification WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM feedback WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM dining_time_slot WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM employee WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM dish_category WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM dish WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM department WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM supplier WHERE store_id = ?", storeId);
-        jdbcTemplate.update("DELETE FROM material WHERE store_id = ?", storeId);
-        // admin 表不删除:管理员账号不参与备份/恢复,保持现状
-        // store 表最后删:门店配置随备份还原
-        jdbcTemplate.update("DELETE FROM store WHERE id = ?", storeId);
+        switch (table) {
+            case "order_item" -> jdbcTemplate.update(
+                    "DELETE oi FROM order_item oi INNER JOIN `order` o ON oi.order_id = o.id WHERE o.store_id = ?", storeId);
+            case "menu_item" -> jdbcTemplate.update(
+                    "DELETE mi FROM menu_item mi INNER JOIN menu m ON mi.menu_id = m.id WHERE m.store_id = ?", storeId);
+            case "purchase_item" -> jdbcTemplate.update(
+                    "DELETE pi FROM purchase_item pi INNER JOIN purchase p ON pi.purchase_id = p.id WHERE p.store_id = ?", storeId);
+            case "group_order_item" -> jdbcTemplate.update(
+                    "DELETE goi FROM group_order_item goi INNER JOIN group_order go ON goi.group_order_id = go.id WHERE go.store_id = ?", storeId);
+            case "store" -> jdbcTemplate.update("DELETE FROM store WHERE id = ?", storeId);
+            default -> jdbcTemplate.update(
+                    "DELETE FROM " + backupService.quoteTable(table) + " WHERE store_id = ?", storeId);
+        }
     }
 
     /**

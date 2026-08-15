@@ -253,16 +253,21 @@ public class DishService {
         return affected;
     }
 
+    /** 回收站分页大小上限(防恶意大分页拖库) */
+    private static final int TRASH_MAX_PAGE_SIZE = 200;
+
     public IPage<Dish> getTrashList(Long storeId, int page, int size) {
         SecurityContext.checkStoreAccess(storeId);
+        // 参数规范化:page 至少 1;size 限制在 [1, 200]
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), TRASH_MAX_PAGE_SIZE);
+        // 分页下推到 SQL(LIMIT/OFFSET),不再全量查询后内存 subList。
         // 使用自定义 SQL 绕过 MyBatis-Plus 逻辑删除拦截器
         // (selectPage 会自动追加 is_deleted=0,导致查不到已删除记录)
-        List<Dish> allTrash = dishMapper.selectTrashByStoreId(storeId);
-        long total = allTrash.size();
-        int fromIndex = Math.min((page - 1) * size, allTrash.size());
-        int toIndex = Math.min(fromIndex + size, allTrash.size());
-        List<Dish> pageRecords = allTrash.subList(fromIndex, toIndex);
-        Page<Dish> p = new Page<>(page, size);
+        int offset = (safePage - 1) * safeSize;
+        List<Dish> pageRecords = dishMapper.selectTrashByStoreId(storeId, offset, safeSize);
+        long total = dishMapper.countTrashByStoreId(storeId);
+        Page<Dish> p = new Page<>(safePage, safeSize);
         p.setRecords(pageRecords);
         p.setTotal(total);
         return p;

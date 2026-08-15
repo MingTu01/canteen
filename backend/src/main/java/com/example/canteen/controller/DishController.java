@@ -11,6 +11,7 @@ import com.example.canteen.mapper.DishMapper;
 import com.example.canteen.security.SecurityContext;
 import com.example.canteen.service.DishService;
 import lombok.Data;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -22,10 +23,12 @@ import java.util.Map;
 public class DishController {
     private final DishService dishService;
     private final DishMapper dishMapper;
+    private final JdbcTemplate jdbcTemplate;
 
-    public DishController(DishService dishService, DishMapper dishMapper) {
+    public DishController(DishService dishService, DishMapper dishMapper, JdbcTemplate jdbcTemplate) {
         this.dishService = dishService;
         this.dishMapper = dishMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     // ==================== 批量操作请求体 ====================
@@ -90,6 +93,27 @@ public class DishController {
         SecurityContext.checkStoreAccess(storeId);
         // 走 Service 缓存(含 status=0 已下架的)
         return ApiResponse.success(dishService.getAllDishesByStore(storeId));
+    }
+
+    /**
+     * 菜品数据版本号(供终端增量同步判断是否有变更)。
+     * 返回 {"version": "<count>:<maxUpdated>"},如 "35:2026-08-15 10:30:00"。
+     *
+     * 用 JdbcTemplate 原生 SQL(不走 MyBatis-Plus 逻辑删除拦截):
+     * 统计范围包含逻辑删除行(is_deleted=1),使"删除菜品"也会改变版本号,
+     * 正好覆盖删除变更场景;空表时 maxUpdated 为 '0'。
+     * 权限/门店校验与 /store/{storeId}/all 一致。
+     */
+    @GetMapping("/store/{storeId}/version")
+    public ApiResponse<Map<String, Object>> getDishVersion(@PathVariable Long storeId) {
+        SecurityContext.checkStoreAccess(storeId);
+        String version = jdbcTemplate.queryForObject(
+                "SELECT CONCAT(COUNT(*), ':', COALESCE(CAST(MAX(updated_at) AS CHAR), '0'))"
+                        + " FROM dish WHERE store_id = ?",
+                String.class, storeId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("version", version == null ? "0:0" : version);
+        return ApiResponse.success(result);
     }
 
     @GetMapping("/{id}")

@@ -15,13 +15,14 @@ import {
   ElMessage,
   ElMessageBox,
 } from 'element-plus'
-import { Eye, CheckCircle2, XCircle, Download } from 'lucide-vue-next'
+import { Eye, CheckCircle2, XCircle, Download, Coins } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import UnsolicitedFeeDialog from '@/components/UnsolicitedFeeDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { orderApi } from '@/api'
 import type { Order, OrderDetail, OrderItem, OrderQuery, PageResult } from '@/api/types'
@@ -55,6 +56,7 @@ interface DishRow {
   updatedAt?: string
   status: number
   orderSource?: number
+  serviceFee?: number
   dishName: string
   price: number
   quantity: number
@@ -82,6 +84,7 @@ const flatRows = computed<DishRow[]>(() => {
         updatedAt: o.updatedAt,
         status: o.status,
         orderSource: o.orderSource,
+        serviceFee: o.serviceFee,
         dishName: item.dishName ?? '—',
         price: item.price ?? 0,
         quantity: item.quantity ?? 0,
@@ -197,13 +200,14 @@ const handleExport = async () => {
       return
     }
     // 按菜品拆行导出(同订单号菜品拆出来)
+    // 手续费/订单总额仅在订单首行非空
     const exportData: Record<string, string | number>[] = []
     let seq = 0
     for (const o of rows) {
       const items = o.items && o.items.length > 0
         ? o.items
         : [{ dishName: '', price: 0, quantity: 0 } as OrderItem]
-      items.forEach((item) => {
+      items.forEach((item, idx) => {
         seq++
         exportData.push({
           '序号': seq,
@@ -217,6 +221,8 @@ const handleExport = async () => {
           '单价': item.price ?? 0,
           '数量': item.quantity ?? 0,
           '合计价格': ((item.price ?? 0) * (item.quantity ?? 0)).toFixed(2),
+          '手续费': (o.items?.length ?? 0) > 0 && idx === 0 ? (o.serviceFee ?? 0) : '',
+          '订单总额': idx === 0 ? (o.totalAmount ?? 0) : '',
           '结帐时间': o.status === 2 && o.updatedAt ? o.updatedAt.replace('T', ' ').substring(0, 19) : '',
           '订单状态': statusLabel(o.status),
           '订单来源': sourceLabel(o.orderSource),
@@ -227,8 +233,8 @@ const handleExport = async () => {
     // 列宽
     ws['!cols'] = [
       { wch: 6 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
-      { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 20 },
-      { wch: 10 }, { wch: 12 },
+      { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 },
+      { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 12 },
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '订单列表')
@@ -244,6 +250,17 @@ const handleExport = async () => {
 
 // 详情抽屉
 const drawerVisible = ref(false)
+// 未订餐用餐手续费设置弹窗
+const feeDialogVisible = ref(false)
+
+/** 打开手续费设置弹窗(超管未选门店时提示) */
+const openFeeDialog = () => {
+  if (noStoreSelected.value) {
+    ElMessage.warning('请先选择食堂')
+    return
+  }
+  feeDialogVisible.value = true
+}
 const detailLoading = ref(false)
 const detail = ref<OrderDetail | null>(null)
 
@@ -351,6 +368,7 @@ watch(() => authStore.storeId, () => {
           aria-label="选择日期范围"
         />
         <template #actions>
+          <ElButton :icon="Coins" @click="openFeeDialog">手续费设置</ElButton>
           <ElButton :icon="Download" :loading="exporting" @click="handleExport">导出Excel</ElButton>
         </template>
       </SearchBar>
@@ -390,6 +408,16 @@ watch(() => authStore.storeId, () => {
           <ElTableColumn label="合计价格" width="110" align="right">
             <template #default="{ row }">
               <span class="font-medium tabular-nums text-text">¥{{ (Number(row.price) * Number(row.quantity)).toFixed(2) }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="手续费" width="90" align="right">
+            <template #default="{ row }">
+              <span v-if="row.isFirstRow" class="tabular-nums text-text">¥{{ row.serviceFee ?? 0 }}</span>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="订单总额" width="100" align="right">
+            <template #default="{ row }">
+              <span v-if="row.isFirstRow" class="font-medium tabular-nums text-text">¥{{ row.totalAmount }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn label="结帐时间" width="170" align="center">
@@ -475,6 +503,12 @@ watch(() => authStore.storeId, () => {
               <ElDescriptionsItem label="状态">
                 <StatusTag :value="detail.order.status" :map="ORDER_STATUS" />
               </ElDescriptionsItem>
+              <ElDescriptionsItem label="订单来源">
+                <StatusTag :value="detail.order.orderSource ?? 0" :map="ORDER_SOURCE" />
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="手续费">
+                ¥{{ detail.order.serviceFee ?? 0 }}
+              </ElDescriptionsItem>
               <ElDescriptionsItem label="下单时间">
                 {{ detail.order.createdAt || '—' }}
               </ElDescriptionsItem>
@@ -532,6 +566,9 @@ watch(() => authStore.storeId, () => {
           </template>
         </div>
       </ElDrawer>
+
+      <!-- 未订餐用餐手续费设置弹窗 -->
+      <UnsolicitedFeeDialog v-model="feeDialogVisible" />
 
     </PageContainer>
   </Layout>

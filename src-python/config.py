@@ -265,3 +265,56 @@ def write_config(updates):
     except Exception as e:
         print(f'[Config] 写入配置失败: {e}')
         return False
+
+
+# ===== set_config 写入前的取值校验规则 =====
+# URL 类配置项:允许留空(空串表示使用默认值/由操作员手动输入),
+# 非空时必须以 http:// 或 https:// 开头(拒绝 file://、javascript: 等危险协议)
+_URL_RE = re.compile(r'^https?://', re.IGNORECASE)
+# 数值类配置项允许的上界(card_interval/idle_timeout 单位为秒,
+# 5000 秒封顶防止异常大值导致读卡防抖/待机超时功能失效)
+_NUMERIC_MAX = 5000
+
+
+def validate_config_value(key, value):
+    """校验单个配置项的取值是否合法(供 set_config 写入前逐项调用)。
+
+    Args:
+        key: 配置项名(如 server_url / card_interval / window_mode)
+        value: 待写入的值
+
+    Returns:
+        None: 取值合法;
+        str: 取值非法时的中文错误信息(调用方据此拒绝写入 config.json)。
+    """
+    if key in ('server_url', 'update_check_url'):
+        # 服务器地址/更新检测地址:必须是以 http:// 或 https:// 开头的 URL(允许留空)
+        if not isinstance(value, str):
+            return f'{key} 必须是字符串'
+        if value and not _URL_RE.match(value):
+            return f'{key} 必须以 http:// 或 https:// 开头'
+        return None
+
+    if key == 'window_mode':
+        # 枚举项:窗口模式只允许全屏/窗口两种合法取值
+        if value not in ('fullscreen', 'windowed'):
+            return 'window_mode 只允许 fullscreen 或 windowed'
+        return None
+
+    if key in ('card_interval', 'idle_timeout'):
+        # 数值项(单位秒):必须是数字且 0 <= v <= 5000。
+        # 注意 card_interval 历史上支持小数(默认 2.0 秒防抖),故同时接受整数与浮点数;
+        # bool 是 int 的子类,需显式排除(True/False 不是合法数值)。
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f'{key} 必须是数字'
+        if not (0 <= value <= _NUMERIC_MAX):
+            return f'{key} 取值超出范围(0 ~ {_NUMERIC_MAX})'
+        return None
+
+    if key == 'ignored_version':
+        # 忽略版本号:仅作本地记录,任意字符串皆可
+        if not isinstance(value, str):
+            return 'ignored_version 必须是字符串'
+        return None
+
+    return f'不支持的配置项: {key}'

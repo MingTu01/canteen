@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from 'axios'
 import { clearBranding } from '@/store/branding'
+import { detectShell } from '@/api/shellApi'
 
 /** 终端绑定配置(存 localStorage,绑定后只读展示,改模式需重新绑定) */
 export interface TerminalConfig {
@@ -20,8 +21,8 @@ export interface TerminalConfig {
 }
 
 const STORAGE_KEY = 'terminal_config_v2'
-/** token 刷新阈值:绑定超过 30 天自动刷新(终端 token 默认 365 天) */
-const TOKEN_REFRESH_THRESHOLD_DAYS = 30
+/** token 刷新阈值:绑定超过 15 天自动刷新(终端 token 默认 30 天,提前一半刷新留足余量) */
+const TOKEN_REFRESH_THRESHOLD_DAYS = 15
 
 /** 读取本地绑定的配置,未绑定时返回 null */
 export function loadConfig(): TerminalConfig | null {
@@ -47,6 +48,76 @@ export function saveConfig(cfg: TerminalConfig): void {
 /** 清除绑定配置(解绑) */
 export function clearConfig(): void {
   localStorage.removeItem(STORAGE_KEY)
+  // 同步清除 shell 侧 DPAPI 加密存储的 token(空串即清;浏览器环境静默跳过)
+  saveTokenToShell('')
+}
+
+// ===== 终端 token 双存储(shell DPAPI 加密文件为主,localStorage 明文兜底) =====
+// 写入点(绑定成功/token 刷新成功):localStorage 照旧写(兜底)+ 异步同步到 shell;
+// 读取点(应用启动早期,initTokenFromShell):先同步读 localStorage 保底,
+//   再异步从 shell 恢复——shell 返回非空且与当前不同则更新 localStorage;
+// 清空点(解绑/401 失效,clearConfig):shell 删除 + localStorage 清除。
+// shell 不在(浏览器开发模式)时全部静默失败,自然降级 localStorage。
+
+/**
+ * 把 token 异步保存到 Python shell(DPAPI 加密后写 token.bin)。
+ * 同源 127.0.0.1:15118 无跨域问题;POST 会带 Origin 且与 Host 一致可通过校验。
+ * 全部静默失败(shell 不在时降级 localStorage),不阻塞调用方。
+ */
+export function saveTokenToShell(token: string): void {
+  if (detectShell() !== 'python') return
+  try {
+    void fetch('/__api__/token_save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    }).catch(() => {
+      /* shell 不在时静默降级 localStorage */
+    })
+  } catch {
+    /* shell 不在时静默降级 localStorage */
+  }
+}
+
+/**
+ * 从 Python shell 读取 DPAPI 加密保存的 token。
+ * 文件不存在/解密失败/shell 不在时返回 null(不抛错)。
+ */
+export async function loadTokenFromShell(): Promise<string | null> {
+  if (detectShell() !== 'python') return null
+  try {
+    const res = await fetch('/__api__/token_load')
+    const data = await res.json()
+    if (data?.ok && typeof data.token === 'string' && data.token) return data.token
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 应用启动早期调用一次(不阻塞首屏):从 shell 恢复 token。
+ * shell 为主存储,返回非空且与 localStorage 不同时,以 shell 为准更新
+ * localStorage 与内存 axios 实例(下次请求即用新 token)。
+ */
+export function initTokenFromShell(): void {
+  if (detectShell() !== 'python') return
+  void (async () => {
+    try {
+      const shellToken = await loadTokenFromShell()
+      if (!shellToken) return
+      const cfg = loadConfig()
+      if (cfg && cfg.token !== shellToken) {
+        saveConfig({ ...cfg, token: shellToken })
+        // 请求拦截器每次从 localStorage 读最新 token,此处重置实例仅作保险
+        currentApi = null
+        currentBase = ''
+        console.log('[api] 已从 shell 恢复终端 token')
+      }
+    } catch {
+      /* 静默 */
+    }
+  })()
 }
 
 /** 创建 axios 实例(动态 baseURL,绑定后所有请求带 token) */
@@ -68,7 +139,7 @@ function asyncPurgeLocalCache(): void {
 
 /**
  * 定期刷新终端 token(滚动续期)。
- * 绑定超过 30 天时,用当前 token 换取新 token,避免接近 365 天过期时失绑。
+ * 绑定超过 15 天时,用当前 token 换取新 token,避免接近 30 天过期时失绑。
  * 异步执行,不阻塞当前请求。
  */
 let refreshInFlight: Promise<void> | null = null
@@ -98,7 +169,7 @@ function maybeRefreshToken(cfg: TerminalConfig): void {
         console.log('[api] 终端 token 已刷新')
       }
     } catch {
-      // 刷新失败(如网络错误),不影响当前 token 使用(365 天内仍有效)
+      // 刷新失败(如网络错误),不影响当前 token 使用(30 天内仍有效)
     } finally {
       refreshInFlight = null
     }
@@ -195,6 +266,8 @@ export async function bindTerminal(params: {
     boundAt: new Date().toISOString(),
   }
   saveConfig(cfg)
+  // 异步同步到 shell 主存储(DPAPI 加密,失败静默降级 localStorage)
+  saveTokenToShell(cfg.token)
   // 重置实例,下次 getApi 会按新配置创建
   currentApi = null
   currentBase = ''

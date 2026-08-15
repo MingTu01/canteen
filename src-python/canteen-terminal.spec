@@ -57,6 +57,9 @@ a = Analysis(
         # 将 drivers/ 目录原样打包到 _internal/drivers/
         # 文件清单:CH375WDM.INF / CH375WDM.CAT / CH375W64.SYS / CH375DLL.DLL / CH375DLL64.DLL
         ('drivers', 'drivers'),
+        # 仓库根版本清单(updater.resolve_current_version 优先读取其中的
+        # terminal.version 字段,实现版本号与发版流程统一,不再依赖硬编码)
+        ('../VERSIONS.json', '.'),
     ],
     hiddenimports=[
         # PyQt5 模块
@@ -70,6 +73,7 @@ a = Analysis(
         'server',
         'bridge',
         'card_reader',
+        'dpapi',
         'updater',
     ],
     hookspath=[],

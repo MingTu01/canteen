@@ -46,22 +46,35 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
     bridge = None
 
     # 只读端点(允许 GET)
-    READ_ONLY_METHODS = frozenset({'server_url', 'config'})
+    READ_ONLY_METHODS = frozenset({'server_url', 'config', 'token_load'})
 
     def log_message(self, format, *args):
         pass  # 静默,不打印访问日志
 
-    def _check_origin(self):
-        """校验请求来源,防止跨站 CSRF。
+    def _check_origin(self, method):
+        """校验请求来源,防止本地 API 被恶意网页 CSRF。
 
-        仅允许同源请求(127.0.0.1)。浏览器跨站请求会被拒绝。
+        以请求头 Host 为准构造唯一允许的 origin(http://{host},
+        如 http://127.0.0.1:15118),规则:
+        1. Origin 存在时必须精确等于 http://{host}
+        2. Referer 存在时必须等于 http://{host} 或以 http://{host}/ 开头
+        3. 状态变更类方法(不在 READ_ONLY_METHODS,如 set_config/quit/
+           restart_card_reader)要求 Origin/Referer 至少提供其一,
+           两者都缺失直接拒绝(防跨站裸 POST/表单提交);
+           GET 只读方法(server_url/config)两者都缺失时放行,
+           但只要提供了就必须精确匹配
         """
+        host = self.headers.get('Host', '')
+        if not host:
+            return False
+        allowed_origin = 'http://' + host
         origin = self.headers.get('Origin', '')
         referer = self.headers.get('Referer', '')
-        # 同源时 Origin 为空(同源 GET)或 http://127.0.0.1:port
-        if origin and not origin.startswith('http://127.0.0.1:'):
+        if origin and origin != allowed_origin:
             return False
-        if referer and not referer.startswith('http://127.0.0.1:'):
+        if referer and referer != allowed_origin and not referer.startswith(allowed_origin + '/'):
+            return False
+        if method not in self.READ_ONLY_METHODS and not origin and not referer:
             return False
         return True
 
@@ -75,7 +88,7 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
             if method not in self.READ_ONLY_METHODS:
                 self._send_json(405, {'ok': False, 'error': 'GET 不支持此端点,请使用 POST'})
                 return
-            if not self._check_origin():
+            if not self._check_origin(method):
                 self._send_json(403, {'ok': False, 'error': '跨站请求被拒绝'})
                 return
             self._handle_api(method)
@@ -90,7 +103,7 @@ class ApiAwareHandler(http.server.SimpleHTTPRequestHandler):
 
         if parsed.path.startswith('/__api__/'):
             method = parsed.path[len('/__api__/'):]
-            if not self._check_origin():
+            if not self._check_origin(method):
                 self._send_json(403, {'ok': False, 'error': '跨站请求被拒绝'})
                 return
             self._handle_api(method)

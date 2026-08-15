@@ -46,7 +46,8 @@ def mock_bridge():
     def fake_handle_api(method, body=None):
         # 已知方法返回 ok=True,未知方法返回 ok=False(与真实 ShellBridge 一致)
         known = {'server_url', 'config', 'set_config', 'switch_to_config',
-                 'switch_to_fullscreen', 'quit', 'restart_card_reader', 'eval_js'}
+                 'switch_to_fullscreen', 'quit', 'restart_card_reader',
+                 'token_save', 'token_load'}
         if method in known:
             return {'ok': True, 'mock': True}
         return {'ok': False, 'error': f'未知方法: {method}'}
@@ -149,9 +150,9 @@ class TestOriginValidation:
         assert status == 403
 
     def test_api_with_same_origin(self, server):
-        """同源(127.0.0.1)Origin 的 API 请求应正常通过。"""
+        """同源 Origin(与实际 Host 一致,动态端口)的 API 请求应正常通过。"""
         status, body = _get(server, '/__api__/config',
-                            headers={'Origin': 'http://127.0.0.1:15118'})
+                            headers={'Origin': server})
         assert status == 200
 
     def test_api_without_origin(self, server):
@@ -189,6 +190,41 @@ class TestHttpMethodEnforcement:
         assert status == 200
 
 
+# ============ token 存储端点测试 ============
+
+class TestTokenEndpoints:
+    """H1 残留修复:token_load 只读(GET),token_save 状态变更(POST)。"""
+
+    def test_token_load_get_allowed(self, server):
+        """token_load 属于 READ_ONLY_METHODS,GET 可访问。"""
+        status, body = _get(server, '/__api__/token_load')
+        assert status == 200
+        assert json.loads(body).get('ok') is True
+
+    def test_token_load_get_without_origin_allowed(self, server):
+        """只读端点无 Origin 头也放行(但提供了就必须精确匹配)。"""
+        status, body = _get(server, '/__api__/token_load')
+        assert status == 200
+
+    def test_token_save_post_with_origin(self, server):
+        """token_save 状态变更:同源 Origin 的 POST 可通过校验。"""
+        status, body = _post(server, '/__api__/token_save',
+                             data={'token': 'abc'},
+                             headers={'Origin': server})
+        assert status == 200
+        assert body.get('ok') is True
+
+    def test_token_save_post_without_origin_rejected(self, server):
+        """token_save 状态变更:Origin/Referer 均缺失时拒绝(防跨站裸 POST)。"""
+        status, body = _post(server, '/__api__/token_save', data={'token': 'abc'})
+        assert status == 403
+
+    def test_token_save_get_rejected(self, server):
+        """token_save 不在 READ_ONLY_METHODS,GET 应返回 405。"""
+        status, _ = _get(server, '/__api__/token_save')
+        assert status == 405
+
+
 # ============ 静态文件与 SPA 回退测试 ============
 
 class TestStaticServing:
@@ -214,6 +250,7 @@ class TestStaticServing:
 
     def test_nonexistent_api_returns_404(self, server):
         """未知的 API 端点应返回错误(而非 SPA 回退)。"""
-        status, body = _post(server, '/__api__/nonexistent_method')
+        status, body = _post(server, '/__api__/nonexistent_method',
+                             headers={'Origin': server})
         assert status == 200  # _handle_api 返回 200 + {ok: False}
         assert body.get('ok') is False

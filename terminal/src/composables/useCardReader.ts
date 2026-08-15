@@ -79,6 +79,8 @@ export function useCardReader(
     }
 
     if (e.key.length === 1) {
+      // 仅累计数字字符:卡号均为数字,误敲字母/符号会拼出无效卡号触发无效查询
+      if (!/^[0-9]$/.test(e.key)) return
       cardBuffer += e.key
       if (cardBufferTimer) clearTimeout(cardBufferTimer)
       cardBufferTimer = setTimeout(() => {

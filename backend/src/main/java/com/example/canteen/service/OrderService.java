@@ -100,7 +100,8 @@ private LocalTime getDeadlineTime(Long storeId, String key) {
                 String[] parts = v.trim().split(":");
                 return LocalTime.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.debug("读取时间配置失败 key={}: {}", key, e.getMessage());
         }
     }
     // 2. 全局配置
@@ -112,9 +113,81 @@ private LocalTime getDeadlineTime(Long storeId, String key) {
             String[] parts = v.trim().split(":");
             return LocalTime.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
         }
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+        log.debug("读取时间配置失败 key={}: {}", key, e.getMessage());
     }
     return LocalTime.of(15, 0);
+}
+
+/**
+ * 读取门店配置字符串。
+ * 读取顺序:store_config(按门店) → sys_config(全局) → 默认空串
+ * @param storeId 门店 ID(可空,空则只读全局)
+ * @param key 配置键
+ */
+private String readStoreConfigValue(Long storeId, String key) {
+    // 1. 门店级配置
+    if (storeId != null) {
+        try {
+            String v = jdbcTemplate.queryForObject(
+                    "SELECT config_value FROM store_config WHERE store_id = ? AND config_key = ?",
+                    String.class, storeId, key);
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+    // 2. 全局配置
+    try {
+        String v = jdbcTemplate.queryForObject(
+                "SELECT config_value FROM sys_config WHERE config_key = ?",
+                String.class, key);
+        if (v != null && !v.isBlank()) {
+            return v;
+        }
+    } catch (Exception ignored) {
+    }
+    return "";
+}
+
+/**
+ * 读取未订餐用餐手续费(按餐别)。
+ * 读取顺序:store_config(按门店) → sys_config(全局) → 默认 0
+ * 未启用(unsolicited_fee_enabled 非 "true",忽略大小写)、餐次未知、金额解析失败或负数均返回 0,金额上限 9999
+ * @param storeId 门店 ID(可空,空则只读全局)
+ * @param mealType 餐次:1-早餐,2-午餐,3-晚餐
+ */
+private BigDecimal getUnsolicitedServiceFee(Long storeId, Integer mealType) {
+    // 1. 开关:未启用直接返回 0
+    String enabled = readStoreConfigValue(storeId, "unsolicited_fee_enabled");
+    if (!"true".equalsIgnoreCase(enabled.trim())) {
+        return BigDecimal.ZERO;
+    }
+    // 2. 按餐别读金额 key
+    String key;
+    if (mealType != null && mealType == MealType.BREAKFAST.getCode()) {
+        key = "unsolicited_fee_breakfast";
+    } else if (mealType != null && mealType == MealType.LUNCH.getCode()) {
+        key = "unsolicited_fee_lunch";
+    } else if (mealType != null && mealType == MealType.DINNER.getCode()) {
+        key = "unsolicited_fee_dinner";
+    } else {
+        return BigDecimal.ZERO;
+    }
+    // 3. 解析金额:失败或负数返回 0,上限 9999
+    try {
+        BigDecimal fee = new BigDecimal(readStoreConfigValue(storeId, key).trim());
+        if (fee.compareTo(BigDecimal.ZERO) < 0) {
+            return BigDecimal.ZERO;
+        }
+        if (fee.compareTo(BigDecimal.valueOf(9999)) > 0) {
+            return BigDecimal.valueOf(9999);
+        }
+        return fee;
+    } catch (Exception e) {
+        return BigDecimal.ZERO;
+    }
 }
 
 /**
@@ -200,6 +273,10 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
             throw new BusinessException("员工不属于本门店");
         }
 
+        // 行锁串行化同一员工的并发下单,防止 check-then-insert 竞态导致重复扣款(未订餐用餐也加锁,保证余额扣减串行)
+        // 用 queryForList 判空更稳(员工存在性已在上面校验,此处空结果直接忽略即可)
+        jdbcTemplate.queryForList("SELECT id FROM employee WHERE id = ? FOR UPDATE", Long.class, employeeId);
+
         // B6 防重复下单:未订餐用餐(现场加餐)绕过此校验,允许同一餐次多次下单
         if (!isUnsolicited) {
             Order existOrder = orderMapper.selectByEmployeeDateMeal(employeeId, orderDate, dto.getMealType());
@@ -244,8 +321,13 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
             totalAmount = totalAmount.add(dish.getPrice().multiply(BigDecimal.valueOf(quantity)));
         }
 
+        // 未订餐用餐手续费:按餐别读取门店配置,正常订餐为 0
+        // 实际扣款额 = 菜品小计 + 手续费,取消退款按订单全额退(自然退全款)
+        BigDecimal serviceFee = isUnsolicited ? getUnsolicitedServiceFee(storeId, dto.getMealType()) : BigDecimal.ZERO;
+        BigDecimal payAmount = totalAmount.add(serviceFee);
+
         // B1 余额原子扣减
-        int balanceRows = employeeMapper.deductBalance(employeeId, totalAmount);
+        int balanceRows = employeeMapper.deductBalance(employeeId, payAmount);
         if (balanceRows == 0) {
             throw new BusinessException("余额不足");
         }
@@ -259,7 +341,8 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         order.setEmployeeId(employeeId);
         order.setDate(orderDate);
         order.setMealType(dto.getMealType());
-        order.setTotalAmount(totalAmount);
+        order.setTotalAmount(payAmount);
+        order.setServiceFee(serviceFee);
         order.setStatus(OrderStatus.PENDING.getCode());
         order.setOrderSource(orderSourceCode);
         orderMapper.insert(order);
@@ -501,23 +584,25 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         if (weekOrders == null) {
             weekOrders = new ArrayList<>();
         }
-        List<Order> effectiveWeekOrders = weekOrders.stream()
-                .filter(o -> o.getStatus() == null || o.getStatus() != OrderStatus.CANCELED.getCode())
-                .toList();
+        // 单次遍历聚合:按订餐日期累计订单数与营业额,避免对同一列表循环 7 次全量扫描
+        Map<LocalDate, long[]> countByDay = new HashMap<>();
+        Map<LocalDate, BigDecimal> revenueByDay = new HashMap<>();
+        for (Order o : weekOrders) {
+            // 排除已取消订单(status=3,null 视为有效历史数据)
+            if (o.getStatus() != null && o.getStatus() == OrderStatus.CANCELED.getCode()) continue;
+            if (o.getDate() == null) continue;
+            countByDay.merge(o.getDate(), new long[]{1}, (a, b) -> { a[0] += 1; return a; });
+            BigDecimal amt = o.getTotalAmount() == null ? BigDecimal.ZERO : o.getTotalAmount();
+            revenueByDay.merge(o.getDate(), amt, BigDecimal::add);
+        }
         List<Map<String, Object>> trend = new ArrayList<>();
         for (int i = 6; i >= 0; i--) {
             LocalDate d = today.minusDays(i);
-            LocalDate day = d;
-            List<Order> dayOrders = effectiveWeekOrders.stream()
-                    .filter(o -> o.getDate() != null && o.getDate().equals(day))
-                    .toList();
-            BigDecimal dayRevenue = dayOrders.stream()
-                    .map(Order::getTotalAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            long[] cnt = countByDay.get(d);
             Map<String, Object> dayStat = new HashMap<>();
             dayStat.put("date", d.toString());
-            dayStat.put("orderCount", dayOrders.size());
-            dayStat.put("revenue", dayRevenue);
+            dayStat.put("orderCount", cnt == null ? 0 : cnt[0]);
+            dayStat.put("revenue", revenueByDay.getOrDefault(d, BigDecimal.ZERO));
             trend.add(dayStat);
         }
         stats.put("trend", trend);

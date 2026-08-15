@@ -4,9 +4,17 @@ import './style.css'
 import App from './App.vue'
 import { cleanExpiredCache as cleanAvatarCache } from './utils/imageCache'
 import { initBrandingFromCache } from './store/branding'
+import { initTokenFromShell } from './api'
 
 // 启动时清理过期头像缓存
 cleanAvatarCache()
+
+/**
+ * 启动早期从 Python shell 恢复终端 token(DPAPI 加密主存储)。
+ * 异步执行不阻塞首屏;shell 返回非空且与 localStorage 不同时以 shell 为准更新,
+ * 避免QtWebEngine持久化目录被清理后 localStorage 明文兜底丢失导致失绑。
+ */
+initTokenFromShell()
 
 /**
  * 从本地缓存恢复品牌数据(不请求网络),让背景在应用挂载前就准备好。

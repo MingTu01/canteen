@@ -82,18 +82,22 @@ public class WebConfig implements WebMvcConfigurer {
  * - 浏览器可能通过内网 IP、外网域名、反代域名访问,origin 不固定
  * - X86 终端(Tauri EXE)直接跨域调用后端 API
  *
- * 策略(兼容项目硬约束:CORS 必须支持所有源跨域访问):
- * - 默认:allowedOriginPatterns("*") 放行所有 origin,支持 allowCredentials=true
- * - 可选:通过 CORS_ALLOWED_ORIGINS 环境变量配置精确白名单(逗号分隔),
- *         配置后仅放行白名单内的 origin,收紧生产环境攻击面
+ * 策略:
+ * - 配置白名单:精确 allowedOrigins + allowCredentials(true)
+ * - 未配置白名单:allowedOriginPatterns("*")(兼容终端/内网多域名)但 allowCredentials(false)。
+ *   终端 token 通过 Authorization 头携带(terminal/src/api/index.ts 拦截器,不依赖 Cookie),
+ *   因此 allowCredentials(false) 不影响终端;浏览器跨源 Cookie 场景需配置精确白名单。
  * - 安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制
  */
 @Configuration
 class CorsConfig implements WebMvcConfigurer {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(CorsConfig.class);
+
     /**
      * P0-5: 可选 CORS 白名单(逗号分隔的精确 origin 列表)。
-     * 留空(默认)则放行所有 origin(向后兼容内网多 origin 部署)。
+     * 留空(默认)则放行所有 origin 但不允许携带凭证(向后兼容内网多 origin 部署)。
      * 配置示例:CORS_ALLOWED_ORIGINS=https://dm.canteen.example.com,https://admin.canteen.example.com
      */
     @Value("${cors.allowed-origins:}")
@@ -111,35 +115,32 @@ class CorsConfig implements WebMvcConfigurer {
         // - admin-web / H5 通过 nginx 反代同源访问(浏览器仍带 Origin 头,Spring CORS 需放行)
         // - 浏览器可能通过内网 IP、外网域名、反代域名访问,origin 不固定
         // - X86 终端(Tauri)直接跨域调用后端 API
-        // 因此默认放行所有 origin,credentials 仍可用(allowedOriginPatterns 支持通配)。
         // 安全性由 JwtAuthenticationFilter 保证,不依赖 CORS 做访问控制。
         var apiMapping = registry.addMapping("/api/**")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .allowCredentials(true)
                 .maxAge(3600);
 
-        // P0-5: 若配置了精确白名单,则收紧为白名单模式
+        // P0-5: 若配置了精确白名单,则收紧为白名单模式 + 允许凭证
+        java.util.List<String> originList = new java.util.ArrayList<>();
         if (allowedOriginsConfig != null && !allowedOriginsConfig.isBlank()) {
-            String[] origins = allowedOriginsConfig.split(",");
-            // trim 并过滤空值
-            java.util.List<String> originList = new java.util.ArrayList<>();
-            for (String o : origins) {
+            for (String o : allowedOriginsConfig.split(",")) {
                 String trimmed = o.trim();
                 if (!trimmed.isEmpty()) {
                     originList.add(trimmed);
                 }
             }
-            if (!originList.isEmpty()) {
-                // 使用精确 allowedOrigins(非通配),仅放行白名单内的 origin
-                apiMapping.allowedOrigins(originList.toArray(new String[0]));
-            } else {
-                // 白名单解析后为空,回退到放行所有
-                apiMapping.allowedOriginPatterns("*");
-            }
+        }
+        if (!originList.isEmpty()) {
+            // 使用精确 allowedOrigins(非通配),仅放行白名单内的 origin
+            apiMapping.allowedOrigins(originList.toArray(new String[0]))
+                    .allowCredentials(true);
         } else {
-            // 默认:放行所有 origin(向后兼容内网多 origin 部署)
-            apiMapping.allowedOriginPatterns("*");
+            // 未配置白名单:放行所有 origin(兼容内网多 origin 部署)但不允许携带凭证。
+            // 终端走 Authorization 头不受影响;如需跨源 Cookie,请配置精确白名单。
+            log.warn("未配置 cors.allowed-origins,CORS 已降级为\"允许任意源但不携带凭证\"模式;生产环境建议配置精确白名单");
+            apiMapping.allowedOriginPatterns("*")
+                    .allowCredentials(false);
         }
 
         // 静态资源(头像/菜品图片)CORS

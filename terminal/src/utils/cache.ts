@@ -12,7 +12,8 @@
  *
  * 容错策略:
  * - IndexedDB 不可用:所有 get* 返回 null,调用方降级直查后端
- * - SSE 断开:自动重连(指数退避 + 随机抖动),断开期间用轮询兜底(每 5 分钟全量校验)
+ * - SSE 断开:自动重连(指数退避 + 随机抖动),断开期间用轮询兜底
+ *   (每 5 分钟按版本号校验一次,版本未变化则跳过全量拉取)
  *
  * 安全说明:
  * - SSE 不再通过 URL query 传递 token(会进浏览器历史/Referer/代理日志)
@@ -41,6 +42,11 @@ const SSE_RECONNECT_BASE = 5000    // 初始重连延迟
 const SSE_RECONNECT_MAX = 60000    // 最大重连延迟(60 秒封顶)
 const SSE_MAX_RETRIES = 10         // 最大重连次数
 const FALLBACK_POLL_INTERVAL = 5 * 60 * 1000 // 5 分钟轮询兜底
+
+/** 菜品数据版本号 localStorage key(按门店,值为后端 count:maxUpdated 版本串) */
+function dishVersionKey(storeId: number): string {
+  return `dish_ver_${storeId}`
+}
 
 /**
  * 菜单失效事件总线:SSE 收到 menu_changed 事件时更新此 ref。
@@ -77,7 +83,8 @@ let sseDebounceTimer: ReturnType<typeof setTimeout> | null = null
 export async function initLocalCache(storeId: number): Promise<void> {
   if (initialized && currentStoreId === storeId) return
   // 如果 storeId 变化(切换门店),先销毁旧缓存并清理旧店铺 IndexedDB 数据
-  if (initialized && currentStoreId !== null && currentStoreId !== storeId) {
+  const switchedStore = initialized && currentStoreId !== null && currentStoreId !== storeId
+  if (switchedStore) {
     console.log(`[cache] 店铺切换 ${currentStoreId} → ${storeId},清理旧店铺缓存`)
     const oldStoreId = currentStoreId
     destroyLocalCache()
@@ -96,7 +103,8 @@ export async function initLocalCache(storeId: number): Promise<void> {
   }
 
   // 后台异步拉取最新菜品 + 图片
-  refreshDishes(storeId).catch((e) =>
+  // 切换门店属清缓存场景,强制全量刷新(不走版本号短路)
+  refreshDishes(storeId, { force: switchedStore }).catch((e) =>
     console.warn('[cache] 菜品缓存刷新失败:', e),
   )
 
@@ -108,7 +116,7 @@ export async function initLocalCache(storeId: number): Promise<void> {
 }
 
 /**
- * 全量刷新本门店菜品 + 图片缓存。
+ * 刷新本门店菜品缓存(带版本号短路)。
  *
  * 并发互斥:同时多个调用(如 SSE 连续事件)复用同一个 in-flight Promise,
  * 避免 clear+put 交错导致空窗或数据回退。
@@ -116,9 +124,9 @@ export async function initLocalCache(storeId: number): Promise<void> {
  * 竞态保护:.finally 中检查是否仍是自己的 Promise,
  * 避免店铺切换后旧请求错误地把新请求的 refreshInFlight 重置为 null。
  */
-export async function refreshDishes(storeId: number): Promise<void> {
+export async function refreshDishes(storeId: number, opts?: { force?: boolean }): Promise<void> {
   if (refreshInFlight) return refreshInFlight
-  const p = doRefreshDishes(storeId).finally(() => {
+  const p = doRefreshDishes(storeId, opts).finally(() => {
     // 只有当 refreshInFlight 仍指向自己时才重置,
     // 避免店铺切换后旧请求把新请求的 Promise 错误置 null
     if (refreshInFlight === p) refreshInFlight = null
@@ -136,8 +144,48 @@ function sseTriggeredRefresh(storeId: number): void {
   }, 500)
 }
 
-/** 实际执行刷新(由 refreshDishes 调用,已加互斥锁) */
-async function doRefreshDishes(storeId: number): Promise<void> {
+/**
+ * 拉取服务端菜品数据版本号(GET /dish/store/{storeId}/version)。
+ * 后端返回 {version: "count:maxUpdated"};接口不可用/网络失败返回 null
+ * (此时视为无法短路,走全量刷新,兼容旧版后端)。
+ */
+async function getDishVersion(storeId: number): Promise<string | null> {
+  try {
+    const resp = await api.get(`/dish/store/${storeId}/version`)
+    if (resp.data?.code !== 200) return null
+    const data = resp.data.data
+    if (typeof data === 'string' && data) return data
+    if (data && typeof data.version === 'string' && data.version) return data.version
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 实际执行刷新(由 refreshDishes 调用,已加互斥锁)。
+ *
+ * 版本号短路:非 force 时先取服务端版本号,与 localStorage `dish_ver_${storeId}`
+ * 比对——相等且本地 IndexedDB 该店菜品非空则直接返回,跳过全量拉取、
+ * dbClearDishesByStore/dbPutDishes 与 dbClearUnusedImages 全表扫描。
+ * 版本不同或本地为空 → 走全量刷新,成功后写回版本号。
+ * (存刷新前的版本号:若刷新期间数据又变更,下次比对会发现不同再多刷一次,
+ * 宁可多刷不可漏刷)
+ */
+async function doRefreshDishes(storeId: number, opts?: { force?: boolean }): Promise<void> {
+  // 先取服务端版本号(全量刷新成功后写回,作为下次短路比对依据)
+  const remoteVer = await getDishVersion(storeId)
+  if (!opts?.force && remoteVer) {
+    const savedVer = localStorage.getItem(dishVersionKey(storeId))
+    if (remoteVer === savedVer) {
+      const localDishes = await dbGetAllDishes()
+      if (localDishes.some((d) => d.storeId === storeId)) {
+        console.log(`[cache] 菜品版本未变化(${remoteVer}),跳过全量刷新`)
+        return
+      }
+    }
+  }
+
   // 拉取门店所有菜品(不分页)
   const resp = await api.get(`/dish/store/${storeId}/all`)
   if (resp.data?.code !== 200) return
@@ -150,6 +198,8 @@ async function doRefreshDishes(storeId: number): Promise<void> {
   if (dishes.length === 0) {
     // 空列表也要清理本地脏数据(门店临时全部下架场景)
     await dbClearDishesByStore(storeId).catch(() => {})
+    // 记录版本号,空门店不再反复全量拉取
+    if (remoteVer) localStorage.setItem(dishVersionKey(storeId), remoteVer)
     console.log('[cache] 门店无菜品,已清空本地缓存')
     return
   }
@@ -174,11 +224,14 @@ async function doRefreshDishes(storeId: number): Promise<void> {
   }
   await dbClearDishesByStore(storeId)
   await dbPutDishes(cached)
-  console.log(`[cache] 已缓存 ${cached.length} 个菜品`)
+  // 全量刷新成功,写回版本号(下次版本未变时短路,跳过全量拉取与图片清理)
+  if (remoteVer) localStorage.setItem(dishVersionKey(storeId), remoteVer)
+  console.log(`[cache] 已缓存 ${cached.length} 个菜品(版本 ${remoteVer ?? '未知'})`)
 
   // 清理 IndexedDB 中残留的旧菜品图片 Blob(菜品图已不再下载/渲染)
   // 注意:images store 与员工头像共用,仅传员工头像 URL 作为白名单,
   // 这样旧的菜品图 Blob 会被清掉,头像保留
+  // (仅真正全量刷新后执行,版本短路路径不触发全表扫描)
   const usedUrls = new Set<string>()
   try {
     const employees = await dbGetAllEmployees()
@@ -363,6 +416,13 @@ export async function purgeLocalCache(): Promise<void> {
   await dbClearImages().catch(() => {})
   await dbClearMenus().catch(() => {})
   await dbClearEmployees().catch(() => {})
+  // 清理各门店的菜品版本号标记,避免残留旧版本号影响下次绑定后的短路判断
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('dish_ver_')) localStorage.removeItem(k)
+    }
+  } catch { /* 静默 */ }
   currentStoreId = null
   initialized = false
 }

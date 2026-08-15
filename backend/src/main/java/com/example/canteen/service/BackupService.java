@@ -218,9 +218,21 @@ public class BackupService {
             throw new BusinessException("仅支持 .json.gz 备份文件");
         }
         // 解析文档校验合法性(readDocument 内部会做 GZIP 解压,失败抛 BusinessException)
+        // 流式读取并限制压缩包大小,防止超大上传占满内存(解压后大小由 BackupIO 限制)
         byte[] content;
         try {
-            content = inputStream.readAllBytes();
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            long total = 0;
+            int n;
+            while ((n = inputStream.read(chunk)) != -1) {
+                total += n;
+                if (total > BackupConstants.MAX_IMPORT_COMPRESSED_BYTES) {
+                    throw new BusinessException("备份文件超过 200MB 上限");
+                }
+                buffer.write(chunk, 0, n);
+            }
+            content = buffer.toByteArray();
         } catch (IOException e) {
             throw new BusinessException("读取上传文件失败: " + e.getMessage());
         }

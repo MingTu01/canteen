@@ -63,7 +63,12 @@ public class WechatAuthService {
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.rateLimiter = rateLimiter;
-        this.restTemplate = new RestTemplate();
+        // 微信 API 超时:连接 5s/读取 10s,避免线程无限期阻塞
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+                new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);
+        factory.setReadTimeout(10000);
+        this.restTemplate = new RestTemplate(factory);
     }
 
     /** 微信是否已配置(AppID 和 AppSecret 均非空) */

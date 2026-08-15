@@ -78,10 +78,10 @@ public class DailySettlementService {
         LocalDateTime end = date.plusDays(1).atStartOfDay();
 
         // 当日订单(包含已取消,用于统计已取消数与退款)
+        // 口径统一:营业额按订餐日期统计,与看板 getDashboardStats 一致;次日订单计入就餐日,而非下单日
         List<Order> orders = orderMapper.selectList(new LambdaQueryWrapper<Order>()
                 .eq(Order::getStoreId, storeId)
-                .ge(Order::getCreatedAt, start)
-                .lt(Order::getCreatedAt, end));
+                .eq(Order::getDate, date));
         // 当日充值
         List<RechargeRecord> recharges = rechargeRecordMapper.selectList(new LambdaQueryWrapper<RechargeRecord>()
                 .eq(RechargeRecord::getStoreId, storeId)

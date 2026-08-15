@@ -359,8 +359,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: #ffffff;
+  /* X86 低端集显:animation 与 transition 并存会反复重建合成层导致闪烁,
+     删除 transition 仅保留 pulse 动画(transform/opacity,见 style.css keyframes) */
   animation: pulse-ring 2.4s ease-in-out infinite;
-  transition: transform 0.2s ease, background 0.2s ease;
 }
 .standby__scan-btn:active { transform: scale(0.95); }
 .standby__scan-btn--loading {
@@ -374,7 +375,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+  /* X86 低端集显禁用 filter:drop-shadow:GPU 逐帧重绘导致闪烁 */
 }
 .standby__scan-hint {
   font-size: var(--fs-lg);

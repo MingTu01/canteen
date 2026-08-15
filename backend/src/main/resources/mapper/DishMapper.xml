@@ -10,11 +10,11 @@
         WHERE id = #{id} AND (stock IS NULL OR stock >= #{qty}) AND is_deleted = 0
     </update>
 
-    <!-- 回收站查询:查 is_deleted=1 的菜品。
+    <!-- 回收站分页查询:查 is_deleted=1 的菜品,分页下推到 SQL(LIMIT/OFFSET)。
          需用自定义 SQL 绕过 MyBatis-Plus 逻辑删除拦截器
          (拦截器会给 selectPage 自动追加 is_deleted=0,导致查不到已删除记录)。 -->
     <select id="selectTrashByStoreId" resultType="com.example.canteen.entity.Dish">
-        SELECT * FROM dish WHERE store_id = #{storeId} AND is_deleted = 1 ORDER BY id DESC
+        SELECT * FROM dish WHERE store_id = #{storeId} AND is_deleted = 1 ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
     </select>
 
     <!-- 回收站计数 -->

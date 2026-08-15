@@ -25,7 +25,8 @@ import {
   ElRadioGroup,
   ElRadioButton,
 } from 'element-plus'
-import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Send, Search, X } from 'lucide-vue-next'
+import { Plus, CalendarDays, Trash2, Sun, Coffee, Moon, Copy, ChevronLeft, ChevronRight, Settings, Send, Search, X, Coins } from 'lucide-vue-next'
+import UnsolicitedFeeDialog from '@/components/UnsolicitedFeeDialog.vue'
 import { todayStr } from '@/utils/date'
 import { normalizeList } from '@/utils/list'
 
@@ -594,6 +595,9 @@ const openOrderConfig = () => {
   orderConfigVisible.value = true
 }
 
+// ===== 未订餐用餐手续费设置弹窗(按门店,复用公共组件) =====
+const unsolicitedFeeVisible = ref(false)
+
 const saveOrderConfig = async () => {
   const sidVal = storeId.value
   if (!sidVal) {
@@ -714,6 +718,7 @@ onMounted(() => {
     <PageContainer title="菜单管理" description="按日期编排每日早、中、晚三餐菜品,支持月历快速切换与菜单复制。">
       <template #actions>
         <ElButton v-if="storeId" :icon="Settings" @click="openOrderConfig">订餐配置</ElButton>
+        <ElButton v-if="storeId" :icon="Coins" @click="unsolicitedFeeVisible = true">手续费设置</ElButton>
         <ElButton type="primary" :icon="Send" @click="openBatchPublish">批量发布</ElButton>
       </template>
 
@@ -1118,6 +1123,9 @@ onMounted(() => {
           </div>
         </template>
       </ElDialog>
+
+      <!-- 未订餐用餐手续费设置弹窗 -->
+      <UnsolicitedFeeDialog v-model="unsolicitedFeeVisible" />
     </PageContainer>
   </Layout>
 </template>

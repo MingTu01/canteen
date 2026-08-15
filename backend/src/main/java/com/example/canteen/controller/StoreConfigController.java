@@ -30,7 +30,9 @@ public class StoreConfigController {
     /** 订餐相关 key 白名单(只允许这些 key 走门店配置) */
     private static final String[] ORDER_CONFIG_KEYS = {
         "order_advance_days", "order_deadline_time", "cancel_deadline_time",
-        "max_order_quantity", "allow_cross_day_order"
+        "max_order_quantity", "allow_cross_day_order",
+        "unsolicited_fee_enabled", "unsolicited_fee_breakfast",
+        "unsolicited_fee_lunch", "unsolicited_fee_dinner"
     };
 
     /** key → 默认值 */
@@ -41,6 +43,10 @@ public class StoreConfigController {
         DEFAULTS.put("cancel_deadline_time", "15:00");
         DEFAULTS.put("max_order_quantity", "10");
         DEFAULTS.put("allow_cross_day_order", "true");
+        DEFAULTS.put("unsolicited_fee_enabled", "false");
+        DEFAULTS.put("unsolicited_fee_breakfast", "0");
+        DEFAULTS.put("unsolicited_fee_lunch", "0");
+        DEFAULTS.put("unsolicited_fee_dinner", "0");
     }
 
     public StoreConfigController(JdbcTemplate jdbcTemplate) {

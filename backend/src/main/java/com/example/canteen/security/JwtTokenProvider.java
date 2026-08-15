@@ -2,6 +2,7 @@ package com.example.canteen.security;
 
 import com.example.canteen.entity.Admin;
 import com.example.canteen.entity.Employee;
+import com.example.canteen.exception.BusinessException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.JwtParser;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,9 +30,16 @@ public class JwtTokenProvider {
     @Value("${jwt.employee-expiration:2592000000}")
     private Long employeeExpiration;
 
-    /** 终端 token 过期时间(默认 365 天),远长于管理员 token(24h),避免 7x24 终端频繁失绑 */
-    @Value("${jwt.terminal-expiration:31536000000}")
+    /** 终端 token 过期时间(默认 30 天,配合 refreshTerminalToken 滚动续期;泄露后风险窗口大幅缩短)。
+     *  终端每次请求都会惰性检查绑定时长并提前刷新 token(terminal/src/api/index.ts maybeRefreshToken),
+     *  在线终端远早于 30 天即完成滚动续期,不会失绑;仅连续离线超 30 天的终端需人工重新绑定。 */
+    @Value("${jwt.terminal-expiration:2592000000}")
     private Long terminalExpiration;
+
+    /** 员工 token 绝对过期上限(90 天,毫秒)。
+     *  员工 token 为 30 天 + 滑动续期,若无上限则活跃用户永不失效,token 泄露后风险无限放大;
+     *  自首次签发(origIat)起最多 90 天,超限后 renewToken 抛 BusinessException,由 Filter 转 401 强制重新登录。 */
+    private static final long EMPLOYEE_ABSOLUTE_CAP_MS = 90L * 24 * 60 * 60 * 1000;
 
     public JwtTokenProvider(SecretKey jwtSecretKey, JwtParser jwtParser) {
         this.secretKey = jwtSecretKey;
@@ -65,6 +73,8 @@ public class JwtTokenProvider {
         claims.put("departmentId", employee.getDepartmentId());
         claims.put("balance", employee.getBalance());
         claims.put("role", 0);
+        // 首次签发时间(毫秒),滑动续期时据此计算 90 天绝对过期上限
+        claims.put("origIat", System.currentTimeMillis());
 
         return Jwts.builder()
                 .claims(claims)
@@ -144,30 +154,71 @@ public class JwtTokenProvider {
 
     /**
      * 滑动续期:用当前有效 token 的 claims 换取新 token。
-     * 新 token 的过期时间根据 role 重新计算(admin 24h / employee 30d / terminal 365d)。
+     * 新 token 的过期时间根据 role 重新计算(admin 24h / employee 30d / terminal 30d)。
      * 用于 JwtAuthenticationFilter 中自动续期,避免活跃用户被登出。
+     *
+     * 员工(role=0)有 90 天绝对过期上限:新 exp = min(now + 30天, origIat + 90天),
+     * 若已超上限则抛 BusinessException(由 Filter 转 401 强制重新登录)。
+     * 终端(role=3)不设绝对上限:绑定制凭证,可随时解绑/重绑,离线超期仅需人工重新绑定,不涉及账号安全。
      */
     public String renewToken(Map<String, Object> oldClaims) {
         Integer role = oldClaims.get("role") instanceof Number n ? n.intValue() : null;
+        long now = System.currentTimeMillis();
         long ttl = switch (role == null ? -1 : role) {
             case 0 -> employeeExpiration;   // 员工
             case 3 -> terminalExpiration;   // 终端
             default -> expiration;           // 管理员(1=超管, 2=门店管理员)
         };
+        long expMs = now + ttl;
         // 复用原 claims,但更新 jti/iat/exp
         Map<String, Object> claims = new HashMap<>(oldClaims);
         claims.remove("exp");
         claims.remove("iat");
         claims.remove("jti");
+        // 员工 token:受 90 天绝对上限约束,防滑动续期导致永不失效
+        if (role != null && role == 0) {
+            long origIat = readOrigIatMs(oldClaims);
+            long absoluteCapMs = origIat + EMPLOYEE_ABSOLUTE_CAP_MS;
+            if (absoluteCapMs <= now) {
+                // 已超绝对上限,拒绝续期;Filter 会将其转为 401 触发 H5 重新登录
+                throw new BusinessException("登录已过期,请重新登录");
+            }
+            expMs = Math.min(expMs, absoluteCapMs);
+            // 回写 origIat(旧 token 无该 claim 时按 iat 补写),保证续期链路上限基准不变
+            claims.put("origIat", origIat);
+        }
         String subject = oldClaims.get("sub") == null ? "renewed" : oldClaims.get("sub").toString();
         return Jwts.builder()
                 .claims(claims)
                 .subject(subject)
                 .id(UUID.randomUUID().toString())
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + ttl))
+                .expiration(new Date(expMs))
                 .signWith(secretKey)
                 .compact();
+    }
+
+    /**
+     * 读取员工 token 的首次签发时间(毫秒)。
+     * 兼容旧 token 无 origIat claim 的场景:缺失时退回用旧 token 的 iat 作为 origIat。
+     */
+    private long readOrigIatMs(Map<String, Object> claims) {
+        Object origIat = claims.get("origIat");
+        if (origIat instanceof Number num) {
+            return num.longValue();
+        }
+        if (origIat instanceof Date date) {
+            return date.getTime();
+        }
+        Object iat = claims.get("iat");
+        if (iat instanceof Date date) {
+            return date.getTime();
+        }
+        if (iat instanceof Number num) {
+            return num.longValue();
+        }
+        // 极端情况两者皆无(不应发生):按当前时间计,即本次续期起算 90 天上限
+        return System.currentTimeMillis();
     }
 
     /** 获取指定 role 的 token TTL(毫秒),供 Filter 判断是否需要续期 */

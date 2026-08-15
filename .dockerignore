@@ -1,0 +1,19 @@
+# 仓库根构建上下文的 .dockerignore
+# 仅作用于以仓库根为 context 的构建(admin-web/Dockerfile、h5/Dockerfile,
+# 两者源码依赖仓库根 shared/,必须以根目录为上下文)。
+# 前端镜像构建只需要 admin-web/ h5/ shared/,其余目录全部排除以缩小上下文传输。
+# 注意:backend 由 docker-compose 以 ./backend 为独立上下文构建,不受本文件影响。
+.git
+.github
+backend
+terminal
+src-python
+docs
+backup
+deploy
+uploads
+*.md
+.env*
+!.env.example
+**/node_modules
+**/dist

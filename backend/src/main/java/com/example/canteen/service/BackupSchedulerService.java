@@ -36,24 +36,41 @@ public class BackupSchedulerService {
     private final BackupService backupService;
     private final SystemConfigService systemConfigService;
     private final StoreService storeService;
+    private final SchedulerLockHelper schedulerLockHelper;
 
     private volatile CronExpression cronExpression;
     private volatile String currentCron;
     private volatile LocalDateTime nextRun;
 
     public BackupSchedulerService(BackupService backupService, SystemConfigService systemConfigService,
-                                  StoreService storeService) {
+                                  StoreService storeService, SchedulerLockHelper schedulerLockHelper) {
         this.backupService = backupService;
         this.systemConfigService = systemConfigService;
         this.storeService = storeService;
+        this.schedulerLockHelper = schedulerLockHelper;
     }
 
     /**
      * 每分钟检查是否到达定时备份时间。
      * 读取 sys_config 中的 backup_auto_enabled / backup_cron / backup_keep_copies。
+     * 分布式锁:多实例部署时同一时刻仅一个实例执行备份(Redis 异常降级为直接执行)。
      */
     @Scheduled(fixedDelay = 60_000L, initialDelay = 30_000L)
     public void scheduledBackup() {
+        String lockToken = java.util.UUID.randomUUID().toString();
+        if (!schedulerLockHelper.tryLock("backup:scheduledBackup", lockToken)) {
+            log.debug("未获取到调度锁,跳过本次定时备份检查");
+            return;
+        }
+        try {
+            doScheduledBackup();
+        } finally {
+            schedulerLockHelper.unlock("backup:scheduledBackup", lockToken);
+        }
+    }
+
+    /** 原定时备份逻辑(由 scheduledBackup 持锁后调用) */
+    private void doScheduledBackup() {
         try {
             boolean enabled = systemConfigService.getBoolConfig("backup_auto_enabled", true);
             if (!enabled) return;

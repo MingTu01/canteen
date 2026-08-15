@@ -30,7 +30,8 @@ const checkIdle = () => {
 onMounted(() => {
   window.addEventListener('click', updateActivity)
   window.addEventListener('keydown', updateActivity)
-  window.addEventListener('touchstart', updateActivity)
+  // 触屏优化:passive 监听不阻塞滚动/渲染
+  window.addEventListener('touchstart', updateActivity, { passive: true })
   timer = window.setInterval(checkIdle, props.checkInterval)
 })
 

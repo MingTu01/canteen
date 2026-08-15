@@ -1,6 +1,7 @@
 package com.example.canteen.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.canteen.dto.GroupOrderCreateDTO;
@@ -263,8 +264,9 @@ public class GroupOrderService {
     }
 
     /**
-     * 确认订单:仅待确认可确认
+     * 确认订单:仅待确认可确认(原子状态流转,防并发重复操作)
      */
+    @Transactional
     public GroupOrder confirm(Long id) {
         GroupOrder existing = groupOrderMapper.selectById(id);
         if (existing == null) {
@@ -274,15 +276,24 @@ public class GroupOrderService {
         if (existing.getStatus() != STATUS_PENDING) {
             throw new BusinessException("当前订单状态不允许确认");
         }
+        LocalDateTime now = LocalDateTime.now();
+        int rows = groupOrderMapper.update(null, new UpdateWrapper<GroupOrder>()
+                .eq("id", id)
+                .eq("status", STATUS_PENDING)
+                .set("status", STATUS_CONFIRMED)
+                .set("updated_at", now));
+        if (rows == 0) {
+            throw new BusinessException("订单状态已变更,请刷新后重试");
+        }
         existing.setStatus(STATUS_CONFIRMED);
-        existing.setUpdatedAt(LocalDateTime.now());
-        groupOrderMapper.updateById(existing);
+        existing.setUpdatedAt(now);
         return existing;
     }
 
     /**
-     * 取消订单:待确认/已确认可取消
+     * 取消订单:待确认/已确认可取消(原子状态流转,防并发重复操作)
      */
+    @Transactional
     public GroupOrder cancel(Long id) {
         GroupOrder existing = groupOrderMapper.selectById(id);
         if (existing == null) {
@@ -292,15 +303,24 @@ public class GroupOrderService {
         if (existing.getStatus() == STATUS_CANCELLED || existing.getStatus() == STATUS_COMPLETED) {
             throw new BusinessException("当前订单状态不允许取消");
         }
+        LocalDateTime now = LocalDateTime.now();
+        int rows = groupOrderMapper.update(null, new UpdateWrapper<GroupOrder>()
+                .eq("id", id)
+                .in("status", STATUS_PENDING, STATUS_CONFIRMED)
+                .set("status", STATUS_CANCELLED)
+                .set("updated_at", now));
+        if (rows == 0) {
+            throw new BusinessException("订单状态已变更,请刷新后重试");
+        }
         existing.setStatus(STATUS_CANCELLED);
-        existing.setUpdatedAt(LocalDateTime.now());
-        groupOrderMapper.updateById(existing);
+        existing.setUpdatedAt(now);
         return existing;
     }
 
     /**
-     * 完成订单:仅已确认可完成
+     * 完成订单:仅已确认可完成(原子状态流转,防并发重复操作)
      */
+    @Transactional
     public GroupOrder complete(Long id) {
         GroupOrder existing = groupOrderMapper.selectById(id);
         if (existing == null) {
@@ -310,9 +330,17 @@ public class GroupOrderService {
         if (existing.getStatus() != STATUS_CONFIRMED) {
             throw new BusinessException("仅已确认状态的订单可完成");
         }
+        LocalDateTime now = LocalDateTime.now();
+        int rows = groupOrderMapper.update(null, new UpdateWrapper<GroupOrder>()
+                .eq("id", id)
+                .eq("status", STATUS_CONFIRMED)
+                .set("status", STATUS_COMPLETED)
+                .set("updated_at", now));
+        if (rows == 0) {
+            throw new BusinessException("订单状态已变更,请刷新后重试");
+        }
         existing.setStatus(STATUS_COMPLETED);
-        existing.setUpdatedAt(LocalDateTime.now());
-        groupOrderMapper.updateById(existing);
+        existing.setUpdatedAt(now);
         return existing;
     }
 

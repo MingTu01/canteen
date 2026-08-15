@@ -64,6 +64,19 @@ CHECK_INTERVAL = 15          # 每 15 秒检查一次
 CREATE_NO_WINDOW = 0x08000000
 
 
+def get_exit_flag_path():
+    """获取正常退出标记文件路径(%APPDATA%\\CanteenTerminal\\exit.flag)。
+
+    目录与 config.py 的 get_appdata_dir() 保持一致;watchdog 按打包规格
+    仅依赖标准库(见 canteen-terminal.spec),不 import config,故本地实现
+    同款目录逻辑。bridge.py 处理 /__api__/quit 时写入该标记。
+    """
+    appdata = os.environ.get('APPDATA')
+    if not appdata:
+        appdata = os.path.expanduser('~\\AppData\\Roaming')
+    return Path(appdata) / 'CanteenTerminal' / 'exit.flag'
+
+
 def is_process_running(exe_name):
     """检查指定进程是否在运行(通过 Windows tasklist 命令)。"""
     try:
@@ -85,6 +98,17 @@ def main():
     first_check = True   # 首次检查标志(开机启动时立即拉起,不等待冷却)
 
     while True:
+        # 检查正常退出标记:主进程通过 /__api__/quit 主动退出时写入 exit.flag,
+        # 属用户主动退出(维护/配置),不再拉起并删除标记后自行退出
+        exit_flag = get_exit_flag_path()
+        if exit_flag.exists():
+            logging.info('检测到正常退出标记,watchdog 退出')
+            try:
+                exit_flag.unlink()
+            except Exception:
+                pass
+            break
+
         if not is_process_running(exe_name):
             now = time.time()
             # 清理 1 小时前的重启记录

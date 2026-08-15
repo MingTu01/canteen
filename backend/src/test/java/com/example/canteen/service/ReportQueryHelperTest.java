@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -41,7 +42,8 @@ class ReportQueryHelperTest {
         orderItemMapper = mock(OrderItemMapper.class);
         rechargeRecordMapper = mock(RechargeRecordMapper.class);
         employeeMapper = mock(EmployeeMapper.class);
-        helper = new ReportQueryHelper(orderMapper, orderItemMapper, rechargeRecordMapper, employeeMapper);
+        // jdbcTemplate 传 null:本测试类覆盖的方法不涉及 SQL 聚合下推
+        helper = new ReportQueryHelper(orderMapper, orderItemMapper, rechargeRecordMapper, employeeMapper, null);
     }
 
     @Test
@@ -52,8 +54,8 @@ class ReportQueryHelperTest {
         List<Order> expected = List.of(o);
         when(orderMapper.selectList(any())).thenReturn(expected);
 
-        LocalDateTime start = LocalDateTime.of(2026, 7, 1, 0, 0);
-        LocalDateTime end = LocalDateTime.of(2026, 7, 2, 0, 0);
+        LocalDate start = LocalDate.of(2026, 7, 1);
+        LocalDate end = LocalDate.of(2026, 7, 2);
         List<Order> result = helper.findOrdersByRange(1L, start, end);
 
         assertSame(expected, result);
@@ -80,7 +82,7 @@ class ReportQueryHelperTest {
     void findCompletedOrdersByRange_delegatesToMapper() {
         when(orderMapper.selectList(any())).thenReturn(List.of());
 
-        helper.findCompletedOrdersByRange(1L, LocalDateTime.now(), LocalDateTime.now().plusDays(1));
+        helper.findCompletedOrdersByRange(1L, LocalDate.now(), LocalDate.now().plusDays(1));
 
         verify(orderMapper).selectList(any());
     }
@@ -90,7 +92,7 @@ class ReportQueryHelperTest {
     void findActiveOrdersByRange_delegatesToMapper() {
         when(orderMapper.selectList(any())).thenReturn(List.of());
 
-        helper.findActiveOrdersByRange(1L, LocalDateTime.now(), LocalDateTime.now().plusDays(1));
+        helper.findActiveOrdersByRange(1L, LocalDate.now(), LocalDate.now().plusDays(1));
 
         verify(orderMapper).selectList(any());
     }

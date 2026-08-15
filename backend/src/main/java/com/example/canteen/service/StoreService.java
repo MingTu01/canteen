@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.canteen.entity.Store;
 import com.example.canteen.mapper.AdminMapper;
-import com.example.canteen.mapper.DailyCloseMapper;
 import com.example.canteen.mapper.DailySettlementMapper;
 import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.DiningTimeSlotMapper;
@@ -23,7 +22,6 @@ import com.example.canteen.mapper.StockCountMapper;
 import com.example.canteen.mapper.StoreMapper;
 import com.example.canteen.mapper.SupplierMapper;
 import com.example.canteen.entity.Admin;
-import com.example.canteen.entity.DailyClose;
 import com.example.canteen.entity.DailySettlement;
 import com.example.canteen.entity.Department;
 import com.example.canteen.entity.DiningTimeSlot;
@@ -68,7 +66,6 @@ public class StoreService {
     private final MaterialMapper materialMapper;
     private final FeedbackMapper feedbackMapper;
     private final GroupOrderMapper groupOrderMapper;
-    private final DailyCloseMapper dailyCloseMapper;
     private final DailySettlementMapper dailySettlementMapper;
     private final StockCountMapper stockCountMapper;
 
@@ -88,7 +85,6 @@ public class StoreService {
                         MaterialMapper materialMapper,
                         FeedbackMapper feedbackMapper,
                         GroupOrderMapper groupOrderMapper,
-                        DailyCloseMapper dailyCloseMapper,
                         DailySettlementMapper dailySettlementMapper,
                         StockCountMapper stockCountMapper) {
         this.storeMapper = storeMapper;
@@ -107,7 +103,6 @@ public class StoreService {
         this.materialMapper = materialMapper;
         this.feedbackMapper = feedbackMapper;
         this.groupOrderMapper = groupOrderMapper;
-        this.dailyCloseMapper = dailyCloseMapper;
         this.dailySettlementMapper = dailySettlementMapper;
         this.stockCountMapper = stockCountMapper;
     }
@@ -196,7 +191,6 @@ public class StoreService {
         materialMapper.delete(new LambdaQueryWrapper<Material>().eq(Material::getStoreId, id));
         feedbackMapper.delete(new LambdaQueryWrapper<Feedback>().eq(Feedback::getStoreId, id));
         groupOrderMapper.delete(new LambdaQueryWrapper<GroupOrder>().eq(GroupOrder::getStoreId, id));
-        dailyCloseMapper.delete(new LambdaQueryWrapper<DailyClose>().eq(DailyClose::getStoreId, id));
         dailySettlementMapper.delete(new LambdaQueryWrapper<DailySettlement>().eq(DailySettlement::getStoreId, id));
         stockCountMapper.delete(new LambdaQueryWrapper<StockCount>().eq(StockCount::getStoreId, id));
 

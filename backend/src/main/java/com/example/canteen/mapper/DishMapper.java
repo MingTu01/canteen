@@ -24,12 +24,15 @@ public interface DishMapper extends BaseMapper<Dish> {
     int restoreById(@Param("id") Long id);
 
     /**
-     * 回收站查询:查 is_deleted=1 的菜品。
+     * 回收站分页查询:查 is_deleted=1 的菜品,分页下推到 SQL(LIMIT/OFFSET),
+     * 不再全量拉取后内存 subList。
      * 需用自定义 SQL 绕过逻辑删除拦截器(selectPage 会自动追加 is_deleted=0)。
      */
-    List<Dish> selectTrashByStoreId(@Param("storeId") Long storeId);
+    List<Dish> selectTrashByStoreId(@Param("storeId") Long storeId,
+                                    @Param("offset") int offset,
+                                    @Param("size") int size);
 
-    /** 回收站计数 */
+    /** 回收站计数(与 selectTrashByStoreId 同条件,供分页 total 用) */
     long countTrashByStoreId(@Param("storeId") Long storeId);
 
     /**

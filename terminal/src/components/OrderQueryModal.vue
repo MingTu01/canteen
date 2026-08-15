@@ -335,7 +335,7 @@ watch(
                     @keyup.enter="onKeywordEnter"
                   />
                   <button class="oqm__search-btn btn-press" aria-label="搜索" @click="onKeywordEnter">
-                    <Search :size="16" />
+                    <Search :size="20" />
                   </button>
                 </div>
               </label>
@@ -706,21 +706,29 @@ watch(
   background: var(--doubao-accent);
   color: var(--doubao-primary);
 }
-.oqm__btn--summary:hover {
-  background: var(--doubao-primary);
-  color: var(--doubao-primary-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .oqm__btn--summary:hover {
+    background: var(--doubao-primary);
+    color: var(--doubao-primary-foreground);
+  }
 }
 .oqm__btn--back,
 .oqm__btn--close {
-  width: 40px;
+  /* 触屏优化:最小点击区域 44px(原 40px) */
+  width: 44px;
+  height: 44px;
   padding: 0;
   background: var(--doubao-muted);
   color: var(--doubao-secondary-foreground);
 }
-.oqm__btn--back:hover,
-.oqm__btn--close:hover {
-  background: var(--doubao-border);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .oqm__btn--back:hover,
+  .oqm__btn--close:hover {
+    background: var(--doubao-border);
+    color: var(--doubao-foreground);
+  }
 }
 
 /* ============ 筛选条 ============ */
@@ -805,15 +813,17 @@ watch(
 }
 .oqm__search-wrap .oqm__text-input {
   width: 100%;
-  padding-right: 44px;
+  /* 触屏优化:右侧搜索按钮放大到 44px,加大右侧留白避免文字被遮挡 */
+  padding-right: 54px;
 }
 .oqm__search-btn {
   position: absolute;
-  right: 4px;
+  right: 2px;
   top: 50%;
   transform: translateY(-50%);
-  width: 32px;
-  height: 32px;
+  /* 触屏优化:最小点击区域 44px(原 32px 触屏易误触) */
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -867,6 +877,8 @@ watch(
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  /* 触屏优化:滚动到边界时不连锁滚动背后的页面 */
+  overscroll-behavior: contain;
   padding: 8px 12px 16px;
 }
 .oqm__row {
@@ -886,8 +898,11 @@ watch(
   cursor: pointer;
   transition: background 0.15s ease;
 }
-.oqm__row:hover {
-  background: var(--doubao-muted);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .oqm__row:hover {
+    background: var(--doubao-muted);
+  }
 }
 .oqm__row:active {
   background: var(--doubao-accent);
@@ -1061,9 +1076,10 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   border-bottom: 1px dashed var(--doubao-border);
-  font-size: var(--fs-xs);
+  /* 菜品行字号放大:原 --fs-xs(10-12px) 触屏看不清,提升至 14-17px */
+  font-size: clamp(14px, 1.2vw, 17px);
 }
 .oqm__rs-dish:last-child { border-bottom: none; }
 .oqm__rs-dish--zero { opacity: 0.4; }
@@ -1074,14 +1090,15 @@ watch(
   white-space: nowrap;
   color: var(--doubao-foreground);
   font-weight: 600;
+  font-size: clamp(15px, 1.3vw, 17px);
 }
 .oqm__rs-dish-qty {
   flex-shrink: 0;
-  font-size: var(--fs-sm);
+  font-size: clamp(15px, 1.3vw, 17px);
   font-weight: 700;
   color: var(--doubao-primary);
   font-variant-numeric: tabular-nums;
-  min-width: 24px;
+  min-width: 28px;
   text-align: right;
 }
 .oqm__rs-dish--zero .oqm__rs-dish-qty { color: var(--doubao-muted-foreground); }
@@ -1136,9 +1153,12 @@ watch(
   color: var(--doubao-muted-foreground);
   cursor: pointer;
 }
-.oqm__receipt-close:hover {
-  background: var(--doubao-border);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .oqm__receipt-close:hover {
+    background: var(--doubao-border);
+    color: var(--doubao-foreground);
+  }
 }
 
 /* 小票头部 */
@@ -1216,6 +1236,8 @@ watch(
 .oqm__receipt-dish {
   color: var(--doubao-foreground);
   font-weight: 700;
+  /* 小票菜名字号放大:原继承 --fs-base(14-16px)偏小,提升至 15-17px */
+  font-size: clamp(15px, 1.4vw, 17px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

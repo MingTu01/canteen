@@ -7,18 +7,20 @@ Shell 桥接:处理前端 → Python 的 API 调用。
 API 端点:
     GET  /__api__/server_url          获取预设服务器地址
     GET  /__api__/config              获取完整配置(window_mode/card_interval/idle_timeout/server_url)
-    POST /__api__/set_config          更新配置(部分字段)
+    GET  /__api__/token_load          读取 DPAPI 加密存储的终端 token
+    POST /__api__/set_config          更新配置(部分字段,写入前逐项校验取值)
+    POST /__api__/token_save          DPAPI 加密保存终端 token(空串即清除)
     POST /__api__/switch_to_config    切换到配置模式(取消全屏)
     POST /__api__/switch_to_fullscreen 切换回全屏模式
     POST /__api__/quit                退出应用
     POST /__api__/restart_card_reader 重启读卡器
-    POST /__api__/eval_js             临时诊断(执行前端 JS,生产环境应禁用)
 """
 import json
 import os
 from PyQt5.QtCore import QObject, pyqtSignal
 
-from config import read_full_config, write_config
+import dpapi
+from config import read_full_config, write_config, get_appdata_dir, validate_config_value
 
 
 class ShellBridge(QObject):
@@ -34,7 +36,6 @@ class ShellBridge(QObject):
     switch_to_fullscreen_requested = pyqtSignal()
     quit_requested = pyqtSignal()
     config_updated = pyqtSignal(dict)
-    eval_js_requested = pyqtSignal(str)
 
     def __init__(self, card_reader, get_server_url_func):
         """
@@ -64,7 +65,7 @@ class ShellBridge(QObject):
             return {'ok': True, 'config': read_full_config()}
 
         elif method == 'set_config':
-            # 更新部分配置字段,body = { window_mode?, card_interval?, idle_timeout?, server_url? }
+            # 更新部分配置字段,body = { window_mode?, card_interval?, idle_timeout?, server_url?, update_check_url? }
             if not isinstance(body, dict):
                 return {'ok': False, 'error': '请求体必须是 JSON 对象'}
             # 字段白名单 + 类型校验
@@ -73,6 +74,7 @@ class ShellBridge(QObject):
                 'card_interval': (int, float),
                 'idle_timeout': (int, float),
                 'server_url': str,
+                'update_check_url': str,
             }
             updates = {}
             for key, expected_type in allowed.items():
@@ -80,6 +82,11 @@ class ShellBridge(QObject):
                     val = body[key]
                     if not isinstance(val, expected_type):
                         return {'ok': False, 'error': f'{key} 类型错误'}
+                    # 逐项取值校验(URL 格式/数值范围/枚举值),
+                    # 非法时直接返回错误,不写入 config.json
+                    err = validate_config_value(key, val)
+                    if err:
+                        return {'ok': False, 'error': err}
                     updates[key] = val
             if not updates:
                 return {'ok': False, 'error': '没有可更新的字段'}
@@ -103,6 +110,17 @@ class ShellBridge(QObject):
             return {'ok': True}
 
         elif method == 'quit':
+            # 写入正常退出标记(%APPDATA%\CanteenTerminal\exit.flag):
+            # watchdog 巡检时发现该标记则不再拉起主进程并自行退出,
+            # 否则用户主动退出后 15 秒内会被 watchdog 重新拉起,无法维护
+            try:
+                flag_dir = get_appdata_dir()
+                os.makedirs(flag_dir, exist_ok=True)
+                with open(os.path.join(flag_dir, 'exit.flag'), 'w', encoding='utf-8') as f:
+                    f.write('quit')
+                print('[Bridge] 已写入正常退出标记 exit.flag')
+            except Exception as e:
+                print(f'[Bridge] 写入退出标记失败: {e}')
             self.quit_requested.emit()
             return {'ok': True}
 
@@ -115,14 +133,44 @@ class ShellBridge(QObject):
             reader_status = self.card_reader.status_info()
             return {'ok': True, 'card_reader': reader_status}
 
-        elif method == 'eval_js':
-            # 临时诊断端点:在前端执行 JS 并返回结果
-            # 生产环境应通过不设置 CANTEEN_DEBUG 环境变量来禁用此端点
-            if not os.environ.get('CANTEEN_DEBUG'):
-                return {'ok': False, 'error': '诊断端点已禁用(设置 CANTEEN_DEBUG=1 启用)'}
-            if isinstance(body, dict) and body.get('js'):
-                self.eval_js_requested.emit(body['js'])
+        elif method == 'token_save':
+            # 终端 token 加密存储:DPAPI 加密(绑定当前 Windows 用户)后
+            # 写入 <配置目录>/token.bin,localStorage 明文仅作降级兜底。
+            # 传空串表示清除(解绑时调用)。
+            if not isinstance(body, dict) or 'token' not in body or not isinstance(body['token'], str):
+                return {'ok': False, 'error': '需要 token 字段(字符串)'}
+            token = body['token']
+            token_path = os.path.join(get_appdata_dir(), 'token.bin')
+            try:
+                os.makedirs(get_appdata_dir(), exist_ok=True)
+                if token == '':
+                    # 空串 = 清除 shell 侧存储
+                    if os.path.exists(token_path):
+                        os.remove(token_path)
+                    return {'ok': True}
+                encrypted = dpapi.protect(token.encode('utf-8'))
+                if encrypted is None:
+                    return {'ok': False, 'error': 'DPAPI 加密不可用,token 未保存'}
+                with open(token_path, 'wb') as f:
+                    f.write(encrypted)
                 return {'ok': True}
-            return {'ok': False, 'error': '需要 js 字段'}
+            except Exception as e:
+                return {'ok': False, 'error': f'保存 token 失败: {e}'}
+
+        elif method == 'token_load':
+            # 读取 DPAPI 加密存储的终端 token。
+            # 文件不存在/解密失败一律返回 token=None(不抛 500),前端降级 localStorage。
+            token_path = os.path.join(get_appdata_dir(), 'token.bin')
+            if not os.path.exists(token_path):
+                return {'ok': True, 'token': None}
+            try:
+                with open(token_path, 'rb') as f:
+                    encrypted = f.read()
+                data = dpapi.unprotect(encrypted)
+                if data is None:
+                    return {'ok': True, 'token': None}
+                return {'ok': True, 'token': data.decode('utf-8', errors='replace')}
+            except Exception:
+                return {'ok': True, 'token': None}
 
         return {'ok': False, 'error': f'未知方法: {method}'}

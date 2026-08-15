@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS `order` (
     total_amount DECIMAL(10,2) NOT NULL,
     status INT DEFAULT 1,
     order_source INT NOT NULL DEFAULT 0,
+    service_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -339,23 +340,7 @@ CREATE TABLE IF NOT EXISTS group_order_item (
 );
 CREATE INDEX IF NOT EXISTS idx_group_order_item_order_id ON group_order_item (group_order_id);
 
--- 日结表
-CREATE TABLE IF NOT EXISTS daily_close (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    store_id BIGINT,
-    close_date DATE,
-    order_count INT,
-    total_revenue DECIMAL(10,2),
-    total_refund DECIMAL(10,2),
-    recharge_amount DECIMAL(10,2),
-    status INT DEFAULT 1,
-    operator_id BIGINT,
-    remark VARCHAR(500),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_daily_close_store_date ON daily_close (store_id, close_date);
--- V17 对账幂等唯一索引
-CREATE UNIQUE INDEX IF NOT EXISTS uk_daily_close_store_date ON daily_close (store_id, close_date);
+-- 日结表 daily_close 已随 V26 下线(日终对账统一走 daily_settlement)
 
 -- 日结算表
 CREATE TABLE IF NOT EXISTS daily_settlement (

@@ -75,8 +75,11 @@ const emit = defineEmits<{ (e: 'back'): void }>()
   font-weight: 400;
   transition: background 0.15s ease;
 }
-.top-bar__back:hover {
-  background: var(--doubao-muted);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .top-bar__back:hover {
+    background: var(--doubao-muted);
+  }
 }
 .top-bar__back-text {
   line-height: 1;

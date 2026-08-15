@@ -280,9 +280,12 @@ watch(showPicker, (open) => {
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.date-picker__trigger:hover {
-  border-color: var(--doubao-primary);
-  background: var(--doubao-accent);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .date-picker__trigger:hover {
+    border-color: var(--doubao-primary);
+    background: var(--doubao-accent);
+  }
 }
 .date-picker__trigger :deep(svg) {
   width: 28px;
@@ -350,9 +353,12 @@ watch(showPicker, (open) => {
   cursor: pointer;
   transition: background 0.15s ease;
 }
-.date-picker__nav:hover {
-  background: var(--doubao-accent);
-  color: var(--doubao-primary);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .date-picker__nav:hover {
+    background: var(--doubao-accent);
+    color: var(--doubao-primary);
+  }
 }
 .date-picker__month {
   margin: 0 24px;
@@ -377,9 +383,12 @@ watch(showPicker, (open) => {
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.date-picker__close:hover {
-  background: var(--doubao-muted);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .date-picker__close:hover {
+    background: var(--doubao-muted);
+    color: var(--doubao-foreground);
+  }
 }
 
 /* 表头 */

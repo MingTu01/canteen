@@ -29,6 +29,12 @@ public final class BackupConstants {
     /** 备份文件名白名单:字母数字下划线连字符 + .json.gz */
     public static final Pattern BACKUP_NAME_PATTERN = Pattern.compile("^[\\w\\-]+\\.json\\.gz$");
 
+    /** 导入备份文件(压缩包)大小上限:200MB,超过直接拒绝读取 */
+    public static final long MAX_IMPORT_COMPRESSED_BYTES = 200L * 1024 * 1024;
+
+    /** 备份解压后大小上限:2GB,超过视为压缩炸弹并中止 */
+    public static final long MAX_DECOMPRESSED_BYTES = 2L * 1024 * 1024 * 1024;
+
     /** 备份格式版本 */
     public static final String FORMAT_VERSION = "2.0";
 
@@ -39,7 +45,9 @@ public final class BackupConstants {
     /** 备份包含的业务表(按依赖顺序:父表在前)。
      *  admin 表不参与备份/恢复:密码脱敏后恢复会导致账号丢失,
      *  管理员账号由 canteen.sh「重置管理员密码」或后台「账号管理」维护。
-     *  sys_operation_log 不备份:操作日志属于审计流水,不随业务数据恢复。 */
+     *  sys_operation_log 不备份:操作日志属于审计流水,不随业务数据恢复。
+     *  daily_close 已随 V26 下线(日终对账统一走 daily_settlement),不再备份/恢复;
+     *  旧备份文件中若含 daily_close 数据,恢复时按未知表忽略。 */
     public static final List<String> TABLES_IN_ORDER = List.of(
             "store", "department", "supplier", "material",
             "dish", "dish_category", "employee", "dining_time_slot",
@@ -47,7 +55,7 @@ public final class BackupConstants {
             "order", "order_item", "recharge_record",
             "group_order", "group_order_item",
             "purchase", "purchase_item",
-            "stock_count", "daily_close", "daily_settlement"
+            "stock_count", "daily_settlement"
     );
 
     /** 带 store_id 列的表(menu_item/order_item/purchase_item/group_order_item 通过关联表过滤) */
@@ -57,7 +65,7 @@ public final class BackupConstants {
             "menu", "notification", "feedback",
             "order", "recharge_record",
             "group_order", "purchase",
-            "stock_count", "daily_close", "daily_settlement"
+            "stock_count", "daily_settlement"
     );
 
     /** 删除顺序(子表在前,避免引用残留)。
@@ -67,7 +75,7 @@ public final class BackupConstants {
             "menu_item", "menu",
             "group_order_item", "group_order",
             "purchase_item", "purchase",
-            "stock_count", "daily_close", "daily_settlement",
+            "stock_count", "daily_settlement",
             "notification", "feedback", "dining_time_slot",
             "employee", "dish_category", "dish",
             "department", "supplier", "material",

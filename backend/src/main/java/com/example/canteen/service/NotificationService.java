@@ -17,13 +17,17 @@ import java.util.List;
 @Service
 public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
+    private static final String EXPIRE_TASK_KEY = "notification:autoExpire";
     private final NotificationMapper notificationMapper;
     private final WechatNotifyService wechatNotifyService;
+    private final SchedulerLockHelper schedulerLockHelper;
 
     public NotificationService(NotificationMapper notificationMapper,
-                               WechatNotifyService wechatNotifyService) {
+                               WechatNotifyService wechatNotifyService,
+                               SchedulerLockHelper schedulerLockHelper) {
         this.notificationMapper = notificationMapper;
         this.wechatNotifyService = wechatNotifyService;
+        this.schedulerLockHelper = schedulerLockHelper;
     }
 
     /**
@@ -146,11 +150,17 @@ public class NotificationService {
     /**
      * 定时任务:每分钟扫描到期通知,自动下架(status -> 0)。
      * 兼容多租户,不依赖请求上下文。
+     * 分布式锁:多实例部署时同一时刻仅一个实例执行(Redis 异常降级为直接执行)。
      */
     @Scheduled(fixedDelay = 60_000L)
     public void autoExpireNotifications() {
-        LocalDateTime now = LocalDateTime.now();
+        String token = java.util.UUID.randomUUID().toString();
+        if (!schedulerLockHelper.tryLock(EXPIRE_TASK_KEY, token)) {
+            log.debug("未获取到调度锁,跳过本次通知下架扫描");
+            return;
+        }
         try {
+            LocalDateTime now = LocalDateTime.now();
             int affected = notificationMapper.update(new LambdaUpdateWrapper<Notification>()
                     .eq(Notification::getStatus, 1)
                     .isNotNull(Notification::getExpireAt)
@@ -161,6 +171,8 @@ public class NotificationService {
             }
         } catch (Exception e) {
             log.warn("通知自动下架扫描失败: {}", e.getMessage());
+        } finally {
+            schedulerLockHelper.unlock(EXPIRE_TASK_KEY, token);
         }
     }
 }

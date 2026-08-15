@@ -50,8 +50,9 @@ export function useDevicePresence(
 
   /** 读卡器是否在线(基于真实硬件返回码判断) */
   const hasCardReader = computed(() => {
-    // 非 Python Shell 环境:无法检测读卡器,默认视为可用
-    // (USB HID 键盘模拟读卡器无需 Python Shell)
+    // 非 Python Shell 环境:无法检测读卡器,视为不在线(返回 false)
+    // (USB HID 键盘模拟读卡器仍可工作,但浏览器无法检测其存在,
+    //  提示文案由 getScanHint 兜底保留"刷卡或扫码")
     if (!isPythonShell) return false
     return !!cardReaderStatus.value?.connected
   })

@@ -48,13 +48,6 @@ public class WechatMessageService {
     @Value("${wechat.canteen-name:企业食堂}")
     private String canteenName;
 
-    private final DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
-
-    public WechatMessageService() {
-        // 防御XXE:禁用外部实体解析
-        dbFactory.setExpandEntityReferences(false);
-    }
-
     /** Token 是否已配置(未配置时回调接口直接拒绝,避免无效请求) */
     public boolean isConfigured() {
         return token != null && !token.isBlank();
@@ -193,11 +186,41 @@ public class WechatMessageService {
         return base + p;
     }
 
-    /** DOM解析XML(防御XXE:已禁用外部实体) */
+    /**
+     * DOM解析XML。
+     * 每次调用新建 DocumentBuilderFactory(工厂非线程安全,不做共享成员),
+     * 并启用完整 XXE 防护(禁 DTD/外部实体/参数实体/外部 DTD)。
+     */
     private Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+        // XXE 防护:禁 DTD/外部实体/参数实体/外部 DTD
+        // trySetFeature:解析器不支持该特性时忽略(兼容不同 JAXP 实现)
+        trySetFeature(dbFactory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+        trySetFeature(dbFactory, "http://xml.org/sax/features/external-general-entities", false);
+        trySetFeature(dbFactory, "http://xml.org/sax/features/external-parameter-entities", false);
+        trySetFeature(dbFactory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        try {
+            dbFactory.setXIncludeAware(false);
+        } catch (Exception ignored) {
+            // 解析器不支持时忽略
+        }
+        try {
+            dbFactory.setExpandEntityReferences(false);
+        } catch (Exception ignored) {
+            // 解析器不支持时忽略
+        }
         DocumentBuilder builder = dbFactory.newDocumentBuilder();
         try (StringReader reader = new StringReader(xml)) {
             return builder.parse(new InputSource(reader));
+        }
+    }
+
+    /** 设置 JAXP 特性,解析器不支持时静默忽略 */
+    private static void trySetFeature(DocumentBuilderFactory factory, String name, boolean value) {
+        try {
+            factory.setFeature(name, value);
+        } catch (Exception ignored) {
+            // 解析器不支持该特性时忽略(不影响其它防护)
         }
     }
 

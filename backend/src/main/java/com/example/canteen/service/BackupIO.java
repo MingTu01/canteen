@@ -114,8 +114,12 @@ public class BackupIO {
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> readDocument(File file) {
-        try (InputStream is = new GZIPInputStream(new FileInputStream(file))) {
+        try (InputStream is = new LimitedInputStream(
+                new GZIPInputStream(new FileInputStream(file)),
+                BackupConstants.MAX_DECOMPRESSED_BYTES)) {
             return objectMapper.readValue(is, Map.class);
+        } catch (DecompressLimitException e) {
+            throw new BusinessException(e.getMessage());
         } catch (IOException e) {
             throw new BusinessException("读取备份文件失败: " + e.getMessage());
         }
@@ -124,8 +128,12 @@ public class BackupIO {
     /** 从 InputStream 读取 GZIP+JSON 文档(用于导入场景,文件尚未落盘)。 */
     @SuppressWarnings("unchecked")
     public Map<String, Object> readDocument(InputStream is) {
-        try (InputStream gz = new GZIPInputStream(is)) {
+        try (InputStream gz = new LimitedInputStream(
+                new GZIPInputStream(is),
+                BackupConstants.MAX_DECOMPRESSED_BYTES)) {
             return objectMapper.readValue(gz, Map.class);
+        } catch (DecompressLimitException e) {
+            throw new BusinessException(e.getMessage());
         } catch (IOException e) {
             throw new BusinessException("读取备份文件失败: " + e.getMessage());
         }
@@ -175,5 +183,51 @@ public class BackupIO {
     public String formatDisplayTime(long epochMillis) {
         return BackupConstants.DISPLAY_TS.format(
                 LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault()));
+    }
+
+    /** 解压大小超限异常(内部标记,由 readDocument 转为带精确信息的 BusinessException)。 */
+    private static final class DecompressLimitException extends IOException {
+        DecompressLimitException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * 限制读取字节数的包装流:累计读取超过 limit 抛 DecompressLimitException(防压缩炸弹)。
+     * read() 与 read(byte[],off,len) 均计数,未读满 limit 前不会误伤正常备份。
+     */
+    private static final class LimitedInputStream extends FilterInputStream {
+        private final long limit;
+        private long read;
+
+        LimitedInputStream(InputStream in, long limit) {
+            super(in);
+            this.limit = limit;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int b = super.read();
+            if (b != -1) {
+                count(1);
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            int n = super.read(b, off, len);
+            if (n > 0) {
+                count(n);
+            }
+            return n;
+        }
+
+        private void count(int n) throws IOException {
+            read += n;
+            if (read > limit) {
+                throw new DecompressLimitException("备份解压后超过 2GB 上限,疑似压缩炸弹");
+            }
+        }
     }
 }

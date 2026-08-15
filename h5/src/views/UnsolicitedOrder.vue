@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getMenuByDate, getDiningTimes } from '@/api/menu'
 import { createOrder } from '@/api/order'
 import { fetchServerTime, type ServerTime } from '@/composables/useServerTime'
+import { useOrderConfig } from '@/composables/useOrderConfig'
 import { parseTimeToMinutes, formatDateStr } from '@/utils/date'
 import { formatMoney, formatMealType } from '@/composables/useFormat'
 import type { MenuWithItems, Dish, DiningTimeSlot } from '@/api/types'
@@ -133,6 +134,26 @@ const cartItems = computed(() => {
   return items
 })
 
+// ============ 未订餐用餐手续费 ============
+const { config: orderConfig, loadConfig } = useOrderConfig()
+
+/** 当前餐别的手续费金额(未启用或无配置为 0) */
+const feeAmount = computed(() => {
+  if (!orderConfig.value.unsolicited_fee_enabled) return 0
+  switch (currentMealType.value) {
+    case 1: return orderConfig.value.unsolicited_fee_breakfast || 0
+    case 2: return orderConfig.value.unsolicited_fee_lunch || 0
+    case 3: return orderConfig.value.unsolicited_fee_dinner || 0
+    default: return 0
+  }
+})
+
+/** 手续费是否生效 */
+const feeEnabled = computed(() => feeAmount.value > 0)
+
+/** 实付合计 = 菜品小计 + 手续费(手续费按订单收取,与购物车数量无关) */
+const payTotal = computed(() => cartTotal.value + (feeEnabled.value ? feeAmount.value : 0))
+
 // ============ 下单 ============
 const submitOrder = async () => {
   if (cart.value.size === 0) {
@@ -148,7 +169,7 @@ const submitOrder = async () => {
 
   showConfirmDialog({
     title: '请打菜人员确认',
-    message: `当前餐别:${currentMealLabel.value}\n菜品数量:${cartCount.value} 份\n合计金额:¥${formatMoney(cartTotal.value)}\n\n请打菜人员确认菜品后点击确认下单。`,
+    message: `当前餐别:${currentMealLabel.value}\n菜品数量:${cartCount.value} 份\n合计金额:¥${formatMoney(payTotal.value)}${feeEnabled.value ? `\n(含手续费 ¥${formatMoney(feeAmount.value)})` : ''}\n\n请打菜人员确认菜品后点击确认下单。`,
     confirmButtonText: '已确认,下单',
     cancelButtonText: '取消',
   })
@@ -207,10 +228,11 @@ onMounted(async () => {
       router.replace('/profile')
       return
     }
-    // 并行加载:服务器时间 + 餐别时段
+    // 并行加载:服务器时间 + 餐别时段 + 订餐配置(含未订餐用餐手续费)
     const [time, slots] = await Promise.all([
       fetchServerTime(),
       getDiningTimes(storeId),
+      loadConfig(storeId),
     ])
     serverTime.value = time
     diningTimes.value = slots
@@ -271,6 +293,12 @@ onUnmounted(() => {
       <section class="unsolicited__notice">
         <AlertCircle :size="16" />
         <span>下单前请打菜人员确认菜品</span>
+      </section>
+
+      <!-- 提示:未订餐用餐手续费(启用且当前餐别金额 > 0 时展示) -->
+      <section v-if="feeEnabled && feeAmount > 0" class="unsolicited__fee-notice">
+        <AlertCircle :size="16" />
+        <span>未订餐用餐将按单收取手续费 ¥{{ formatMoney(feeAmount) }}({{ currentMealLabel }})</span>
       </section>
 
       <!-- 当前餐别菜品列表 -->
@@ -348,7 +376,11 @@ onUnmounted(() => {
         <span class="unsolicited__cart-badge">{{ cartCount }}</span>
       </button>
       <div class="unsolicited__footer-info">
-        <span class="unsolicited__footer-total">¥{{ formatMoney(cartTotal) }}</span>
+        <div class="unsolicited__footer-amount">
+          <span class="unsolicited__footer-total">¥{{ formatMoney(payTotal) }}</span>
+          <!-- 仅有手续费时展示 -->
+          <span v-if="feeEnabled" class="unsolicited__footer-fee">含手续费 ¥{{ formatMoney(feeAmount) }}</span>
+        </div>
         <button
           class="unsolicited__submit-btn"
           :disabled="submitting"
@@ -372,8 +404,8 @@ onUnmounted(() => {
             <span class="unsolicited__cart-subtotal">¥{{ formatMoney(item.subtotal) }}</span>
           </div>
           <div class="unsolicited__cart-total-row">
-            <span>合计</span>
-            <span class="unsolicited__cart-total-num">¥{{ formatMoney(cartTotal) }}</span>
+            <span>合计{{ feeEnabled ? `(含手续费 ¥${formatMoney(feeAmount)})` : '' }}</span>
+            <span class="unsolicited__cart-total-num">¥{{ formatMoney(payTotal) }}</span>
           </div>
         </div>
       </div>
@@ -472,6 +504,20 @@ onUnmounted(() => {
   border-radius: 6px;
   color: #fa8c16;
   font-size: 13px;
+}
+
+/* 手续费提示条(醒目,红橙色系) */
+.unsolicited__fee-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  background: #fee2e2;
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .unsolicited__section-title {
@@ -678,10 +724,20 @@ onUnmounted(() => {
   justify-content: space-between;
   margin-left: 12px;
 }
+.unsolicited__footer-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
 .unsolicited__footer-total {
   font-size: 18px;
   font-weight: 700;
   color: #ee0a24;
+}
+.unsolicited__footer-fee {
+  font-size: 12px;
+  color: #999;
 }
 .unsolicited__submit-btn {
   background: #1989fa;

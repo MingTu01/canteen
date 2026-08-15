@@ -1,5 +1,6 @@
 package com.example.canteen.security;
 
+import com.example.canteen.exception.BusinessException;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -140,8 +141,15 @@ public class JwtAuthenticationFilter implements Filter {
                         tokenBlacklistService.blacklist(token);
                     }
                 }
+            } catch (BusinessException renewRejected) {
+                // 业务性拒绝续期(如员工 token 超 90 天绝对上限):必须以 401 终止,
+                // 触发 H5 重新登录,而不是静默沿用旧 token 继续放行
+                log.info("Token 续期被拒绝:path={}, msg={}", path, renewRejected.getMessage());
+                unauthorizedResponseWriter.write(httpResponse, httpRequest,
+                        HttpServletResponse.SC_UNAUTHORIZED, renewRejected.getMessage(), true);
+                return;
             } catch (Exception renewEx) {
-                // 续期失败不影响当前请求,下次请求会再尝试
+                // 其他续期失败不影响当前请求,下次请求会再尝试
                 log.debug("Token 滑动续期失败: {}", renewEx.getMessage());
             }
         } catch (Exception e) {

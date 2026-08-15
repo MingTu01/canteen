@@ -983,8 +983,9 @@ watch(menuInvalidated, (v) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  /* 触屏优化:最小点击区域 44px(原 36px) */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: none;
   background: transparent;
@@ -992,14 +993,19 @@ watch(menuInvalidated, (v) => {
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.cart-modal__close:hover {
-  background: var(--doubao-muted);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .cart-modal__close:hover {
+    background: var(--doubao-muted);
+    color: var(--doubao-foreground);
+  }
 }
 
 .cart-modal__body {
   flex: 1;
   overflow-y: auto;
+  /* 触屏优化:滚动到边界时不连锁滚动背后的页面 */
+  overscroll-behavior: contain;
   padding: 16px 24px;
 }
 .cart-modal__empty {
@@ -1142,8 +1148,11 @@ watch(menuInvalidated, (v) => {
   font-family: inherit;
   transition: background 0.15s ease, transform 0.12s ease;
 }
-.cart-modal__remove:hover {
-  background: rgba(239, 68, 68, 0.08);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .cart-modal__remove:hover {
+    background: rgba(239, 68, 68, 0.08);
+  }
 }
 .cart-modal__remove:active { transform: scale(0.92); }
 

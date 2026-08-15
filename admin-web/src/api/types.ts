@@ -117,6 +117,8 @@ export interface Order {
   status: number
   /** 订单来源: 0-正常订餐, 1-未订餐用餐 */
   orderSource?: number
+  /** 未订餐用餐手续费(包含在 totalAmount 中,正常订餐为 0) */
+  serviceFee?: number
   createdAt?: string
   updatedAt?: string
   /** 非数据库字段:员工卡号(列表展示用,由后端填充) */

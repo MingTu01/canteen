@@ -190,7 +190,7 @@ if sys.platform == 'win32':
 from PyQt5.QtCore import Qt, QUrl, QObject, pyqtSignal, QThread, QTimer
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox, QProgressDialog
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile, QWebEngineScript
-from PyQt5.QtGui import QKeyEvent
+from PyQt5.QtGui import QKeyEvent, QColor
 
 from config import read_config, ensure_config_json, get_exe_dir, get_local_appdata_dir, read_full_config, write_config
 from server import find_web_dist, start_server
@@ -257,6 +257,9 @@ class TerminalWindow(QWidget):
         self.view = QWebEngineView(self)
         self.page = FullscreenWebPage(self.view)
         self.view.setPage(self.page)
+        # 页面背景设为深色(与前端 .app-root #0e1115 一致):
+        # 默认白色背景会在页面加载前短暂白闪,深色终端观感突兀
+        self.page.setBackgroundColor(QColor('#0e1115'))
 
         # 诊断信号:加载进度 / 加载完成 / 渲染进程崩溃
         self.view.loadProgress.connect(
@@ -435,7 +438,9 @@ class UpdateDownloadWorker(QThread):
             if not url:
                 self.finished.emit(False, '未找到安装包下载地址')
                 return
-            updater.download_installer(url, self.dest_path)
+            # 版本清单提供 sha256 时下载后强制校验(见 updater.download_installer)
+            updater.download_installer(url, self.dest_path,
+                                       expected_sha256=self.release.get('asset_sha256', ''))
             self.finished.emit(True, self.dest_path)
         except Exception as e:
             self.finished.emit(False, str(e))
@@ -698,14 +703,6 @@ def main():
             window.switch_to_config_mode()
 
     bridge.config_updated.connect(on_config_updated)
-
-    # 临时诊断:eval_js 信号 → 在前端执行 JS 并通过回调返回结果
-    def on_eval_js(js_code):
-        print(f'[EvalJS] 执行诊断 JS...')
-        # runJavaScript 第二个参数是回调,返回 JS 表达式的值
-        # JS 代码必须是表达式(或 IIFE),返回值会被序列化传回
-        window.page.runJavaScript(js_code, 0, lambda result: print(f'[EvalJS Result] {result}'))
-    bridge.eval_js_requested.connect(on_eval_js)
 
     # 9. 连接读卡器卡号信号 → 推送给前端
     card_reader.card_read.connect(

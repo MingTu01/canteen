@@ -187,9 +187,12 @@ const onOverlayClick = () => {
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.modal__close:hover {
-  background: var(--doubao-muted);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .modal__close:hover {
+    background: var(--doubao-muted);
+    color: var(--doubao-foreground);
+  }
 }
 
 /* 图标 */
@@ -274,8 +277,11 @@ const onOverlayClick = () => {
   background: var(--doubao-muted);
   color: var(--doubao-secondary-foreground);
 }
-.modal__btn--cancel:hover {
-  background: var(--doubao-border);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .modal__btn--cancel:hover {
+    background: var(--doubao-border);
+  }
 }
 .modal__btn--confirm.modal__btn--info {
   background: var(--doubao-primary);

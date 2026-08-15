@@ -469,9 +469,9 @@ onUnmounted(() => {
   padding: 28px 24px 24px;
   border-radius: var(--doubao-radius);
   border: 1px solid rgba(255, 255, 255, 0.15);
+  /* X86 低端集显禁用 backdrop-filter:GPU 重绘导致整页闪烁 */
   /* 降低透明度(更不透明),让菜品名称等内容在品牌背景上更清晰 */
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.62);
 }
 .pickup-info__meal-head {
   display: flex;

@@ -124,7 +124,10 @@ const initCharts = () => {
   const cardBg = themeStore.isDark ? '#161b22' : '#ffffff'
 
   if (pieChartRef.value) {
-    pieChart = echarts.init(pieChartRef.value)
+    // 复用未销毁的实例(与 composables/useEcharts.ts 约定一致),避免切换门店重复 init 报 "chart instance already initialized"
+    if (!pieChart || pieChart.isDisposed()) {
+      pieChart = echarts.init(pieChartRef.value)
+    }
     const m = stats.value.mealTypeStats
     pieChart.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -149,7 +152,10 @@ const initCharts = () => {
   }
 
   if (lineChartRef.value) {
-    lineChart = echarts.init(lineChartRef.value)
+    // 同上:复用实例,避免切换门店重复 init
+    if (!lineChart || lineChart.isDisposed()) {
+      lineChart = echarts.init(lineChartRef.value)
+    }
     lineChart.setOption({
       tooltip: { trigger: 'axis' },
       grid: { left: 40, right: 20, top: 20, bottom: 30 },

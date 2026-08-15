@@ -13,7 +13,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>enterprise-canteen</artifactId>
-    <version>0.0.46</version>
+    <version>0.0.47</version>
     <packaging>jar</packaging>
     <name>enterprise-canteen</name>
     <description>企业智慧食堂预定餐系统</description>

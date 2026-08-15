@@ -350,9 +350,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.modal__close:hover {
-  background: var(--doubao-muted);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .modal__close:hover {
+    background: var(--doubao-muted);
+    color: var(--doubao-foreground);
+  }
 }
 
 /* 图标 */
@@ -415,11 +418,11 @@ onBeforeUnmount(() => {
   font-size: var(--fs-base);
   font-family: inherit;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  /* X86 终端禁用 box-shadow 过渡:0 -> 3px 会触发合成层重建,低端机闪烁 */
+  transition: border-color 0.15s ease;
 }
 .input-field__input:focus {
   border-color: var(--doubao-primary);
-  box-shadow: 0 0 0 3px rgba(0, 101, 253, 0.15);
 }
 .input-field__input--password {
   padding-right: 56px;
@@ -439,9 +442,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.input-field__toggle:hover {
-  background: var(--doubao-border);
-  color: var(--doubao-foreground);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .input-field__toggle:hover {
+    background: var(--doubao-border);
+    color: var(--doubao-foreground);
+  }
 }
 
 /* 错误提示 */
@@ -486,15 +492,21 @@ onBeforeUnmount(() => {
   background: var(--doubao-muted);
   color: var(--doubao-secondary-foreground);
 }
-.modal__btn--cancel:hover {
-  background: var(--doubao-border);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .modal__btn--cancel:hover {
+    background: var(--doubao-border);
+  }
 }
 .modal__btn--confirm {
   background: var(--doubao-primary);
   color: var(--doubao-primary-foreground);
 }
-.modal__btn--confirm:hover {
-  opacity: 0.9;
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .modal__btn--confirm:hover {
+    opacity: 0.9;
+  }
 }
 
 /* 操作菜单(三按钮网格) */
@@ -519,8 +531,11 @@ onBeforeUnmount(() => {
   font-family: inherit;
   transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
 }
-.action-tile:hover {
-  transform: translateY(-2px);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .action-tile:hover {
+    transform: translateY(-2px);
+  }
 }
 .action-tile:disabled {
   opacity: 0.5;
@@ -532,23 +547,32 @@ onBeforeUnmount(() => {
   border-color: rgba(0, 101, 253, 0.3);
   color: var(--doubao-primary);
 }
-.action-tile--primary:hover {
-  background: rgba(0, 101, 253, 0.15);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .action-tile--primary:hover {
+    background: rgba(0, 101, 253, 0.15);
+  }
 }
 .action-tile--danger {
   background: rgba(239, 68, 68, 0.08);
   border-color: rgba(239, 68, 68, 0.3);
   color: var(--doubao-destructive);
 }
-.action-tile--danger:hover {
-  background: rgba(239, 68, 68, 0.15);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .action-tile--danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+  }
 }
 .action-tile--cancel {
   background: var(--doubao-muted);
   color: var(--doubao-secondary-foreground);
 }
-.action-tile--cancel:hover {
-  background: var(--doubao-border);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .action-tile--cancel:hover {
+    background: var(--doubao-border);
+  }
 }
 .action-tile__icon {
   margin-bottom: 4px;

@@ -38,7 +38,8 @@ class RestoreServiceTest {
         @SuppressWarnings("unchecked")
         org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate =
                 mock(org.springframework.data.redis.core.RedisTemplate.class);
-        restoreService = new RestoreService(null, backupService, redisTemplate);
+        // selfProvider 传 null:无 Spring 容器的单元测试场景,self() 回退 this 即可
+        restoreService = new RestoreService(null, backupService, redisTemplate, null);
     }
 
     @AfterEach

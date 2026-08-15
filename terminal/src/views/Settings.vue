@@ -1277,10 +1277,14 @@ onBeforeUnmount(() => {
   font-size: var(--fs-base);
   font-weight: 400;
   cursor: pointer;
-  transition: all 0.15s ease;
+  /* X86 终端禁用 transition:all:只过渡实际变化的属性,避免整层重绘 */
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
-.seg-btn:hover {
-  border-color: var(--doubao-ring);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .seg-btn:hover {
+    border-color: var(--doubao-ring);
+  }
 }
 .seg-btn--active {
   border-color: var(--doubao-primary);
@@ -1325,11 +1329,15 @@ onBeforeUnmount(() => {
   color: var(--doubao-text-secondary);
   font-size: var(--fs-xs);
   cursor: pointer;
-  transition: all 0.2s ease;
+  /* X86 终端禁用 transition:all:只过渡实际变化的属性,避免整层重绘 */
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
-.settings__refresh-btn:hover:not(:disabled) {
-  border-color: var(--doubao-primary);
-  color: var(--doubao-primary);
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .settings__refresh-btn:hover:not(:disabled) {
+    border-color: var(--doubao-primary);
+    color: var(--doubao-primary);
+  }
 }
 .settings__refresh-btn:disabled {
   opacity: 0.5;
@@ -1412,11 +1420,15 @@ onBeforeUnmount(() => {
   color: var(--doubao-primary, #007aff);
   font-size: var(--fs-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  /* X86 终端禁用 transition:all:只过渡实际变化的属性,避免整层重绘 */
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
-.settings__device-action:hover:not(:disabled) {
-  background: var(--doubao-primary, #007aff);
-  color: #fff;
+/* 触屏优化:hover 仅鼠标设备生效,触屏不粘滞 */
+@media (hover: hover) and (pointer: fine) {
+  .settings__device-action:hover:not(:disabled) {
+    background: var(--doubao-primary, #007aff);
+    color: #fff;
+  }
 }
 .settings__device-action:disabled {
   opacity: 0.5;

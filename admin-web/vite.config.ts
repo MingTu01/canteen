@@ -58,5 +58,23 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // 大依赖拆独立 chunk:避免全部打进首屏 index,提升缓存命中率;
+          // echarts/xlsx 属首屏不需要的重依赖,配合路由懒加载不阻塞首屏
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('element-plus') || id.includes('@element-plus')) return 'element-plus'
+              if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
+              if (id.includes('xlsx') || id.includes('cfb') || id.includes('codepage')) return 'xlsx'
+              if (id.includes('lucide-vue-next')) return 'lucide'
+              if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) return 'vue-vendor'
+              return 'vendor'
+            }
+          },
+        },
+      },
+    },
   }
 })

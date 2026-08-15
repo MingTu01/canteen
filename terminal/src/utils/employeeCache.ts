@@ -1,30 +1,28 @@
 /**
- * 员工列表本地缓存 + 头像预加载管理器。
+ * 员工列表本地缓存管理器。
  *
  * 职责:
  * 1. 启动时拉取本食堂全量员工列表 → 存 IndexedDB(employees store)
- * 2. 后台并发预下载所有员工头像 → 存 IndexedDB(images store,与菜品图片共用)
- * 3. 提供 getEmployeeByCardNo(cardNo):优先查本地缓存(毫秒级),未命中走网络
- * 4. 每天定时轮询更新(全量覆盖)
- * 5. 清理缓存(切换门店/解绑时)
+ * 2. 提供 getEmployeeByCardNo(cardNo):优先查本地缓存(毫秒级),未命中走网络
+ * 3. 每天定时轮询更新(全量覆盖)
+ * 4. 清理缓存(切换门店/解绑时)
+ *
+ * 头像不在此预加载:渲染链路走 imageCache.ts 的 getCachedAvatar
+ * (独立 IndexedDB canteen_terminal_avatar,懒加载),预下载写入 images store
+ * 属于死数据,且会拖慢菜品刷新时的 dbClearUnusedImages 全表扫描。
  *
  * 店铺隔离:终端绑定后 storeId 锁定,只拉取本食堂员工。
  */
-import api, { loadConfig } from '@/api'
+import api from '@/api'
 import {
   dbPutEmployees,
   dbGetEmployeeByCardNo,
   dbClearEmployees,
-  dbPutImage,
-  dbGetImage,
   type CachedEmployee,
 } from '@/utils/db'
 
 /** 轮询间隔:24 小时(员工列表变化不频繁,每天全量刷新一次) */
 const POLL_INTERVAL = 24 * 60 * 60 * 1000
-
-/** 头像下载并发数 */
-const AVATAR_CONCURRENCY = 5
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let currentStoreId: number | null = null
@@ -33,7 +31,6 @@ let refreshGen = 0
 
 /**
  * 拉取本食堂全量员工列表并缓存到 IndexedDB。
- * 同时后台预下载所有头像。
  *
  * 竞态保护:用代际号(generation)替代简单的 loading 标志,
  * 店铺切换时旧请求完成后会发现代际号不匹配而丢弃数据,不会阻塞新请求。
@@ -73,86 +70,10 @@ async function doRefreshEmployees(): Promise<void> {
     // 写入 IndexedDB(全量覆盖)
     await dbPutEmployees(employees)
     console.log(`[employeeCache] 已缓存 ${employees.length} 名员工`)
-
-    // 写入后再次校验,避免切换后预加载旧头像
-    if (myGen !== refreshGen) return
-    // 后台预下载头像(不阻塞主流程)
-    preloadAvatars(employees, myGen).catch(() => {})
   } catch (e) {
     if (myGen === refreshGen) {
       console.error('[employeeCache] 刷新员工列表异常:', e)
     }
-  }
-}
-
-/**
- * 后台并发预下载所有员工头像到 IndexedDB。
- * 头像存入 images store(与菜品图片共用),key 为完整 avatar URL(带签名)。
- * 已缓存的跳过,失败的重试 2 次。
- *
- * @param myGen 发起时的代际号,用于在下载过程中检测店铺是否已切换
- */
-async function preloadAvatars(employees: CachedEmployee[], myGen: number): Promise<void> {
-  const config = loadConfig()
-  const baseUrl = config?.serverUrl || ''
-
-  // 收集需要下载的头像 URL(去重,过滤空值)
-  const avatarUrls = [...new Set(
-    employees
-      .map((e) => e.avatar)
-      .filter((u): u is string => !!u && u.startsWith('/uploads/'))
-  )]
-
-  if (avatarUrls.length === 0) return
-
-  let completed = 0
-  let failed = 0
-  let skipped = 0
-  const total = avatarUrls.length
-
-  async function downloadAvatar(url: string): Promise<void> {
-    // 店铺已切换,停止下载
-    if (myGen !== refreshGen) return
-    // 已缓存则跳过
-    const existing = await dbGetImage(url)
-    if (existing) {
-      skipped++
-      return
-    }
-
-    const fullUrl = url.startsWith('http') ? url : baseUrl + url
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      // 每次重试前检查店铺是否已切换
-      if (myGen !== refreshGen) return
-      try {
-        const resp = await api.get(fullUrl, { responseType: 'blob', timeout: 15000 })
-        const blob = resp.data as Blob
-        if (!blob || blob.size < 100) continue
-        await dbPutImage(url, blob)
-        completed++
-        return
-      } catch {
-        if (attempt === 2) {
-          failed++
-        }
-      }
-    }
-  }
-
-  // 并发下载(限并发 5)
-  const queue = [...avatarUrls]
-  async function worker() {
-    while (queue.length > 0) {
-      if (myGen !== refreshGen) return  // 店铺已切换,停止
-      const url = queue.shift()!
-      await downloadAvatar(url)
-    }
-  }
-  await Promise.all(
-    Array.from({ length: AVATAR_CONCURRENCY }, () => worker()),
-  )
-  if (myGen === refreshGen) {
-    console.log(`[employeeCache] 头像预加载完成:新增 ${completed},跳过 ${skipped},失败 ${failed},共 ${total}`)
   }
 }
 
@@ -240,7 +161,8 @@ function refreshEmployees(): Promise<void> {
  * 代际号机制:旧请求完成后会自动丢弃数据,不阻塞新请求。
  */
 export async function initEmployeeCache(storeId: number): Promise<void> {
-  // 店铺切换:先清理旧店铺员工缓存(含头像会在 refreshDishes 的 dbClearUnusedImages 中清理)
+  // 店铺切换:先清理旧店铺员工缓存
+  //(头像由 imageCache 独立缓存懒加载,不写入 images store,无需在此清理)
   if (currentStoreId !== null && currentStoreId !== storeId) {
     console.log(`[employeeCache] 店铺切换 ${currentStoreId} → ${storeId},清理旧员工缓存`)
     await dbClearEmployees().catch(() => {})

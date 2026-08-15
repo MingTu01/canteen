@@ -1,15 +1,14 @@
 /**
  * 格式化工具(composable)。
  * 提供金额、日期、餐次、订单状态的格式化函数。
+ * 金额与日期的核心实现委托仓库根 shared/(admin-web 与 h5 共享),
+ * 本文件仅保留 h5 特有的解析与展示逻辑。
  */
 
-/** 格式化金额:保留两位小数(不包含 ¥ 符号) */
-export function formatMoney(val: number | string | null | undefined): string {
-  if (val === null || val === undefined || val === '') return '0.00'
-  const n = typeof val === 'string' ? parseFloat(val) : val
-  if (Number.isNaN(n)) return '0.00'
-  return n.toFixed(2)
-}
+import { formatDateStr } from '../../../shared/date'
+import { formatMoney } from '../../../shared/money'
+
+export { formatMoney }
 
 /** 格式化日期:yyyy-MM-dd(支持 ISO 字符串 / Date / 时间戳) */
 export function formatDate(dateStr: string | Date | number | null | undefined): string {
@@ -22,10 +21,7 @@ export function formatDate(dateStr: string | Date | number | null | undefined): 
     d = new Date(dateStr)
   }
   if (Number.isNaN(d.getTime())) return ''
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return formatDateStr(d)
 }
 
 /** 格式化日期时间:yyyy-MM-dd HH:mm */
