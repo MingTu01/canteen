@@ -187,6 +187,29 @@ public class AdminService {
         rateLimiter.recordSuccess(rateLimitKey);
     }
 
+    /**
+     * 敏感操作二次验证:校验当前登录管理员的密码。
+     * 用于删除食堂、恢复备份等破坏性操作前的身份确认(防会话被劫持后直接调用接口)。
+     * 复用 changePassword 相同的限流策略,防止持有会话者暴力枚举密码。
+     */
+    public void verifyCurrentAdminPassword(String password) {
+        Long currentId = SecurityContext.currentAdminId();
+        if (currentId == null) {
+            throw new SecurityException("登录状态异常,请重新登录");
+        }
+        if (password == null || password.isBlank()) {
+            throw new BusinessException("请输入管理员密码");
+        }
+        String rateLimitKey = "pwd:verify:" + currentId;
+        rateLimiter.checkLocked(rateLimitKey);
+        Admin admin = adminMapper.selectById(currentId);
+        if (admin == null || !passwordEncoder.matches(password, admin.getPassword())) {
+            rateLimiter.recordFail(rateLimitKey);
+            throw new BusinessException("管理员密码错误,验证失败");
+        }
+        rateLimiter.recordSuccess(rateLimitKey);
+    }
+
     public void deleteAdmin(Long id) {
         if (!SecurityContext.isSuperAdmin()) {
             throw new SecurityException("仅超级管理员可删除管理员账号");

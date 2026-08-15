@@ -35,8 +35,9 @@ export const backupApi = {
   list: () => api.get<BackupInfo[]>('/backup/list').then((r) => r.data),
   create: (params?: BackupCreateParams) =>
     api.post<BackupCreateResult>('/backup/create', params ?? {}).then((r) => r.data),
-  restore: (backupName: string) =>
-    api.post(`/backup/restore/${backupName}`).then((r) => r.data),
+  /** 恢复备份(敏感操作:password 为当前登录管理员密码,后端强制二次验证) */
+  restore: (backupName: string, password: string) =>
+    api.post(`/backup/restore/${backupName}`, { password }).then((r) => r.data),
   delete: (backupName: string) =>
     api.delete<void>(`/backup/${backupName}`).then((r) => r.data),
   /** 下载备份(文件流),触发浏览器下载 */
@@ -53,10 +54,11 @@ export const backupApi = {
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url)
   },
-  /** 导入备份文件(可选立即恢复) */
-  importBackup: (file: File, restore = false) => {
+  /** 导入备份文件(可选立即恢复;restore=true 时需传管理员密码做二次验证) */
+  importBackup: (file: File, restore = false, password?: string) => {
     const formData = new FormData()
     formData.append('file', file)
+    if (restore && password) formData.append('password', password)
     return api
       .post<BackupImportResult>('/backup/import', formData, {
         params: { restore },

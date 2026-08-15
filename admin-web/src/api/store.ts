@@ -6,7 +6,9 @@ export const storeApi = {
   get: (id: number) => api.get<Store>(`/store/${id}`).then((r) => r.data),
   create: (data: Store) => api.post<Store>('/store', data).then((r) => r.data),
   update: (id: number, data: Store) => api.put<Store>(`/store/${id}`, data).then((r) => r.data),
-  delete: (id: number) => api.delete<void>(`/store/${id}`).then((r) => r.data),
+  /** 删除食堂(敏感操作:password 为当前登录管理员密码,后端强制二次验证) */
+  delete: (id: number, password: string) =>
+    api.delete<void>(`/store/${id}`, { data: { password } }).then((r) => r.data),
   /** 重置食堂安全码,返回 { id, name, securityCode } */
   resetSecurityCode: (id: number) =>
     api.post<{ id: number; name: string; securityCode: string }>(`/store/${id}/reset-security-code`).then((r) => r.data),

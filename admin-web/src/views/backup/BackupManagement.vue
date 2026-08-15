@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
+import PasswordConfirmDialog from '@/components/PasswordConfirmDialog.vue'
 import StatCard from '@/components/StatCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { backupApi, storeApi, systemApi } from '@/api'
@@ -157,42 +158,40 @@ const createBackup = async () => {
   }
 }
 
-/* ===== 恢复 ===== */
-const restoreBackup = async (backup: BackupInfo) => {
+/* ===== 恢复(敏感操作,密码二次验证) ===== */
+const passwordConfirmRef = ref<InstanceType<typeof PasswordConfirmDialog>>()
+
+const restoreBackup = (backup: BackupInfo) => {
   const scopeText = backup.type === 'store' && backup.storeName
     ? `门店「${backup.storeName}」的`
     : backup.type === 'store'
       ? '本门店的'
       : '全库'
-  try {
-    await ElMessageBox.confirm(
-      `确定要恢复备份「${backup.name}」吗?此操作将覆盖${scopeText}所有数据,不可撤销。建议先下载备份留存。`,
-      '恢复确认',
-      { confirmButtonText: '确定恢复', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    return /* 用户取消 */
-  }
-  restoring.value = backup.name
-  try {
-    const res = await backupApi.restore(backup.name)
-    const r = res as { restoredRows?: number; restoredTables?: string[]; redactedAdminsSkipped?: number }
-    ElMessage.success(
-      `数据恢复成功${r.restoredRows != null ? `(共 ${r.restoredRows} 行 / ${(r.restoredTables || []).length} 表)` : ''},即将刷新页面`
-    )
-    if (r.redactedAdminsSkipped) {
-      ElMessageBox.alert(
-        `${r.redactedAdminsSkipped} 个管理员账号因密码敏感脱敏未随备份恢复,当前无法登录。请通过部署脚本重置超管密码后再登录。`,
-        '管理员账号提醒',
-        { confirmButtonText: '知道了', type: 'warning' }
-      )
-    }
-    setTimeout(() => window.location.reload(), 1500)
-  } catch {
-    /* 拦截器提示 */
-  } finally {
-    restoring.value = null
-  }
+  passwordConfirmRef.value?.open({
+    title: '恢复备份',
+    message: `确定要恢复备份「${backup.name}」吗?此操作将覆盖${scopeText}所有数据,不可撤销。建议先下载备份留存。此操作需输入管理员密码验证。`,
+    confirmText: '验证并恢复',
+    onConfirm: async (password) => {
+      restoring.value = backup.name
+      try {
+        const res = await backupApi.restore(backup.name, password)
+        const r = res as { restoredRows?: number; restoredTables?: string[]; redactedAdminsSkipped?: number }
+        ElMessage.success(
+          `数据恢复成功${r.restoredRows != null ? `(共 ${r.restoredRows} 行 / ${(r.restoredTables || []).length} 表)` : ''},即将刷新页面`
+        )
+        if (r.redactedAdminsSkipped) {
+          ElMessageBox.alert(
+            `${r.redactedAdminsSkipped} 个管理员账号因密码敏感脱敏未随备份恢复,当前无法登录。请通过部署脚本重置超管密码后再登录。`,
+            '管理员账号提醒',
+            { confirmButtonText: '知道了', type: 'warning' }
+          )
+        }
+        setTimeout(() => window.location.reload(), 1500)
+      } finally {
+        restoring.value = null
+      }
+    },
+  })
 }
 
 /* ===== 删除 ===== */
@@ -265,20 +264,35 @@ const handleImportFileRemove = () => {
   importFile.value = null
 }
 
-const confirmImport = async () => {
+const confirmImport = () => {
   if (!importFile.value) {
     ElMessage.warning('请选择备份文件(.json.gz)')
     return
   }
+  // 导入本身不需要密码;勾选"导入后立即恢复"属于破坏性操作,需密码二次验证
+  if (!importRestore.value) {
+    doImport()
+    return
+  }
+  passwordConfirmRef.value?.open({
+    title: '导入并恢复',
+    message: '将导入该备份文件并立即覆盖恢复对应范围的数据,不可撤销。此操作需输入管理员密码验证。',
+    confirmText: '验证并导入',
+    onConfirm: (password) => doImport(password),
+  })
+}
+
+const doImport = async (password?: string) => {
   importing.value = true
   importResult.value = null
   try {
-    const res = await backupApi.importBackup(importFile.value, importRestore.value)
+    const res = await backupApi.importBackup(importFile.value!, importRestore.value, password)
     importResult.value = res
     ElMessage.success(importRestore.value && res.restored ? '导入并恢复成功' : '导入成功')
     await fetchBackups()
-  } catch {
-    /* 拦截器提示 */
+  } catch (e) {
+    /* 拦截器已 toast;带密码场景(密码二次验证弹窗内)重新抛出,保持弹窗打开展示错误 */
+    if (password) throw e
   } finally {
     importing.value = false
   }
@@ -668,5 +682,8 @@ const saveBackupConfig = async () => {
         </div>
       </template>
     </ElDialog>
+
+    <!-- 敏感操作密码二次验证(恢复备份/导入并恢复) -->
+    <PasswordConfirmDialog ref="passwordConfirmRef" />
   </Layout>
 </template>

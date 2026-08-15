@@ -10,6 +10,7 @@ import com.example.canteen.mapper.StoreMapper;
 import com.example.canteen.security.AuthCookieUtil;
 import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.SecurityContext;
+import com.example.canteen.service.AdminService;
 import com.example.canteen.service.StoreService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -32,15 +33,17 @@ public class StoreController {
     private final AdminMapper adminMapper;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthCookieUtil authCookieUtil;
+    private final AdminService adminService;
 
     public StoreController(StoreService storeService, StoreMapper storeMapper,
                            AdminMapper adminMapper, JwtTokenProvider jwtTokenProvider,
-                           AuthCookieUtil authCookieUtil) {
+                           AuthCookieUtil authCookieUtil, AdminService adminService) {
         this.storeService = storeService;
         this.storeMapper = storeMapper;
         this.adminMapper = adminMapper;
         this.jwtTokenProvider = jwtTokenProvider;
         this.authCookieUtil = authCookieUtil;
+        this.adminService = adminService;
     }
 
     @GetMapping
@@ -265,10 +268,17 @@ public class StoreController {
         return ApiResponse.success(storeService.updateStore(store));
     }
 
+    /**
+     * 删除食堂(敏感操作,强制密码二次验证)。
+     * Body: { "password": "当前登录管理员密码" }
+     */
     @OperationLog(value = "删除食堂", detail = "'食堂ID ' + #id")
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> deleteStore(@PathVariable Long id) {
+    public ApiResponse<Void> deleteStore(@PathVariable Long id,
+                                         @RequestBody(required = false) Map<String, String> body) {
         SecurityContext.checkSuperAdmin("仅超级管理员可删除食堂");
+        // 敏感操作二次验证:防会话被劫持/CSRF 后直接调接口删库(前端弹窗输入密码后随请求携带)
+        adminService.verifyCurrentAdminPassword(body == null ? null : body.get("password"));
         storeService.deleteStore(id);
         return ApiResponse.success(null);
     }

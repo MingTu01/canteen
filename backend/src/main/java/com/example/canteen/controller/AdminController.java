@@ -81,6 +81,21 @@ public class AdminController {
         return ApiResponse.success(null);
     }
 
+    /**
+     * 敏感操作二次验证:校验当前登录管理员的密码。
+     * Body: { "action": "操作描述"(可选,记入操作日志), "password": "管理员密码" }
+     * 前端在执行删除食堂/恢复备份等破坏性操作前调用;破坏性接口本身也会强制校验,此处用于预校验并记录日志。
+     */
+    @OperationLog(value = "敏感操作密码验证", detail = "#body == null ? '' : ('操作 ' + #body['action'])")
+    @PostMapping("/verify-password")
+    public ApiResponse<Void> verifyPassword(@RequestBody Map<String, String> body) {
+        if (!SecurityContext.hasAdminLevel()) {
+            throw new SecurityException("无权执行该操作");
+        }
+        adminService.verifyCurrentAdminPassword(body.get("password"));
+        return ApiResponse.success(null);
+    }
+
     @OperationLog(value = "删除管理员", detail = "'管理员ID ' + #id")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteAdmin(@PathVariable Long id) {

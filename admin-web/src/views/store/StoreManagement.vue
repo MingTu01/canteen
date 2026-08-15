@@ -18,6 +18,7 @@ import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
+import PasswordConfirmDialog from '@/components/PasswordConfirmDialog.vue'
 import { storeApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import type { Store } from '@/api/types'
@@ -103,24 +104,21 @@ const handleSave = async () => {
   }
 }
 
-const handleDelete = async (row: Store) => {
+/* ===== 删除食堂(敏感操作,密码二次验证) ===== */
+const passwordConfirmRef = ref<InstanceType<typeof PasswordConfirmDialog>>()
+
+const handleDelete = (row: Store) => {
   if (!row.id) return
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除食堂「${row.name}」吗？删除后该食堂的所有数据将无法访问。`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-  try {
-    await storeApi.delete(row.id)
-    ElMessage.success('删除成功')
-    fetchStores()
-  } catch {
-    /* 错误已由拦截器统一提示 */
-  }
+  passwordConfirmRef.value?.open({
+    title: '删除食堂',
+    message: `确定要删除食堂「${row.name}」吗?该食堂的菜品、订单、员工等全部数据将被清理且不可访问(已有备份文件保留,可用于恢复)。此操作需输入管理员密码验证。`,
+    confirmText: '验证并删除',
+    onConfirm: async (password) => {
+      await storeApi.delete(row.id!, password)
+      ElMessage.success('删除成功')
+      fetchStores()
+    },
+  })
 }
 
 /* ===== 进入管理(切换当前食堂) ===== */
@@ -486,5 +484,8 @@ onMounted(fetchStores)
         </template>
       </ElDialog>
     </PageContainer>
+
+    <!-- 敏感操作密码二次验证(删除食堂) -->
+    <PasswordConfirmDialog ref="passwordConfirmRef" />
   </Layout>
 </template>

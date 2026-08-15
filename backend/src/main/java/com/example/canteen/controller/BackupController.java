@@ -5,6 +5,7 @@ import com.example.canteen.dto.ApiResponse;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.exception.SecurityException;
 import com.example.canteen.security.SecurityContext;
+import com.example.canteen.service.AdminService;
 import com.example.canteen.service.BackupService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -35,9 +36,11 @@ import java.util.Map;
 public class BackupController {
 
     private final BackupService backupService;
+    private final AdminService adminService;
 
-    public BackupController(BackupService backupService) {
+    public BackupController(BackupService backupService, AdminService adminService) {
         this.backupService = backupService;
+        this.adminService = adminService;
     }
 
     /** 列出当前身份可见的备份。 */
@@ -69,13 +72,19 @@ public class BackupController {
         return ApiResponse.success(backupService.createBackup(type, storeId));
     }
 
-    /** 恢复备份。 */
+    /**
+     * 恢复备份(敏感操作,强制密码二次验证)。
+     * Body: { "password": "当前登录管理员密码" }
+     */
     @OperationLog(value = "恢复备份", detail = "'备份文件 ' + #backupName")
     @PostMapping("/restore/{backupName}")
-    public ApiResponse<Map<String, Object>> restoreBackup(@PathVariable String backupName) {
+    public ApiResponse<Map<String, Object>> restoreBackup(@PathVariable String backupName,
+                                                          @RequestBody(required = false) Map<String, String> body) {
         if (!SecurityContext.hasAdminLevel()) {
             throw new SecurityException(SecurityException.FORBIDDEN, "无权访问备份功能");
         }
+        // 敏感操作二次验证:恢复会覆盖业务数据,防会话被劫持后直接调用
+        adminService.verifyCurrentAdminPassword(body == null ? null : body.get("password"));
         return ApiResponse.success(backupService.restoreBackup(backupName));
     }
 
@@ -108,18 +117,24 @@ public class BackupController {
 
     /**
      * 导入(上传)备份文件。
-     * 参数:file=备份文件;restore=true|false(是否立即恢复,默认 false)。
+     * 参数:file=备份文件;restore=true|false(是否立即恢复,默认 false);
+     * password=管理员密码(restore=true 时必填,敏感操作二次验证)。
      */
     @OperationLog(value = "导入备份", detail = "'文件名 ' + #file.originalFilename + ' 立即恢复 ' + #restore")
     @PostMapping("/import")
     public ApiResponse<Map<String, Object>> importBackup(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "restore", defaultValue = "false") boolean restore) {
+            @RequestParam(value = "restore", defaultValue = "false") boolean restore,
+            @RequestParam(value = "password", required = false) String password) {
         if (!SecurityContext.hasAdminLevel()) {
             throw new SecurityException(SecurityException.FORBIDDEN, "无权访问备份功能");
         }
         if (file == null || file.isEmpty()) {
             throw new BusinessException("请选择备份文件");
+        }
+        // 导入后立即恢复属于破坏性操作,同样需要密码二次验证
+        if (restore) {
+            adminService.verifyCurrentAdminPassword(password);
         }
         try {
             Map<String, Object> result = backupService.importBackup(

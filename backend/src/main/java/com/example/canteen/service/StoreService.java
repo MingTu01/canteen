@@ -40,6 +40,7 @@ import com.example.canteen.entity.StockCount;
 import com.example.canteen.entity.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -68,6 +69,7 @@ public class StoreService {
     private final GroupOrderMapper groupOrderMapper;
     private final DailySettlementMapper dailySettlementMapper;
     private final StockCountMapper stockCountMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     public StoreService(StoreMapper storeMapper,
                         AdminMapper adminMapper,
@@ -86,7 +88,8 @@ public class StoreService {
                         FeedbackMapper feedbackMapper,
                         GroupOrderMapper groupOrderMapper,
                         DailySettlementMapper dailySettlementMapper,
-                        StockCountMapper stockCountMapper) {
+                        StockCountMapper stockCountMapper,
+                        JdbcTemplate jdbcTemplate) {
         this.storeMapper = storeMapper;
         this.adminMapper = adminMapper;
         this.employeeMapper = employeeMapper;
@@ -105,6 +108,7 @@ public class StoreService {
         this.groupOrderMapper = groupOrderMapper;
         this.dailySettlementMapper = dailySettlementMapper;
         this.stockCountMapper = stockCountMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     public List<Store> getAllStores() {
@@ -139,15 +143,24 @@ public class StoreService {
     /**
      * 删除食堂并清理全部关联数据。
      *
-     * 修复历史 BUG:此前仅 storeMapper.deleteById(id) 物理删除 store 表一条记录,
-     * 不清理 admin/employee/dish/order 等 19+ 张关联表的 store_id 残留,
-     * 导致门店管理员仍可登录并继续添加内容,产生孤儿数据(指向不存在的食堂)。
+     * 修复历史 BUG:
+     * 1) 此前 employee/dish 用 setIsDeleted(1)+update(entity,wrapper) 软删除,
+     *    但 is_deleted 字段被 MyBatis-Plus 全局逻辑删除托管,update 的 SET 子句会跳过该字段,
+     *    且实体只设置了 isDeleted 一个字段 → 生成 "UPDATE employee SET WHERE ..." 空 SET 非法 SQL,
+     *    抛 BadSqlGrammarException 导致删除食堂始终报 500(事务回滚)。
+     *    正确做法:delete(wrapper),MyBatis-Plus 自动转 UPDATE ... SET is_deleted=1。
+     * 2) 补齐此前遗漏的 5 张表:menu_item/order_item/purchase_item/group_order_item(明细子表)、
+     *    store_config(门店配置)。子表必须在父表(menu/order/purchase/group_order)之前删除,
+     *    否则成为孤儿行;且后续从 store{N} 备份恢复该食堂时,恢复的 INNER JOIN 清理匹配不到
+     *    孤儿明细行,重新插入备份主键时冲突导致恢复失败。
      *
      * 清理策略:
      * 1) admin:将该店管理员的 store_id 置 0 并禁用账号,防止残留旧值登录
-     * 2) employee/dish/department:软删除(is_deleted=1),保留审计痕迹
-     * 3) 其余关联表:物理删除,避免 id 复用导致跨店数据串扰
+     * 2) employee/dish:软删除(is_deleted=1),保留审计痕迹
+     * 3) 明细子表先删,其余关联表物理删除,避免 id 复用导致跨店数据串扰
      * 4) 最后物理删除 store 表记录
+     *
+     * 注:该食堂的备份文件(store{N}_*.json.gz)刻意保留 —— 删除后仍可从备份恢复整个食堂。
      *
      * 全程 @Transactional 保证原子性:任一清理失败则整体回滚,不留下半清理状态。
      */
@@ -167,18 +180,22 @@ public class StoreService {
                 new LambdaUpdateWrapper<Admin>().eq(Admin::getStoreId, id));
 
         // 2) employee:软删除(is_deleted=1),保留审计痕迹
-        Employee employeeUpdate = new Employee();
-        employeeUpdate.setIsDeleted(1);
-        employeeMapper.update(employeeUpdate,
-                new LambdaUpdateWrapper<Employee>().eq(Employee::getStoreId, id));
+        employeeMapper.delete(new LambdaQueryWrapper<Employee>().eq(Employee::getStoreId, id));
 
         // 3) dish:软删除
-        Dish dishUpdate = new Dish();
-        dishUpdate.setIsDeleted(1);
-        dishMapper.update(dishUpdate,
-                new LambdaUpdateWrapper<Dish>().eq(Dish::getStoreId, id));
+        dishMapper.delete(new LambdaQueryWrapper<Dish>().eq(Dish::getStoreId, id));
 
-        // 4) 其余关联表:物理删除
+        // 4) 明细子表:先于父表删除(无实体 Mapper,用 JdbcTemplate;表名 order 为保留字需反引号)
+        jdbcTemplate.update(
+                "DELETE FROM menu_item WHERE menu_id IN (SELECT id FROM menu WHERE store_id = ?)", id);
+        jdbcTemplate.update(
+                "DELETE FROM order_item WHERE order_id IN (SELECT id FROM `order` WHERE store_id = ?)", id);
+        jdbcTemplate.update(
+                "DELETE FROM purchase_item WHERE purchase_id IN (SELECT id FROM purchase WHERE store_id = ?)", id);
+        jdbcTemplate.update(
+                "DELETE FROM group_order_item WHERE group_order_id IN (SELECT id FROM group_order WHERE store_id = ?)", id);
+
+        // 5) 其余关联表:物理删除
         dishCategoryMapper.delete(new LambdaQueryWrapper<DishCategory>().eq(DishCategory::getStoreId, id));
         departmentMapper.delete(new LambdaQueryWrapper<Department>().eq(Department::getStoreId, id));
         menuMapper.delete(new LambdaQueryWrapper<Menu>().eq(Menu::getStoreId, id));
@@ -194,7 +211,10 @@ public class StoreService {
         dailySettlementMapper.delete(new LambdaQueryWrapper<DailySettlement>().eq(DailySettlement::getStoreId, id));
         stockCountMapper.delete(new LambdaQueryWrapper<StockCount>().eq(StockCount::getStoreId, id));
 
-        // 5) 最后物理删除 store 表记录
+        // 6) store_config:门店级配置(含订餐/手续费配置),避免孤儿配置残留
+        jdbcTemplate.update("DELETE FROM store_config WHERE store_id = ?", id);
+
+        // 7) 最后物理删除 store 表记录
         storeMapper.deleteById(id);
         log.warn("食堂 id={}, name={} 及其关联数据已全部清理", id, store.getName());
     }
