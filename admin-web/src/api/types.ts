@@ -163,6 +163,8 @@ export interface OrderQuery extends PageQuery {
   storeId: number
   status?: number
   mealType?: number
+  /** 订单来源筛选:0=正常订餐 1=未订餐用餐 */
+  orderSource?: number
   date?: string
   startDate?: string
   endDate?: string

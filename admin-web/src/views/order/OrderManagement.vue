@@ -22,7 +22,6 @@ import PageContainer from '@/components/PageContainer.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import UnsolicitedFeeDialog from '@/components/UnsolicitedFeeDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { orderApi } from '@/api'
 import type { Order, OrderDetail, OrderItem, OrderQuery, PageResult } from '@/api/types'
@@ -112,6 +111,8 @@ const formatCheckoutTime = (row: { status?: number; updatedAt?: string }) => {
 const filters = reactive({
   status: undefined as number | undefined,
   mealType: undefined as number | undefined,
+  /** 订单来源:1=未订餐用餐(快捷筛选按钮切换),undefined=全部 */
+  orderSource: undefined as number | undefined,
   dateRange: [] as string[],
   keyword: '',
 })
@@ -140,6 +141,7 @@ const buildQuery = (overrides: Partial<OrderQuery> = {}): OrderQuery => ({
   size: size.value,
   status: filters.status,
   mealType: filters.mealType,
+  orderSource: filters.orderSource,
   startDate: filters.dateRange?.[0],
   endDate: filters.dateRange?.[1],
   keyword: filters.keyword,
@@ -174,6 +176,7 @@ const handleSearch = () => {
 const handleReset = () => {
   filters.status = undefined
   filters.mealType = undefined
+  filters.orderSource = undefined
   filters.dateRange = []
   filters.keyword = ''
   page.value = 1
@@ -278,16 +281,15 @@ const handleExport = async () => {
 
 // 详情抽屉
 const drawerVisible = ref(false)
-// 未订餐用餐手续费设置弹窗
-const feeDialogVisible = ref(false)
 
-/** 打开手续费设置弹窗(超管未选门店时提示) */
-const openFeeDialog = () => {
+/** 未订餐就餐快捷筛选:点击切换,激活时仅显示 orderSource=1 的订单 */
+const toggleUnsolicitedFilter = () => {
   if (noStoreSelected.value) {
     ElMessage.warning('请先选择食堂')
     return
   }
-  feeDialogVisible.value = true
+  filters.orderSource = filters.orderSource === 1 ? undefined : 1
+  handleSearch()
 }
 const detailLoading = ref(false)
 const detail = ref<OrderDetail | null>(null)
@@ -450,7 +452,14 @@ watch(() => authStore.storeId, () => {
           aria-label="选择日期范围"
         />
         <template #actions>
-          <ElButton :icon="Coins" @click="openFeeDialog">手续费设置</ElButton>
+          <!-- 未订餐就餐快捷筛选:点击切换,激活时高亮仅显示未订餐用餐订单(手续费设置入口在菜单管理页) -->
+          <ElButton
+            :type="filters.orderSource === 1 ? 'warning' : 'default'"
+            :icon="Coins"
+            @click="toggleUnsolicitedFilter"
+          >
+            {{ filters.orderSource === 1 ? '已筛选未订餐就餐' : '未订餐就餐' }}
+          </ElButton>
           <ElButton :icon="Download" :loading="exporting" @click="handleExport">导出Excel</ElButton>
         </template>
       </SearchBar>
@@ -653,10 +662,6 @@ watch(() => authStore.storeId, () => {
           </template>
         </div>
       </ElDrawer>
-
-      <!-- 未订餐用餐手续费设置弹窗 -->
-      <UnsolicitedFeeDialog v-model="feeDialogVisible" />
-
     </PageContainer>
   </Layout>
 </template>

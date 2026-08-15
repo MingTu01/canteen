@@ -70,6 +70,7 @@ public class OrderController {
                                                              @RequestParam(required = false) Integer mealType,
                                                              @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                                              @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+                                                             @RequestParam(required = false) Integer orderSource,
                                                              @RequestParam(required = false) String keyword) {
         SecurityContext.checkStoreAccess(storeId);
         if (SecurityContext.isEmployee()) {
@@ -80,6 +81,10 @@ public class OrderController {
                 .orderByDesc(Order::getId);
         if (status != null) {
             wrapper.eq(Order::getStatus, status);
+        }
+        // 订单来源筛选:0=正常订餐 1=未订餐用餐(订单管理页快捷筛选)
+        if (orderSource != null) {
+            wrapper.eq(Order::getOrderSource, orderSource);
         }
         if (mealType != null) {
             wrapper.eq(Order::getMealType, mealType);
