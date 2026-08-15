@@ -24,7 +24,6 @@ import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
 import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
-import { cardInterval } from '@/store/terminalSettings'
 
 const router = useRouter()
 const clock = ref('')
@@ -156,8 +155,7 @@ const {
   (code) => {
     scan(code, true)  // fromCamera=true:摄像头扫码不接受纯卡号(防远程冒充)
   },
-  // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
-  { debounceMs: cardInterval.value * 1000 },
+  // 同码 30 秒冷却(内置默认):防摄像头流冻结/视野内常驻码反复触发错误提示
 )
 
 // ===== 设备在线检测(读卡器 + 摄像头) =====

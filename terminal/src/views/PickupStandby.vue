@@ -24,7 +24,6 @@ import OrderQueryModal from '@/components/OrderQueryModal.vue'
 import { useCardReader } from '@/composables/useCardReader'
 import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
 import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
-import { cardInterval } from '@/store/terminalSettings'
 
 const router = useRouter()
 const clock = ref('')
@@ -157,7 +156,9 @@ const handleInput = async (code: string, fromCamera = false) => {
       showErrorWithAutoClose('取餐失败', '卡号不存在')
     }
   } catch (e: any) {
-    showErrorWithAutoClose('取餐失败', '卡号不存在')
+    // 摄像头扫码异常(网络错误等)与未匹配区分文案,便于现场排查
+    showErrorWithAutoClose('取餐失败',
+      fromCamera ? '请扫描H5「我的」页生成的支付码' : '卡号不存在')
   } finally {
     scanning.value = false
   }
@@ -196,8 +197,7 @@ const {
     if (showOrderQuery.value) showOrderQuery.value = false
     handleInput(code, true)
   },
-  // 使用读卡器的防抖间隔(秒 → 毫秒),保持一致
-  { debounceMs: cardInterval.value * 1000 },
+  // 同码 30 秒冷却(内置默认):防摄像头流冻结/视野内常驻码反复触发错误弹窗
 )
 
 // ===== 设备在线检测(读卡器 + 摄像头) =====

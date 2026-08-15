@@ -36,10 +36,16 @@ export function isCameraSupported(): boolean {
 
 export function useCameraScanner(
   onScan: ScanCallback,
-  options: { debounceMs?: number } = {},
+  options: { sameCodeCooldownMs?: number } = {},
 ) {
-  /** 防抖间隔(毫秒),同一码在此间隔内不重复触发 */
-  const debounceMs = options.debounceMs ?? 2000
+  /**
+   * 同一码重复触发的冷却间隔(毫秒),不同码不受影响立即触发。
+   * 修复 BUG:摄像头长时间空闲后 USB 选择性暂停/驱动休眠,视频流冻结在
+   * 最后一帧,ZXing 反复解码出同一陈旧帧文本;或视野内有常驻二维码图案。
+   * 原防抖(2-3 秒)过期后同码再次触发 onScan → 弹「请扫描H5支付码」
+   * → 5 秒自动关闭 → 又触发,无限循环弹窗。同一码 30 秒内不再重复触发。
+   */
+  const sameCodeCooldownMs = options.sameCodeCooldownMs ?? 30000
 
   /** 是否正在扫码 */
   const isScanning = ref(false)
@@ -64,6 +70,14 @@ export function useCameraScanner(
   let deviceChangeHandler: (() => void) | null = null
   /** 热插拔重启防抖(避免短时间内多次 devicechange 触发重启) */
   let hotplugTimer: ReturnType<typeof setTimeout> | null = null
+  /** 流健康监测定时器(检测 track 死亡/帧冻结并自动重启) */
+  let healthTimer: ReturnType<typeof setInterval> | null = null
+  /** 上次健康检查时的 video.currentTime(停滞说明流冻结) */
+  let lastVideoTime = -1
+  /** currentTime 连续停滞的检查次数 */
+  let frozenChecks = 0
+  /** 健康检查间隔(毫秒) */
+  const HEALTH_CHECK_INTERVAL = 10000
 
   /** 枚举可用摄像头(需要先获得 getUserMedia 权限才能拿到 label) */
   const enumerateCameras = async (): Promise<MediaDeviceInfo[]> => {
@@ -145,9 +159,10 @@ export function useCameraScanner(
           if (!result) return
           const text = result.getText()
           if (!text) return
-          // 防抖:同一码在 debounceMs 内不重复触发
+          // 防抖:不同码立即触发;同一码受 30 秒冷却保护
+          // (防冻结帧/常驻码反复触发导致无限循环弹窗,见 sameCodeCooldownMs 注释)
           const now = Date.now()
-          if (text === lastCode && now - lastCodeTime < debounceMs) return
+          if (text === lastCode && now - lastCodeTime < sameCodeCooldownMs) return
           lastCode = text
           lastCodeTime = now
           onScan(text)
@@ -166,6 +181,13 @@ export function useCameraScanner(
         navigator.mediaDevices.addEventListener('devicechange', deviceChangeHandler)
       }
 
+      // 启动流健康监测(track 死亡/帧冻结自动重启)
+      if (!healthTimer) {
+        lastVideoTime = -1
+        frozenChecks = 0
+        healthTimer = setInterval(checkStreamHealth, HEALTH_CHECK_INTERVAL)
+      }
+
       return true
     } catch (e: any) {
       error.value = e?.message || '摄像头启动失败'
@@ -173,6 +195,56 @@ export function useCameraScanner(
       cameraAvailable.value = false
       return false
     }
+  }
+
+  /**
+   * 重启摄像头扫码(流异常时自动恢复)。
+   * 不重置 lastCode:重启后若视野内仍是同一常驻码,30 秒冷却继续生效,
+   * 避免重启瞬间又弹一次错误提示。
+   */
+  const restartCamera = async () => {
+    if (!activeVideoEl) return
+    if (reader) {
+      try {
+        reader.stopContinuousDecode()
+        reader.reset()
+      } catch {
+        /* 忽略 */
+      }
+    }
+    isScanning.value = false
+    cameraAvailable.value = false
+    frozenChecks = 0
+    lastVideoTime = -1
+    await start(activeVideoEl)
+  }
+
+  /**
+   * 流健康监测(修复摄像头长时间空闲后反复弹「请扫描H5支付码」的 BUG):
+   * - track.readyState === 'ended':流已死亡(USB 选择性暂停/驱动休眠)→ 重启
+   * - video.currentTime 连续 2 个周期无变化:帧冻结,ZXing 会反复解码
+   *   同一陈旧帧导致同码反复触发 → 重启后画面恢复实时
+   */
+  const checkStreamHealth = () => {
+    if (!isScanning.value || !activeVideoEl) return
+    const video = activeVideoEl
+    const stream = video.srcObject as MediaStream | null
+    const track = stream?.getVideoTracks?.()[0]
+    if (track && track.readyState === 'ended') {
+      restartCamera()
+      return
+    }
+    if (video.readyState >= 2 && video.currentTime === lastVideoTime) {
+      frozenChecks++
+      if (frozenChecks >= 2) {
+        frozenChecks = 0
+        restartCamera()
+        return
+      }
+    } else {
+      frozenChecks = 0
+    }
+    lastVideoTime = video.currentTime
   }
 
   /**
@@ -240,6 +312,13 @@ export function useCameraScanner(
       clearTimeout(hotplugTimer)
       hotplugTimer = null
     }
+    // 停止流健康监测
+    if (healthTimer) {
+      clearInterval(healthTimer)
+      healthTimer = null
+    }
+    frozenChecks = 0
+    lastVideoTime = -1
   }
 
   onUnmounted(() => {
