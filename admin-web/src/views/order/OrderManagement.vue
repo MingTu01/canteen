@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   ElButton,
   ElDatePicker,
@@ -67,10 +67,17 @@ interface DishRow {
 const flatRows = computed<DishRow[]>(() => {
   const result: DishRow[] = []
   for (const o of orders.value) {
-    const items = o.items && o.items.length > 0
-      ? o.items
-      : [{ dishName: '—', price: 0, quantity: 0 } as OrderItem]
-    items.forEach((item, idx) => {
+    // 展示行 = 菜品明细 + 手续费行(手续费>0 时作为一条「菜品」追加,不再单独成列)
+    const fee = Number(o.serviceFee ?? 0)
+    const rows: OrderItem[] = o.items && o.items.length > 0 ? [...o.items] : []
+    if (fee > 0) {
+      rows.push({ dishName: '手续费', price: fee, quantity: 1 } as OrderItem)
+    }
+    // 无菜品也无手续费:占位一行
+    if (rows.length === 0) {
+      rows.push({ dishName: '—', price: 0, quantity: 0 } as OrderItem)
+    }
+    rows.forEach((item, idx) => {
       result.push({
         key: `${o.id ?? 0}-${idx}`,
         orderId: o.id,
@@ -200,13 +207,21 @@ const handleExport = async () => {
       return
     }
     // 按菜品拆行导出(同订单号菜品拆出来)
-    // 手续费/订单总额仅在订单首行非空
-    const exportData: Record<string, string | number>[] = []
+    // 手续费>0 时作为一条「菜品」行导出(菜名=手续费,数量=1),不再单独成列;
+    // 价格/数值列一律写数值类型单元格(空缺用 undefined 跳过,不写空串),
+    // 保证 Excel 内 SUM/公式可直接计算
+    const exportData: Record<string, string | number | undefined>[] = []
     let seq = 0
     for (const o of rows) {
-      const items = o.items && o.items.length > 0
-        ? o.items
-        : [{ dishName: '', price: 0, quantity: 0 } as OrderItem]
+      const fee = Number(o.serviceFee ?? 0)
+      const items: OrderItem[] = o.items && o.items.length > 0 ? [...o.items] : []
+      if (fee > 0) {
+        items.push({ dishName: '手续费', price: fee, quantity: 1 } as OrderItem)
+      }
+      // 无菜品也无手续费:仅导出一行订单级信息(菜名留空)
+      if (items.length === 0) {
+        items.push({ dishName: '', price: 0, quantity: 0 } as OrderItem)
+      }
       items.forEach((item, idx) => {
         seq++
         exportData.push({
@@ -218,11 +233,11 @@ const handleExport = async () => {
           '会员号': o.cardNo ?? '',
           '餐次': mealLabel(o.mealType),
           '菜名': item.dishName ?? '',
-          '单价': item.price ?? 0,
-          '数量': item.quantity ?? 0,
-          '合计价格': ((item.price ?? 0) * (item.quantity ?? 0)).toFixed(2),
-          '手续费': (o.items?.length ?? 0) > 0 && idx === 0 ? (o.serviceFee ?? 0) : '',
-          '订单总额': idx === 0 ? (o.totalAmount ?? 0) : '',
+          '单价': Number(item.price ?? 0),
+          '数量': Number(item.quantity ?? 0),
+          '合计价格': Number(((item.price ?? 0) * (item.quantity ?? 0)).toFixed(2)),
+          // 订单级字段仅首行填,其余行跳过(保持数值列纯净可计算)
+          '订单总额': idx === 0 ? Number(o.totalAmount ?? 0) : undefined,
           '结帐时间': o.status === 2 && o.updatedAt ? o.updatedAt.replace('T', ' ').substring(0, 19) : '',
           '订单状态': statusLabel(o.status),
           '订单来源': sourceLabel(o.orderSource),
@@ -230,10 +245,23 @@ const handleExport = async () => {
       })
     }
     const ws = XLSX.utils.json_to_sheet(exportData)
+    // 金额列统一两位小数显示格式(单元格仍为数值,公式可计算)
+    const MONEY_COLS = new Set(['单价', '合计价格', '订单总额'])
+    const header = Object.keys(exportData[0] ?? {})
+    const moneyColIdx = header
+      .map((h, i) => (MONEY_COLS.has(h) ? i : -1))
+      .filter((i) => i >= 0)
+    moneyColIdx.forEach((col) => {
+      for (let r = 0; r < exportData.length; r++) {
+        const addr = XLSX.utils.encode_cell({ r, c: col })
+        const cell = ws[addr]
+        if (cell && cell.t === 'n') cell.z = '0.00'
+      }
+    })
     // 列宽
     ws['!cols'] = [
       { wch: 6 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
-      { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 },
+      { wch: 8 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 12 },
       { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 12 },
     ]
     const wb = XLSX.utils.book_new()
@@ -325,6 +353,60 @@ const handleCancel = async (row: OrderRow) => {
 
 onMounted(fetchOrders)
 
+// ===== 表格上方横向滚动条(与表格底部滚动条双向同步) =====
+// 列较多时表格自带滚动条在最底部,拖动需先滚到底部,不便操作;
+// 在表格上方放一条独立滚动条,拖任一条另一条同步移动。
+// ElTable 是泛型函数组件,InstanceType 不适用;仅需要 $el 拿 DOM
+const tableRef = ref<{ $el: HTMLElement }>()
+const topScrollbarRef = ref<HTMLElement>()
+const tableScrollWidth = ref(0)
+const showTopScrollbar = ref(false)
+
+/** 获取表格内部横向滚动容器(EP 2.x 为 .el-scrollbar__wrap) */
+const getTableWrap = (): HTMLElement | null => {
+  const el = tableRef.value?.$el as HTMLElement | undefined
+  if (!el) return null
+  return (
+    el.querySelector('.el-scrollbar__wrap') ||
+    el.querySelector('.el-table__body-wrapper')
+  )
+}
+
+/** 上方滚动条拖动 → 同步表格 */
+const syncFromTop = () => {
+  const wrap = getTableWrap()
+  if (wrap && topScrollbarRef.value) wrap.scrollLeft = topScrollbarRef.value.scrollLeft
+}
+
+/** 表格底部滚动条拖动 → 同步上方 */
+const syncFromTable = () => {
+  const wrap = getTableWrap()
+  if (wrap && topScrollbarRef.value) topScrollbarRef.value.scrollLeft = wrap.scrollLeft
+}
+
+/** 测量表格内容宽度:超出才显示上方滚动条,并挂载底部滚动监听(仅一次) */
+const setupTopScrollbar = async () => {
+  await nextTick()
+  const wrap = getTableWrap()
+  const top = topScrollbarRef.value
+  if (!wrap || !top) return
+  tableScrollWidth.value = wrap.scrollWidth
+  showTopScrollbar.value = wrap.scrollWidth > wrap.clientWidth
+  if (!wrap.dataset.topbarSync) {
+    wrap.addEventListener('scroll', syncFromTable)
+    wrap.dataset.topbarSync = '1'
+  }
+}
+
+watch(orders, () => { setupTopScrollbar() }, { flush: 'post' })
+const onWinResize = () => { setupTopScrollbar() }
+window.addEventListener('resize', onWinResize)
+onUnmounted(() => {
+  window.removeEventListener('resize', onWinResize)
+  const wrap = getTableWrap()
+  if (wrap) wrap.removeEventListener('scroll', syncFromTable)
+})
+
 // 超管切换食堂后自动刷新订单列表
 watch(() => authStore.storeId, () => {
   page.value = 1
@@ -374,7 +456,17 @@ watch(() => authStore.storeId, () => {
       </SearchBar>
 
       <div class="card overflow-hidden">
+        <!-- 表格上方横向滚动条:与表格底部滚动条双向同步,列多时免拖到底部 -->
+        <div
+          v-show="showTopScrollbar"
+          ref="topScrollbarRef"
+          class="table-top-scrollbar"
+          @scroll="syncFromTop"
+        >
+          <div :style="{ width: `${tableScrollWidth}px`, height: '1px' }" />
+        </div>
         <ElTable
+          ref="tableRef"
           v-loading="loading"
           :data="flatRows"
           style="width: 100%"
@@ -408,11 +500,6 @@ watch(() => authStore.storeId, () => {
           <ElTableColumn label="合计价格" width="110" align="right">
             <template #default="{ row }">
               <span class="font-medium tabular-nums text-text">¥{{ (Number(row.price) * Number(row.quantity)).toFixed(2) }}</span>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="手续费" width="90" align="right">
-            <template #default="{ row }">
-              <span v-if="row.isFirstRow" class="tabular-nums text-text">¥{{ row.serviceFee ?? 0 }}</span>
             </template>
           </ElTableColumn>
           <ElTableColumn label="订单总额" width="100" align="right">
@@ -586,5 +673,26 @@ watch(() => authStore.storeId, () => {
 /* 操作按钮不换行 */
 :deep(.el-table .cell .el-button + .el-button) {
   margin-left: 6px;
+}
+
+/* 表格上方横向滚动条(与表格底部滚动条双向同步) */
+.table-top-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.table-top-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+.table-top-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--el-border-color-darker);
+  border-radius: 4px;
+}
+.table-top-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--el-text-color-secondary);
+}
+.table-top-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }
 </style>

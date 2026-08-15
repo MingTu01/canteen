@@ -79,12 +79,24 @@ export function useCardReader(
     }
 
     if (e.key.length === 1) {
-      // 仅累计数字字符:卡号均为数字,误敲字母/符号会拼出无效卡号触发无效查询
-      if (!/^[0-9]$/.test(e.key)) return
+      // 累计字母数字字符:
+      // - 数字卡号(读卡器/扫码枪扫条码卡)
+      // - 32 位 hex 一次性支付码(HID 扫码枪扫 H5 二维码,含 a-f 字母)
+      // 修复 BUG:原先仅累计数字,扫码枪扫支付码时 a-f 字母被丢弃,
+      // 拼出残缺数字串导致验证失败,市面大多数 HID 扫码设备无法使用。
+      if (!/^[0-9a-zA-Z]$/.test(e.key)) return
       cardBuffer += e.key
       if (cardBufferTimer) clearTimeout(cardBufferTimer)
       cardBufferTimer = setTimeout(() => {
-        cardBuffer = ''
+        // 超时自动提交:兼容未配置「回车后缀」的扫码枪(≥8 位才提交:
+        // 卡号 ≥8 位、支付码 32 位;80ms 内人工敲 8 位不可能,无误触风险)
+        if (cardBuffer.length >= 8) {
+          const code = cardBuffer
+          cardBuffer = ''
+          handler(code)
+        } else {
+          cardBuffer = ''
+        }
         cardBufferTimer = null
       }, CARD_INPUT_TIMEOUT)
     }

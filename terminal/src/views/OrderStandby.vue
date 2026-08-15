@@ -85,9 +85,11 @@ const scan = async (input: string, fromCamera = false) => {
 
     // 2. 一次性支付码:32 位 hex(小写)→ /terminal/verify-paycode
     //    扫码枪和摄像头都接受,核销即失效,防截图重放
-    if (/^[0-9a-f]{32}$/.test(trimmed)) {
+    //    大小写归一化:部分 HID 扫码枪出厂输出大写,后端按小写 key 核销
+    const payCode = trimmed.toLowerCase()
+    if (/^[0-9a-f]{32}$/.test(payCode)) {
       try {
-        const resp = await api.post('/terminal/verify-paycode', { code: trimmed })
+        const resp = await api.post('/terminal/verify-paycode', { code: payCode })
         if (resp.data.code === 200 && resp.data.data) {
           resetOrderFlow()
           orderStore.employee = resp.data.data
