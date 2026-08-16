@@ -91,7 +91,7 @@ public class MenuController {
      * POST /api/menu/batch-publish?storeId=1
      * 无需选择日期,直接发布该门店所有未发布的菜单。
      */
-    @OperationLog(value = "批量发布菜单", detail = "'门店ID ' + #storeId")
+    @OperationLog(value = "批量发布菜单", detail = "'门店 ' + #resolver.storeName(#storeId)")
     @PostMapping("/batch-publish")
     public ApiResponse<Map<String, Object>> batchPublishMenu(@RequestParam Long storeId) {
         if (SecurityContext.isEmployee()) {
@@ -117,7 +117,7 @@ public class MenuController {
         return ApiResponse.success(Map.of("copied", copied));
     }
 
-    @OperationLog(value = "删除菜单", detail = "'菜单ID ' + #id")
+    @OperationLog(value = "删除菜单", detail = "#resolver.menuBrief(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteMenu(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

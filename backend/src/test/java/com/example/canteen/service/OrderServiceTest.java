@@ -10,6 +10,7 @@ import com.example.canteen.entity.Order;
 import com.example.canteen.entity.OrderItem;
 import com.example.canteen.entity.OrderStatus;
 import com.example.canteen.exception.BusinessException;
+import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.DishMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.OrderItemMapper;
@@ -41,6 +42,7 @@ class OrderServiceTest {
     private OrderItemMapper orderItemMapper;
     private DishMapper dishMapper;
     private EmployeeMapper employeeMapper;
+    private DepartmentMapper departmentMapper;
     private JdbcTemplate jdbcTemplate;
     private WechatNotifyService wechatNotifyService;
     private DiningTimeSlotService diningTimeSlotService;
@@ -56,6 +58,7 @@ class OrderServiceTest {
         orderItemMapper = mock(OrderItemMapper.class);
         dishMapper = mock(DishMapper.class);
         employeeMapper = mock(EmployeeMapper.class);
+        departmentMapper = mock(DepartmentMapper.class);
         jdbcTemplate = mock(JdbcTemplate.class);
         wechatNotifyService = mock(WechatNotifyService.class);
         diningTimeSlotService = mock(DiningTimeSlotService.class);
@@ -63,7 +66,7 @@ class OrderServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(String.class), anyString()))
                 .thenReturn("15:00");
         orderService = new OrderService(orderMapper, orderItemMapper, dishMapper, employeeMapper,
-                jdbcTemplate, wechatNotifyService, diningTimeSlotService);
+                departmentMapper, jdbcTemplate, wechatNotifyService, diningTimeSlotService);
 
         testEmployee = new Employee();
         testEmployee.setId(1L);

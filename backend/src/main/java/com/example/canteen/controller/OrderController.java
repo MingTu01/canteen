@@ -218,7 +218,7 @@ public class OrderController {
         return ApiResponse.success(orderService.getOrderDetail(id));
     }
 
-    @OperationLog(value = "完成订单", detail = "'订单ID ' + #id")
+    @OperationLog(value = "完成订单", detail = "#resolver.orderBrief(#id)")
     @PutMapping("/{id}/complete")
     public ApiResponse<Void> completeOrder(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {
@@ -235,7 +235,7 @@ public class OrderController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog(value = "取消订单", detail = "'订单ID ' + #id")
+    @OperationLog(value = "取消订单", detail = "#resolver.orderBrief(#id)")
     @PutMapping("/{id}/cancel")
     public ApiResponse<Void> cancelOrder(@PathVariable Long id) {
         Order order = orderService.getOrderById(id);

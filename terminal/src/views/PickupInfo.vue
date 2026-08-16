@@ -101,15 +101,60 @@ const resetCountdown = () => {
   paused.value = false
 }
 
-/** 取餐完成:调用 complete 接口,成功后直接返回待机主页 */
+/** 回查当前订单最新状态(2=已完成);网络异常返回 null */
+const fetchOrderStatus = async (orderId: number): Promise<number | null> => {
+  if (!employee.value) return null
+  try {
+    const resp = await api.get(`/order/employee/${employee.value.id}`, { timeout: 8000 })
+    const list: any[] = resp.data?.code === 200 ? (resp.data.data ?? []) : []
+    const hit = list.find((o) => Number(o.id) === orderId)
+    return hit ? Number(hit.status) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 取餐完成:调用 complete 接口,成功后直接返回待机主页。
+ * 网络健壮性(V1.0.32):
+ * - 自动重试:共 3 次尝试(首试 + 重试 2 次),仅对网络类错误(无响应/超时/5xx)重试,
+ *   4xx 业务拒绝不重试直接跳出。后端 WHERE status=1 原子更新天然幂等,重复提交安全。
+ * - 失败兜底回查:网络瞬断可能出现"请求已达服务端、DB 已更新、响应丢失",
+ *   此时订单实际已完成。全部尝试失败后回查订单真实状态,status=2 视为成功,
+ *   彻底避免"误报失败"造成重复发餐/操作员困惑。
+ *   反向不一致(终端显示成功但后台未取餐)在架构上不可能:终端仅凭 2xx 判成功,
+ *   而服务端事务提交后才返回 2xx。
+ */
 const completePickup = async () => {
   if (completing.value || !order.value) return
   completing.value = true
+  const orderId = Number(order.value.id)
   try {
-    await api.put(`/order/${order.value.id}/complete`)
-    goBack()
-  } catch (e: any) {
-    errorMsg.value = e?.response?.data?.message ?? '取餐完成失败,请重试'
+    let lastErr: any = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await api.put(`/order/${orderId}/complete`, undefined, { timeout: 8000 })
+        goBack()
+        return
+      } catch (e: any) {
+        lastErr = e
+        // 4xx = 服务端已收到并明确拒绝(如订单状态已变更/时段不符),重试无意义
+        if (e?.response && e.response.status >= 400 && e.response.status < 500) break
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
+      }
+    }
+    const status = await fetchOrderStatus(orderId)
+    if (status === 2) {
+      // 订单实际已完成(响应丢失场景),按成功处理
+      goBack()
+      return
+    }
+    // 4xx 业务拒绝(如未到用餐时间)展示服务端原文;纯网络错误则说明订单状态未受影响
+    const bizMsg = lastErr?.response?.data?.message
+    errorMsg.value =
+      status === 1 && !bizMsg
+        ? '取餐完成失败(网络异常),订单状态未变更,请重试'
+        : (bizMsg ?? '取餐完成失败,请重试')
     showError.value = true
   } finally {
     completing.value = false

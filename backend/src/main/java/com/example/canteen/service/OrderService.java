@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.example.canteen.dto.OrderCreateDTO;
 import com.example.canteen.dto.OrderItemDTO;
+import com.example.canteen.entity.Department;
 import com.example.canteen.entity.DiningTimeSlot;
 import com.example.canteen.entity.Dish;
 import com.example.canteen.entity.Employee;
@@ -13,6 +14,7 @@ import com.example.canteen.entity.OrderItem;
 import com.example.canteen.entity.OrderSource;
 import com.example.canteen.entity.OrderStatus;
 import com.example.canteen.exception.BusinessException;
+import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.DishMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.OrderItemMapper;
@@ -44,12 +46,14 @@ public class OrderService {
     private final OrderItemMapper orderItemMapper;
     private final DishMapper dishMapper;
     private final EmployeeMapper employeeMapper;
+    private final DepartmentMapper departmentMapper;
     private final JdbcTemplate jdbcTemplate;
     private final WechatNotifyService wechatNotifyService;
     private final DiningTimeSlotService diningTimeSlotService;
 
     public OrderService(OrderMapper orderMapper, OrderItemMapper orderItemMapper,
                         DishMapper dishMapper, EmployeeMapper employeeMapper,
+                        DepartmentMapper departmentMapper,
                         JdbcTemplate jdbcTemplate,
                         WechatNotifyService wechatNotifyService,
                         DiningTimeSlotService diningTimeSlotService) {
@@ -57,6 +61,7 @@ public class OrderService {
         this.orderItemMapper = orderItemMapper;
         this.dishMapper = dishMapper;
         this.employeeMapper = employeeMapper;
+        this.departmentMapper = departmentMapper;
         this.jdbcTemplate = jdbcTemplate;
         this.wechatNotifyService = wechatNotifyService;
         this.diningTimeSlotService = diningTimeSlotService;
@@ -403,10 +408,17 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
         // B12 订单归属校验
         SecurityContext.checkStoreAccess(order.getStoreId());
-        // 填充员工姓名供前端详情展示
+        // 填充员工姓名/卡号/部门供前端详情展示(与列表接口保持一致,否则详情弹窗显示 —)
         Employee emp = employeeMapper.selectById(order.getEmployeeId());
         if (emp != null) {
             order.setEmployeeName(emp.getName());
+            order.setCardNo(emp.getCardNo());
+            if (emp.getDepartmentId() != null) {
+                Department dept = departmentMapper.selectById(emp.getDepartmentId());
+                if (dept != null) {
+                    order.setDepartmentName(dept.getName());
+                }
+            }
         }
         List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
 

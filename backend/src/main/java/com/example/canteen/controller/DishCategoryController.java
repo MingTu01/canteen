@@ -32,7 +32,7 @@ public class DishCategoryController {
         return ApiResponse.success(dishCategoryService.createCategory(category));
     }
 
-    @OperationLog(value = "更新菜品分类", detail = "'分类ID ' + #id + ' 名称 ' + #category.name")
+    @OperationLog(value = "更新菜品分类", detail = "'名称 ' + #category.name")
     @PutMapping("/{id}")
     public ApiResponse<DishCategory> updateCategory(@PathVariable Long id, @RequestBody DishCategory category) {
         if (SecurityContext.isEmployee()) {
@@ -42,7 +42,7 @@ public class DishCategoryController {
         return ApiResponse.success(dishCategoryService.updateCategory(category));
     }
 
-    @OperationLog(value = "删除菜品分类", detail = "'分类ID ' + #id")
+    @OperationLog(value = "删除菜品分类", detail = "'名称 ' + #resolver.dishCategoryName(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteCategory(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

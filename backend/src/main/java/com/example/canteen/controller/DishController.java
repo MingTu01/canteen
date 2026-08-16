@@ -136,7 +136,7 @@ public class DishController {
         return ApiResponse.success(dishService.createDish(dish));
     }
 
-    @OperationLog(value = "更新菜品", detail = "'菜品ID ' + #id + ' 名称 ' + #dish.name")
+    @OperationLog(value = "更新菜品", detail = "'名称 ' + #dish.name")
     @PutMapping("/{id}")
     public ApiResponse<Dish> updateDish(@PathVariable Long id, @RequestBody Dish dish) {
         if (!SecurityContext.canManageDish()) {
@@ -147,7 +147,7 @@ public class DishController {
         return ApiResponse.success(dishService.updateDish(dish));
     }
 
-    @OperationLog(value = "删除菜品", detail = "'菜品ID ' + #id")
+    @OperationLog(value = "删除菜品", detail = "'名称 ' + #resolver.dishName(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
@@ -162,7 +162,7 @@ public class DishController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog(value = "菜品上下架", detail = "'菜品ID ' + #id")
+    @OperationLog(value = "菜品上下架", detail = "'名称 ' + #resolver.dishName(#id)")
     @PutMapping("/{id}/toggle-status")
     public ApiResponse<Void> toggleStatus(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
@@ -234,7 +234,7 @@ public class DishController {
         return ApiResponse.success(result);
     }
 
-    @OperationLog(value = "恢复菜品", detail = "'菜品ID ' + #id")
+    @OperationLog(value = "恢复菜品", detail = "'名称 ' + #resolver.dishName(#id)")
     @PutMapping("/{id}/restore")
     public ApiResponse<Void> restoreDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {
@@ -244,7 +244,7 @@ public class DishController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog(value = "彻底删除菜品", detail = "'菜品ID ' + #id")
+    @OperationLog(value = "彻底删除菜品", detail = "'名称 ' + #resolver.dishName(#id)")
     @DeleteMapping("/{id}/purge")
     public ApiResponse<Void> purgeDish(@PathVariable Long id) {
         if (!SecurityContext.canManageDish()) {

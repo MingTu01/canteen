@@ -24,7 +24,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.getTimeSlotsByStore(storeId));
     }
 
-    @OperationLog(value = "创建就餐时段", detail = "'门店 ' + #resolver.storeName(#timeSlot.storeId) + ' 名称 ' + #timeSlot.name")
+    @OperationLog(value = "创建就餐时段", detail = "'门店 ' + #resolver.storeName(#timeSlot.storeId) + ' ' + #resolver.mealType(#timeSlot.mealType) + ' ' + #timeSlot.startTime + '-' + #timeSlot.endTime")
     @PostMapping
     public ApiResponse<DiningTimeSlot> createTimeSlot(@RequestBody DiningTimeSlot timeSlot) {
         if (SecurityContext.isEmployee()) {
@@ -34,7 +34,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.createTimeSlot(timeSlot));
     }
 
-    @OperationLog(value = "更新就餐时段", detail = "'时段ID ' + #id + ' 名称 ' + #timeSlot.name")
+    @OperationLog(value = "更新就餐时段", detail = "'门店 ' + #resolver.storeName(#timeSlot.storeId) + ' ' + #resolver.mealType(#timeSlot.mealType) + ' ' + #timeSlot.startTime + '-' + #timeSlot.endTime")
     @PutMapping("/{id}")
     public ApiResponse<DiningTimeSlot> updateTimeSlot(@PathVariable Long id, @RequestBody DiningTimeSlot timeSlot) {
         if (SecurityContext.isEmployee()) {
@@ -44,7 +44,7 @@ public class DiningTimeSlotController {
         return ApiResponse.success(timeSlotService.updateTimeSlot(timeSlot));
     }
 
-    @OperationLog(value = "删除就餐时段", detail = "'时段ID ' + #id")
+    @OperationLog(value = "删除就餐时段", detail = "'名称 ' + #resolver.timeSlotName(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteTimeSlot(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

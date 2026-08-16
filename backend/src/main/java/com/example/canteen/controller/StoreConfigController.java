@@ -74,7 +74,7 @@ public class StoreConfigController {
      * PUT /api/store-config/order?storeId=1
      * body:[{key,value},...]
      */
-    @OperationLog(value = "更新门店订餐配置", detail = "'门店ID ' + #storeId + ' 配置项数 ' + #body.size()")
+    @OperationLog(value = "更新门店订餐配置", detail = "'门店 ' + #resolver.storeName(#storeId) + ' 配置项数 ' + #body.size()")
     @PutMapping("/order")
     public ApiResponse<Void> updateOrderConfig(@RequestParam Long storeId,
                                                @RequestBody List<Map<String, Object>> body) {

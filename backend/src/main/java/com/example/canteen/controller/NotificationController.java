@@ -18,10 +18,27 @@ public class NotificationController {
         this.notificationService = notificationService;
     }
 
+    /**
+     * 管理端查询:返回门店全部通知(含待发布/已下架),供通知管理页使用。
+     * 收紧为管理级:员工若可访问该接口,将看到已下架通知(B12 越权泄露)。
+     */
     @GetMapping("/store/{storeId}")
     public ApiResponse<List<Notification>> getNotificationsByStore(@PathVariable Long storeId) {
+        if (!SecurityContext.hasAdminLevel()) {
+            throw new com.example.canteen.exception.SecurityException("无权访问通知管理");
+        }
         SecurityContext.checkStoreAccess(storeId);
         return ApiResponse.success(notificationService.getNotificationsByStore(storeId));
+    }
+
+    /**
+     * 员工端(H5)查询:仅返回上架中且在上下架时间窗口内的通知。
+     * 修复:此前 H5 复用管理端 /store/{storeId} 接口,下架通知仍在 H5 首页展示。
+     */
+    @GetMapping("/store/{storeId}/visible")
+    public ApiResponse<List<Notification>> getVisibleNotifications(@PathVariable Long storeId) {
+        SecurityContext.checkStoreAccess(storeId);
+        return ApiResponse.success(notificationService.getVisibleNotifications(storeId));
     }
 
     @OperationLog(value = "创建通知", detail = "'标题 ' + #notification.title")
@@ -34,7 +51,7 @@ public class NotificationController {
         return ApiResponse.success(notificationService.createNotification(notification));
     }
 
-    @OperationLog(value = "更新通知", detail = "'通知ID ' + #id + ' 标题 ' + #notification.title")
+    @OperationLog(value = "更新通知", detail = "'标题 ' + #notification.title")
     @PutMapping("/{id}")
     public ApiResponse<Notification> updateNotification(@PathVariable Long id, @RequestBody Notification notification) {
         if (!SecurityContext.hasAdminLevel()) {
@@ -48,7 +65,7 @@ public class NotificationController {
      * 上架/下架通知(仅修改 status 字段)
      * PUT /api/notification/{id}/status
      */
-    @OperationLog(value = "通知上下架", detail = "'通知ID ' + #id + ' 状态 ' + (#status == 1 ? '上架' : '下架')")
+    @OperationLog(value = "通知上下架", detail = "'标题 ' + #resolver.notificationTitle(#id) + ' 状态 ' + (#status == 1 ? '上架' : '下架')")
     @PutMapping("/{id}/status")
     public ApiResponse<Notification> toggleStatus(@PathVariable Long id, @RequestParam Integer status) {
         // 与创建/更新/删除对齐为管理级权限:员工若可上下架通知,
@@ -68,7 +85,7 @@ public class NotificationController {
         return ApiResponse.success(notificationService.updateNotification(notification));
     }
 
-    @OperationLog(value = "删除通知", detail = "'通知ID ' + #id")
+    @OperationLog(value = "删除通知", detail = "'标题 ' + #resolver.notificationTitle(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteNotification(@PathVariable Long id) {
         if (!SecurityContext.hasAdminLevel()) {

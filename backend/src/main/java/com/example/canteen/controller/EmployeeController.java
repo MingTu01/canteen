@@ -147,7 +147,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employeeService.createEmployee(employee)));
     }
 
-    @OperationLog(value = "更新员工", detail = "'员工ID ' + #id + ' 姓名 ' + #employee.name")
+    @OperationLog(value = "更新员工", detail = "'姓名 ' + #employee.name")
     @PutMapping("/{id}")
     public ApiResponse<EmployeeVO> updateEmployee(@PathVariable Long id, @RequestBody Employee employee) {
         // 与前端路由对齐(员工管理 [1,2,6])
@@ -159,7 +159,7 @@ public class EmployeeController {
         return ApiResponse.success(EmployeeVO.from(employeeService.updateEmployee(employee)));
     }
 
-    @OperationLog(value = "删除员工", detail = "'员工ID ' + #id")
+    @OperationLog(value = "删除员工", detail = "'姓名 ' + #resolver.employeeName(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteEmployee(@PathVariable Long id) {
         // 删除类操作剔除店长(6)(其角色定位为「全店管理但不可删数据」)与厨师/财务
@@ -185,7 +185,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "employees": [ {cardNo,name,departmentName,balance,password,status}, ... ] }
      * 返回:{ "success": N, "failed": M, "errors": [{row,cardNo,name,reason}] }
      */
-    @OperationLog(value = "批量导入员工", detail = "'门店ID ' + #body['storeId'] + ' 行数 ' + #body['employees'].size()")
+    @OperationLog(value = "批量导入员工", detail = "'门店 ' + #resolver.storeName(#body['storeId']) + ' 行数 ' + #body['employees'].size()")
     @PostMapping("/batch")
     public ApiResponse<Map<String, Object>> batchImport(@RequestBody Map<String, Object> body) {
         // 与前端路由对齐(员工管理 [1,2,6])
@@ -239,7 +239,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "amount": 100.00 } (门店管理员可不传 storeId,自动取当前门店)
      * 返回:{ "successCount": N, "totalAmount": M }
      */
-    @OperationLog(value = "批量充值", detail = "'门店ID ' + #body['storeId'] + ' 金额 ' + #body['amount']")
+    @OperationLog(value = "批量充值", detail = "'门店 ' + #resolver.storeName(#body['storeId']) + ' 金额 ' + #body['amount']")
     @PostMapping("/batch-recharge")
     public ApiResponse<Map<String, Object>> batchRecharge(@RequestBody Map<String, Object> body) {
         // 充值属资金操作:对齐前端充值页 [1,2,4,6],厨师(5)无权充值
@@ -267,7 +267,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "employeeIds": [1,2,3] } (门店管理员可不传 storeId,自动取当前门店)
      * 返回:{ "successCount": N }
      */
-    @OperationLog(value = "批量重置员工密码", detail = "'门店ID ' + #body['storeId'] + ' 人数 ' + #body['employeeIds']")
+    @OperationLog(value = "批量重置员工密码", detail = "'门店 ' + #resolver.storeName(#body['storeId']) + ' 人数 ' + #body['employeeIds']")
     @PostMapping("/reset-passwords")
     @SuppressWarnings("unchecked")
     public ApiResponse<Map<String, Object>> resetPasswords(@RequestBody Map<String, Object> body) {
@@ -323,7 +323,7 @@ public class EmployeeController {
      * 请求体:{ "storeId": 1, "threshold": 20, "amount": 100.00 }
      * 返回:{ "successCount": N, "totalAmount": M }
      */
-    @OperationLog(value = "余额充值", detail = "'门店ID ' + #body['storeId'] + ' 阈值 ' + #body['threshold'] + ' 金额 ' + #body['amount']")
+    @OperationLog(value = "余额充值", detail = "'门店 ' + #resolver.storeName(#body['storeId']) + ' 阈值 ' + #body['threshold'] + ' 金额 ' + #body['amount']")
     @PostMapping("/low-balance/recharge")
     public ApiResponse<Map<String, Object>> rechargeLowBalance(@RequestBody Map<String, Object> body) {
         if (!SecurityContext.canViewFinance()) {
@@ -436,7 +436,7 @@ public class EmployeeController {
      * @param storeId    门店 ID(超管需显式传;门店管理员可不传,自动取当前门店)
      * @param file       图片文件(前端已 canvas 压缩)
      */
-    @OperationLog(value = "上传员工头像", detail = "'标识符 ' + #identifier + ' 门店ID ' + #storeId")
+    @OperationLog(value = "上传员工头像", detail = "'标识符 ' + #identifier + ' 门店 ' + #resolver.storeName(#storeId)")
     @PostMapping("/{identifier}/avatar")
     public ApiResponse<Map<String, Object>> uploadAvatar(@PathVariable String identifier,
                                                          @RequestParam(required = false) Long storeId,

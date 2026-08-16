@@ -59,7 +59,7 @@ public class AdminController {
         return ApiResponse.success(adminService.createAdmin(admin));
     }
 
-    @OperationLog(value = "更新管理员", detail = "'管理员ID ' + #id + ' 账号 ' + #admin.username")
+    @OperationLog(value = "更新管理员", detail = "#resolver.adminBrief(#id)")
     @PutMapping("/{id}")
     public ApiResponse<AdminVO> updateAdmin(@PathVariable Long id, @RequestBody Admin admin) {
         // 门店管理员可改本店非超管账号,超管可改任意账号(Service 层做具体校验)
@@ -67,7 +67,7 @@ public class AdminController {
         return ApiResponse.success(adminService.updateAdmin(id, admin));
     }
 
-    @OperationLog(value = "修改密码", detail = "'管理员ID ' + #id")
+    @OperationLog(value = "修改密码", detail = "#resolver.adminBrief(#id)")
     @PutMapping("/{id}/password")
     public ApiResponse<Void> changePassword(@PathVariable Long id, @RequestBody Map<String, String> body) {
         // 本人可改自己密码,或超管可改任意密码
@@ -96,7 +96,7 @@ public class AdminController {
         return ApiResponse.success(null);
     }
 
-    @OperationLog(value = "删除管理员", detail = "'管理员ID ' + #id")
+    @OperationLog(value = "删除管理员", detail = "#resolver.adminBrief(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteAdmin(@PathVariable Long id) {
         SecurityContext.checkSuperAdmin("仅超级管理员可删除管理员账号");

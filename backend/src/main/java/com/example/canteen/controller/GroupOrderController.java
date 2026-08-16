@@ -97,7 +97,7 @@ public class GroupOrderController {
     }
 
     /** 创建(含 items) */
-    @OperationLog(value = "创建团餐订单", detail = "'门店ID ' + #dto.groupOrder.storeId + ' 日期 ' + #dto.groupOrder.date")
+    @OperationLog(value = "创建团餐订单", detail = "'门店 ' + #resolver.storeName(#dto.groupOrder.storeId) + ' 日期 ' + #dto.groupOrder.date")
     @PostMapping
     public ApiResponse<GroupOrder> create(@RequestBody GroupOrderCreateDTO dto) {
         if (SecurityContext.isEmployee()) {
@@ -119,7 +119,7 @@ public class GroupOrderController {
     }
 
     /** 取消 */
-    @OperationLog(value = "取消团餐订单", detail = "'团餐ID ' + #id")
+    @OperationLog(value = "取消团餐订单", detail = "#resolver.groupOrderBrief(#id)")
     @PutMapping("/{id}/cancel")
     public ApiResponse<GroupOrder> cancel(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {
@@ -129,7 +129,7 @@ public class GroupOrderController {
     }
 
     /** 完成 */
-    @OperationLog(value = "完成团餐订单", detail = "'团餐ID ' + #id")
+    @OperationLog(value = "完成团餐订单", detail = "#resolver.groupOrderBrief(#id)")
     @PutMapping("/{id}/complete")
     public ApiResponse<GroupOrder> complete(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {
@@ -139,7 +139,7 @@ public class GroupOrderController {
     }
 
     /** 删除 */
-    @OperationLog(value = "删除团餐订单", detail = "'团餐ID ' + #id")
+    @OperationLog(value = "删除团餐订单", detail = "#resolver.groupOrderBrief(#id)")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         if (SecurityContext.isEmployee()) {

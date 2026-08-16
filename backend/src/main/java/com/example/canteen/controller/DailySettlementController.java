@@ -50,7 +50,7 @@ public class DailySettlementController {
     }
 
     /** 生成/刷新对账数据 */
-    @OperationLog(value = "生成对账数据", detail = "'门店ID ' + #storeId + ' 日期 ' + #date")
+    @OperationLog(value = "生成对账数据", detail = "'门店 ' + #resolver.storeName(#storeId) + ' 日期 ' + #date")
     @PostMapping("/generate")
     public ApiResponse<DailySettlement> generate(
             @RequestParam Long storeId,
@@ -75,7 +75,7 @@ public class DailySettlementController {
     }
 
     /** 确认对账(1→2) */
-    @OperationLog(value = "确认对账", detail = "'对账ID ' + #id")
+    @OperationLog(value = "确认对账", detail = "#resolver.settlementBrief(#id)")
     @PutMapping("/{id}/confirm")
     public ApiResponse<DailySettlement> confirm(@PathVariable Long id) {
         // 先查询记录并鉴权,避免先修改数据后被拦截
@@ -88,7 +88,7 @@ public class DailySettlementController {
     }
 
     /** 关店(2→3) */
-    @OperationLog(value = "关店", detail = "'对账ID ' + #id")
+    @OperationLog(value = "关店", detail = "#resolver.settlementBrief(#id)")
     @PutMapping("/{id}/close")
     public ApiResponse<DailySettlement> close(@PathVariable Long id) {
         // 先查询记录并鉴权,避免先修改数据后被拦截
