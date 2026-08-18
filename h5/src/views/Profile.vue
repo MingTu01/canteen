@@ -17,6 +17,7 @@ import {
   Receipt,
   ChevronRight,
   UtensilsCrossed,
+  BellRing,
 } from 'lucide-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -94,6 +95,8 @@ onMounted(async () => {
   await authStore.refreshEmployee()
   // 自动加载取餐码(不弹层,供内嵌卡片展示)
   loadQrcode()
+  // 微信订阅授权回跳检测(带 subscribed=1 query 时提示订阅结果)
+  checkWechatSubscribeBack()
   // 监听页面可见性:页面切回前台时恢复 SSE 连接(防止后台被中断后未重连)
   document.addEventListener('visibilitychange', onVisibilityChange)
   // 确保全局 SSE 连接运行(SSE 在 auth store 全局管理,登录时已启动,
@@ -194,6 +197,55 @@ const goGroupOrder = (): void => {
 
 const goUnsolicitedOrder = (): void => {
   router.push('/unsolicited-order')
+}
+
+// ============ 微信订阅提醒(一次性订阅消息授权) ============
+const showWechatSubscribePopup = ref(false)
+const wechatSubscribing = ref(false)
+
+/** 打开订阅方式选择弹层 */
+const openWechatSubscribe = (): void => {
+  showWechatSubscribePopup.value = true
+}
+
+/**
+ * 跳转微信订阅授权页。
+ * 每次授权仅可获得一条消息的下发权限(微信一次性订阅消息机制),
+ * 需要接收下一条提醒时需再次订阅。
+ * @param scene 1000=通知/公告提醒,1001=订单提醒
+ */
+const goWechatSubscribe = async (scene: number): Promise<void> => {
+  if (wechatSubscribing.value) return
+  wechatSubscribing.value = true
+  try {
+    const res = await authApi.getWechatSubscribeUrl(scene)
+    if (res?.url) {
+      window.location.href = res.url
+      return // 跳转离开页面,无需关弹层
+    }
+    showFailToast('获取订阅链接失败')
+  } catch {
+    /* 拦截器已提示(如公众号未配置) */
+  } finally {
+    wechatSubscribing.value = false
+  }
+}
+
+/**
+ * 微信授权回跳检测:授权确认后微信带 query 回跳本页
+ * (redirect_url=/profile?subscribed=1,微信追加 openid/action/scene 参数)。
+ */
+const checkWechatSubscribeBack = (): void => {
+  const q = router.currentRoute.value.query
+  if (q.subscribed === '1') {
+    if (q.action === 'confirm') {
+      showSuccessToast('订阅成功,将在下一条提醒中通知您')
+    } else if (q.action === 'cancel') {
+      showFailToast('已取消订阅')
+    }
+    // 清理 query 参数,避免刷新重复提示
+    router.replace({ path: '/profile' }).catch(() => {})
+  }
 }
 
 // ============ 取餐码(一次性支付码) ============
@@ -364,6 +416,7 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { label: '未订餐用餐', icon: UtensilsCrossed, handler: goUnsolicitedOrder },
+  { label: '微信提醒订阅', icon: BellRing, handler: openWechatSubscribe },
   { label: '提交反馈', icon: PenSquare, handler: goCreateFeedback },
   { label: '我的反馈', icon: MessageSquare, handler: goFeedback },
   { label: '团体订餐', icon: Users, handler: goGroupOrder },
@@ -564,6 +617,44 @@ const menuItems: MenuItem[] = [
             </div>
           </div>
         </van-pull-refresh>
+      </div>
+    </van-popup>
+
+    <!-- ============ 微信订阅提醒弹层 ============ -->
+    <van-popup
+      v-model:show="showWechatSubscribePopup"
+      position="bottom"
+      round
+      closeable
+    >
+      <div class="popup wechat-subscribe-popup">
+        <div class="popup__title">微信提醒订阅</div>
+        <div class="wechat-subscribe-popup__desc">
+          订阅后可通过微信公众号接收提醒。每次订阅可接收一条消息,需要时再次订阅即可。
+        </div>
+        <div class="wechat-subscribe-popup__options">
+          <button
+            type="button"
+            class="wechat-subscribe-popup__option"
+            :disabled="wechatSubscribing"
+            @click="goWechatSubscribe(1000)"
+          >
+            <BellRing :size="20" />
+            <span>通知/公告提醒</span>
+          </button>
+          <button
+            type="button"
+            class="wechat-subscribe-popup__option"
+            :disabled="wechatSubscribing"
+            @click="goWechatSubscribe(1001)"
+          >
+            <BellRing :size="20" />
+            <span>订餐成功提醒</span>
+          </button>
+        </div>
+        <div class="popup__footer">
+          <van-button block round @click="showWechatSubscribePopup = false">关闭</van-button>
+        </div>
       </div>
     </van-popup>
 
@@ -999,6 +1090,50 @@ const menuItems: MenuItem[] = [
     color: $brand-muted-foreground;
     flex-shrink: 0;
     padding-top: 2px;
+  }
+}
+
+// 微信订阅提醒弹层
+.wechat-subscribe-popup {
+  &__desc {
+    font-size: 13px;
+    color: $brand-muted-foreground;
+    line-height: 1.6;
+    text-align: center;
+    padding: 0 12px;
+    margin-bottom: 16px;
+  }
+
+  &__options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 4px;
+  }
+
+  &__option {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 13px 16px;
+    background: rgba(0, 101, 253, 0.06);
+    border: 1px solid rgba(0, 101, 253, 0.15);
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: $brand-primary;
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:active {
+      background: rgba(0, 101, 253, 0.14);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 }
 

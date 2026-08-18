@@ -108,6 +108,7 @@ public class WechatMessageService {
                 String event = getText(doc, "Event");
                 if ("subscribe".equals(event)) {
                     // 关注事件:回复图文卡片引导订餐
+                    // (订阅授权引导已移至 H5 首次登录改密后弹窗,关注卡片无人点击故移除)
                     log.info("员工关注公众号: openid={}", fromUserName);
                     return buildSubscribeReply(fromUserName, toUserName);
                 }

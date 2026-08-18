@@ -1,10 +1,14 @@
 package com.example.canteen.controller;
 
 import com.example.canteen.service.WechatMessageService;
+import com.example.canteen.service.WechatNotifyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * 微信公众号消息/事件回调接口。
@@ -26,9 +30,30 @@ public class WechatMessageController {
     private static final Logger log = LoggerFactory.getLogger(WechatMessageController.class);
 
     private final WechatMessageService wechatMessageService;
+    private final WechatNotifyService wechatNotifyService;
 
-    public WechatMessageController(WechatMessageService wechatMessageService) {
+    public WechatMessageController(WechatMessageService wechatMessageService,
+                                   WechatNotifyService wechatNotifyService) {
         this.wechatMessageService = wechatMessageService;
+        this.wechatNotifyService = wechatNotifyService;
+    }
+
+    /**
+     * 获取一次性订阅消息授权链接(H5 登录后调用,跳转后用户确认即完成一次订阅)。
+     *
+     * @param scene 订阅场景:1000=通知/公告,1001=订单(默认1000)
+     * @return {url: 授权链接};未配置微信返回 400
+     */
+    @GetMapping("/subscribe-url")
+    public ResponseEntity<Map<String, String>> subscribeUrl(@RequestParam(value = "scene", defaultValue = "1000") int scene) {
+        if (scene < 0 || scene > 10000) {
+            scene = WechatNotifyService.SCENE_NOTIFY;
+        }
+        String url = wechatNotifyService.buildSubscribeAuthUrl(scene);
+        if (url == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "微信公众号未配置(AppID/模板ID/H5地址)"));
+        }
+        return ResponseEntity.ok(Map.of("url", url));
     }
 
     /**

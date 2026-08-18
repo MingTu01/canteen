@@ -45,6 +45,28 @@ export function getMe(): Promise<Employee> {
 }
 
 /* ============================================================
+ * 微信订阅提醒(一次性订阅消息授权)
+ * ============================================================ */
+
+/** 订阅授权链接响应(对应后端 GET /api/wechat/subscribe-url) */
+export interface WechatSubscribeUrlResult {
+  /** 微信订阅授权链接(H5 内 location.href 跳转) */
+  url: string
+}
+
+/**
+ * 获取微信一次性订阅消息授权链接。
+ * 场景值:1000=通知/公告提醒,1001=订单提醒。
+ * 后端未配置微信公众号时返回 400(拦截器提示)。
+ */
+export function getWechatSubscribeUrl(scene: number): Promise<WechatSubscribeUrlResult> {
+  return get<WechatSubscribeUrlResult>('/wechat/subscribe-url', {
+    params: { scene },
+    _silent: true,
+  })
+}
+
+/* ============================================================
  * SSE 员工维度订阅(支付码核销实时刷新)
  * ============================================================ */
 

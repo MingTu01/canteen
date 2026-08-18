@@ -19,20 +19,23 @@
   - 本脚本仅修改 .env 文件,不会泄露或上传任何信息到第三方
   - AppSecret 是敏感信息,请确保 .env 已在 .gitignore 中
   - 员工需在 H5 端使用微信登录并绑定后,才能收到订阅消息推送
-  - 订阅消息需员工在 H5 端主动订阅(wx-open-subscribe 开放标签),
-    每次订阅可发送一条消息
+  - 一次性订阅消息:员工需在 H5「我的 → 微信提醒订阅」中授权,
+    每次授权仅可接收一条消息,同一场景多次授权不累积
 
 前置条件:
   - 已注册微信公众号(认证服务号,订阅号不支持网页授权和订阅消息)
   - 微信开发者平台(developers.weixin.qq.com)获取 AppID 和 AppSecret
   - 微信开发者平台「API IP白名单」添加服务器公网IP
   - 公众号后台(mp.weixin.qq.com)「功能设置 → 网页授权域名」填写 H5 域名(需 443 端口)
-  - 公众号后台「广告与服务 → 订阅消息」申请所需订阅消息模板
+  - 公众号后台「功能设置 → 业务域名」填写 H5 域名(订阅授权回跳必需)
 
 重要变更:
   - 2025-12-01 起,开发接口管理迁移至微信开发者平台(developers.weixin.qq.com)
-  - 旧版模板消息(message/template/send)已于 2021-04-30 下线,
-    现使用订阅消息(message/subscribe/bizsend)
+  - 2026-08 起,多模板体系下线:每个公众号仅保留一个固定的「一次性订阅消息」
+    模板(开发者平台 → 服务号 → 一次性订阅消息 处查看模板ID),
+    WECHAT_TEMPLATE_NOTIFY/ORDER 两项配置填同一模板ID
+  - 发送接口 message/template/subscribe(接口英文名 templateSubscribe)
+    必填 scene(字符串) + title(≤15字),data 仅支持单个 content 字段(≤200字)
   - 网页授权域名/业务域名/JS接口安全域名 均要求 80/443 端口,不支持带端口
   - 服务器配置(消息推送)URL 也要求 80/443 端口
 """
@@ -54,15 +57,15 @@ ENV_FILE = os.path.join(PROJECT_DIR, ".env")
 
 # 微信 API 端点
 WECHAT_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token"
-# 订阅消息发送接口(旧版模板消息 message/template/send 已于 2021-04-30 下线)
-WECHAT_SEND_TEMPLATE_URL = "https://api.weixin.qq.com/cgi-bin/message/subscribe/bizsend"
+# 一次性订阅消息发送接口(2026-08 新版:必填 scene + title,data 仅单个 content 字段)
+WECHAT_SEND_TEMPLATE_URL = "https://api.weixin.qq.com/cgi-bin/message/template/subscribe"
 
 # 需要管理的 .env 变量清单(变量名 → 中文说明)
 WECHAT_VARS = {
     "WECHAT_APP_ID": "公众号 AppID",
     "WECHAT_APP_SECRET": "公众号 AppSecret",
-    "WECHAT_TEMPLATE_NOTIFY": "通知/公告/活动 订阅消息模板ID",
-    "WECHAT_TEMPLATE_ORDER": "订单创建 订阅消息模板ID",
+    "WECHAT_TEMPLATE_NOTIFY": "一次性订阅消息模板ID(通知)",
+    "WECHAT_TEMPLATE_ORDER": "一次性订阅消息模板ID(订单)",
     "WECHAT_H5_BASE_URL": "H5 访问基础URL",
     "WECHAT_TOKEN": "服务器配置Token(回调签名)",
     "WECHAT_H5_BANNER_URL": "图文卡片封面图URL",
@@ -214,17 +217,19 @@ def get_access_token(app_id, app_secret):
     return token, None
 
 
-def send_template_message(access_token, openid, template_id, data, url=None):
+def send_template_message(access_token, openid, template_id, title, content, url=None, scene=1000):
     """
-    发送订阅消息(旧版模板消息已下线)。
+    发送一次性订阅消息(2026-08 新版:必填 scene + title,data 仅单个 content 字段)。
     返回 (msgid, error_msg),成功时 error_msg 为 None。
-    注意:接收人需已订阅该模板,否则返回 43101。
+    注意:接收人需已在 H5 完成订阅授权,否则返回 43101。
     """
     api_url = f"{WECHAT_SEND_TEMPLATE_URL}?access_token={access_token}"
     payload = {
         "touser": openid,
         "template_id": template_id,
-        "data": data,
+        "scene": str(scene),
+        "title": title[:15],
+        "data": {"content": {"value": content[:200]}},
     }
     if url:
         payload["url"] = url
@@ -355,18 +360,20 @@ def show_intro():
     print("""
 本脚本将引导你完成微信公众号配置,启用以下功能:
   1. H5 微信登录(员工在微信内打开 H5,一键登录)
-  2. 通知/公告/活动发布时,推送模板消息给员工
-  3. 员工下单成功时,推送订单模板消息(含日期、餐次、取餐码)
+  2. 通知/公告/活动发布时,推送一次性订阅消息给员工
+  3. 员工下单成功时,推送订单订阅消息(含日期、餐次、金额)
   4. 关注公众号后自动回复图文卡片,引导员工进入H5订餐
 
-所需材料(请提前在公众号后台准备好):
-  - 公众号 AppID 和 AppSecret(设置与开发 → 基本配置)
-  - 通知模板ID 和 订单模板ID(功能 → 模板消息 → 添加模板)
-  - 服务器公网IP 已加入白名单(基本配置 → IP白名单)
-  - H5 访问域名 已配置网页授权域名(功能设置 → 网页授权域名)
-  - 服务器配置 Token 和 EncodingAESKey(本脚本会自动生成,填到后台「基本配置→服务器配置」)
+所需材料(请提前准备好):
+  - 公众号 AppID 和 AppSecret(微信开发者平台 → 服务号 → 开发信息)
+  - 一次性订阅消息模板ID(微信开发者平台 → 服务号 → 一次性订阅消息,
+    2026-08 起每个公众号仅此一个固定模板)
+  - 服务器公网IP 已加入白名单(微信开发者平台 → API IP白名单)
+  - H5 访问域名 已配置网页授权域名 + 业务域名(mp后台 → 功能设置)
+  - 服务器配置 Token 和 EncodingAESKey(本脚本会自动生成,填到
+    微信开发者平台 → 服务号 → 消息与事件推送)
 
-注意:必须是「服务号」,订阅号不支持网页授权和模板消息。
+注意:必须是「服务号」,订阅号不支持网页授权和订阅消息。
 """)
 
 
@@ -402,28 +409,28 @@ def collect_config(current_env):
     else:
         info("凭证校验成功!access_token 获取正常")
 
-    title("第 2 步:输入模板消息配置")
+    title("第 2 步:输入订阅消息模板配置")
 
     print("""
-请输入模板ID(在公众号后台「功能 → 模板消息」中添加模板后复制)
+请输入一次性订阅消息模板ID。
 
-模板字段要求(在公众号后台申请模板时按以下字段命名):
-  通知模板:{{title.DATA}} {{content.DATA}} {{time.DATA}}
-  订单模板:{{orderDate.DATA}} {{mealType.DATA}} {{amount.DATA}} {{pickupCode.DATA}} {{time.DATA}}
+2026-08 起微信开发者平台已下线多模板体系,每个公众号仅保留一个固定的
+「一次性订阅消息」模板,查看位置:
+  微信开发者平台(developers.weixin.qq.com)→ 我的业务 → 服务号
+  → 一次性订阅消息 → 模板ID
 
-如暂不启用某项推送,直接回车留空即可。
+只需输入这一个模板ID,通知/订单两类推送共用(两项自动填同一值)。
+员工需在 H5「我的 → 微信提醒订阅」中授权后才能收到消息。
+如暂不启用推送,直接回车留空即可。
 """)
 
     template_notify = prompt(
-        "通知/公告/活动 模板ID",
+        "一次性订阅消息 模板ID",
         default=current_env.get("WECHAT_TEMPLATE_NOTIFY", ""),
         required=False,
     )
-    template_order = prompt(
-        "订单创建 模板ID",
-        default=current_env.get("WECHAT_TEMPLATE_ORDER", ""),
-        required=False,
-    )
+    # 新版仅一个固定模板:两项配置填同一值
+    template_order = template_notify
 
     print("\n请输入 H5 访问基础URL(用于模板消息点击跳转)")
     print("示例: https://canteen.example.com (末尾不带斜杠)")
@@ -500,19 +507,22 @@ def test_template(config, token):
 
     available = []
     if config.get("WECHAT_TEMPLATE_NOTIFY"):
-        available.append(("通知模板", "WECHAT_TEMPLATE_NOTIFY"))
+        available.append(("通知提醒(scene=1000)", "WECHAT_TEMPLATE_NOTIFY", 1000))
     if config.get("WECHAT_TEMPLATE_ORDER"):
-        available.append(("订单模板", "WECHAT_TEMPLATE_ORDER"))
+        available.append(("订单提醒(scene=1001)", "WECHAT_TEMPLATE_ORDER", 1001))
 
     if not available:
-        warn("未配置任何模板ID,跳过测试")
+        warn("未配置模板ID,跳过测试")
         return
 
-    if not confirm("是否发送测试模板消息验证配置?(需要一个已绑定微信的 openid)", default_yes=False):
+    print("\n注意:测试前,该微信号需先在 H5「我的 → 微信提醒订阅」中完成对应订阅授权,")
+    print("      否则微信会返回 43101(用户未订阅)。")
+
+    if not confirm("是否发送测试消息验证配置?(需要一个已绑定微信的 openid)", default_yes=False):
         return
 
-    print("\n可测试的模板:")
-    for i, (label, _) in enumerate(available, 1):
+    print("\n可测试的提醒类型:")
+    for i, (label, _, _) in enumerate(available, 1):
         print(f"  {i}. {label}")
     print(f"  {len(available) + 1}. 跳过测试")
 
@@ -526,38 +536,25 @@ def test_template(config, token):
         info("已跳过测试")
         return
 
-    label, var_key = available[choice_idx]
+    label, var_key, scene = available[choice_idx]
     template_id = config[var_key]
     openid = prompt("接收测试消息的 openid(员工已绑定的微信 openid)", required=True)
 
-    # 构造测试数据
-    if var_key == "WECHAT_TEMPLATE_NOTIFY":
-        data = {
-            "title": {"value": "【测试】这是一条测试通知"},
-            "content": {"value": "如果你看到了这条消息,说明通知模板配置正确。"},
-            "time": {"value": "2026-01-01 12:00"},
-        }
-    else:
-        data = {
-            "orderDate": {"value": "2026-01-01"},
-            "mealType": {"value": "午餐"},
-            "amount": {"value": "¥15.00"},
-            "pickupCode": {"value": "123456"},
-            "time": {"value": "2026-01-01 12:00"},
-        }
+    # 新版固定模板:标题(≤15字) + 单条正文(≤200字)
+    test_title = "【测试】订阅消息"
+    test_content = "如果你看到了这条消息,说明一次性订阅消息配置正确。"
 
     url = config.get("WECHAT_H5_BASE_URL", "")
     click_url = f"{url}/" if url else None
 
     print(f"\n正在发送测试消息到 {openid}...")
-    msgid, err = send_template_message(token, openid, template_id, data, click_url)
+    msgid, err = send_template_message(token, openid, template_id, test_title, test_content, click_url, scene)
     if err:
         error(f"发送失败: {err}")
         print("\n常见错误码:")
         print("  40037: 模板ID不正确")
-        print("  43004: 用户未关注公众号(必须先关注)")
+        print("  43101: 用户未订阅(先在 H5「微信提醒订阅」中授权)")
         print("  40003: openid 不正确(用户未绑定或 openid 不属于此公众号)")
-        print("  41028: 模板消息接口权限未开通")
     else:
         info(f"发送成功!msgid={msgid}")
         print("请在微信中查看是否收到测试消息。")
