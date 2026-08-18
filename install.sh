@@ -2,11 +2,13 @@
 #==============================================================
 # 企业智慧食堂系统 - 一键安装脚本(install.sh)
 #==============================================================
-# 用法(在任意全新服务器上执行,多加速器自动切换):
+# 用法(在任意全新服务器上执行,多通道自动切换):
 #
-#   for p in "https://gh-proxy.com/https/" "https://ghp.keleyaa.com/https/" "https://g.blfrp.cn/https/" "https://gh.llkk.cc/https/" "https://ghpxy.hwinzniej.top/https/" "https://"; do
-#     curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
-#   done && sudo bash /tmp/canteen-install.sh
+#   for u in "https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://testingcf.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh" "https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh"; do curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break; done && sudo bash /tmp/canteen-install.sh
+#
+# 说明:jsdelivr CDN 为主通道(真 CDN 不挑客户端 IP,国内云服务器稳定可达);
+# GitHub 代理节点(gh-proxy.com 等)对数据中心 IP(腾讯云/阿里云等)常返回
+# 403/404 防滥用拦截,仅作兜底;直连最后兜底。
 #
 # 或指定安装目录:
 #
