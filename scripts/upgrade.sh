@@ -73,11 +73,13 @@ error() { echo -e "${RED}[错误]${NC} $1"; }
 step()  { echo -e "\n${BLUE}========== $1 ==========${NC}"; }
 
 # GitHub 加速器列表(国内服务器直连 GitHub 会超时,必须走加速器)
-# 按优先级排列:api.gitproxy.dev 稳定性最佳(已在 clean-redeploy.sh 验证)
+# 2026-08 实测:api.gitproxy.dev/ghfast.top/mirror.ghproxy.com 已失效,换用以下节点
 GITHUB_PROXIES=(
-    "https://api.gitproxy.dev/https://github.com/"
     "https://gh-proxy.com/https://github.com/"
-    "https://ghfast.top/https://github.com/"
+    "https://ghp.keleyaa.com/https://github.com/"
+    "https://g.blfrp.cn/https://github.com/"
+    "https://gh.llkk.cc/https://github.com/"
+    "https://ghpxy.hwinzniej.top/https://github.com/"
 )
 
 # 为项目配置 GitHub 加速器(git url.insteadOf 重写)

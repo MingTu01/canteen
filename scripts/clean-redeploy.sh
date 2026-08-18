@@ -20,9 +20,11 @@ BRANCH="deploy"
 
 # GitHub 加速器列表(国内服务器直连 GitHub 会超时,必须走加速器)
 GITHUB_PROXIES=(
-    "https://api.gitproxy.dev/https://github.com/"
     "https://gh-proxy.com/https://github.com/"
-    "https://ghfast.top/https://github.com/"
+    "https://ghp.keleyaa.com/https://github.com/"
+    "https://g.blfrp.cn/https://github.com/"
+    "https://gh.llkk.cc/https://github.com/"
+    "https://ghpxy.hwinzniej.top/https://github.com/"
 )
 
 # 颜色
