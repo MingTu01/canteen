@@ -12,8 +12,8 @@
 #   ./deploy.sh reset-admin    # 重置超管账号密码
 #
 # 一键安装(在全新服务器上,多加速器自动切换):
-#   for p in https://gh-proxy.com/https/ https://ghfast.top/https/ https://mirror.ghproxy.com/https/ https://; do
-#     curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+#   for p in "https://gh-proxy.com/https/" "https://ghfast.top/https/" "https://mirror.ghproxy.com/https/" "https://"; do
+#     curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
 #   done && sudo bash /tmp/canteen-install.sh
 #
 # 适用系统: CentOS 7+/8/9, Ubuntu 18.04+, Debian 10+
@@ -1091,8 +1091,8 @@ case "$COMMAND" in
         echo "  help            显示帮助"
         echo ""
         echo "一键安装(多加速器自动切换):"
-        echo "  for p in https://gh-proxy.com/https/ https://ghfast.top/https/ https://mirror.ghproxy.com/https/ https://; do"
-        echo "    curl -fsSL \"\${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh\" -o /tmp/canteen-install.sh && break"
+        echo "  for p in \"https://gh-proxy.com/https/\" \"https://ghfast.top/https/\" \"https://mirror.ghproxy.com/https/\" \"https://\"; do"
+        echo "    curl -fsSL --connect-timeout 8 --max-time 60 \"\${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh\" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break"
         echo "  done && sudo bash /tmp/canteen-install.sh"
         ;;
     *)

@@ -395,8 +395,8 @@ public class EmployeeController {
         for (Employee e : list) {
             sb.append(csvEscape(e.getName())).append(',');
             sb.append(csvEscape(e.getCardNo())).append(',');
-            // 导出文件会脱离系统边界流转,手机号按 PII 规范脱敏(页面查看不受影响)
-            sb.append(csvEscape(com.example.canteen.dto.EmployeeVO.maskPhone(e.getPhone()))).append(',');
+            // 手机号明文导出(内网管理场景,用户明确要求不脱敏;接口已限超管/店管/店长)
+            sb.append(csvEscape(e.getPhone())).append(',');
             sb.append(csvEscape(e.getDepartmentId() == null ? "" : deptNameMap.getOrDefault(e.getDepartmentId(), ""))).append(',');
             sb.append(e.getBalance() == null ? "0" : e.getBalance().toPlainString()).append(',');
             sb.append(e.getStatus() != null && e.getStatus() == 1 ? "启用" : "禁用").append(',');
