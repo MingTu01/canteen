@@ -560,9 +560,62 @@ def test_template(config, token):
         print("请在微信中查看是否收到测试消息。")
 
 
+def deploy_menu(config, token):
+    """
+    下发底部菜单(启用服务器配置后,公众号后台的自定义菜单失效,只能通过API管理)。
+    菜单结构:单个「在线订餐」按钮(view → H5 首页)。
+    """
+    title("第 5 步:下发底部菜单")
+
+    h5_url = (config.get("WECHAT_H5_BASE_URL") or "").rstrip("/")
+    if not h5_url:
+        warn("H5 地址未配置,跳过菜单下发")
+        return
+    if not token:
+        warn("access_token 不可用,跳过菜单下发")
+        return
+
+    print("""
+说明:
+  - 启用服务器配置后,公众号后台的自动回复/自定义菜单已失效,由本系统接管
+  - 菜单结构:底部单个「在线订餐」按钮,点击直接进入 H5 订餐页
+  - 重复下发即为覆盖更新;用户端约 5 分钟后刷新(重新进入公众号会话页)
+""")
+    if not confirm("是否下发底部菜单?", default_yes=True):
+        info("已跳过(之后也可在管理端调用 POST /api/wechat/menu/sync 下发)")
+        return
+
+    api_url = f"https://api.weixin.qq.com/cgi-bin/menu/create?access_token={token}"
+    payload = {
+        "button": [
+            {"type": "view", "name": "在线订餐", "url": f"{h5_url}/"},
+        ]
+    }
+    req = urllib.request.Request(
+        api_url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        error(f"菜单下发请求失败: {e}")
+        return
+
+    if result.get("errcode", 0) == 0:
+        info("菜单下发成功!等待约 5 分钟后在微信中重新进入公众号即可看到")
+    else:
+        error(f"菜单下发失败: errcode={result.get('errcode')}, errmsg={result.get('errmsg')}")
+        print("\n常见错误码:")
+        print("  40019: 菜单 key 冲突(重复下发即可覆盖)")
+        print("  48001: 公众号无自定义菜单权限(个人未认证订阅号)")
+
+
 def save_and_apply(config):
     """保存配置到 .env 并提示重启。"""
-    title("第 5 步:保存配置")
+    title("第 6 步:保存配置")
 
     print(f"将写入以下配置到 .env 文件:\n")
     for key, label in WECHAT_VARS.items():
@@ -673,6 +726,9 @@ def main():
 
     # 测试模板消息
     test_template(config, token)
+
+    # 下发底部菜单(服务器配置启用后菜单只能API管理)
+    deploy_menu(config, token)
 
     # 保存并应用
     save_and_apply(config)
