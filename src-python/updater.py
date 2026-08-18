@@ -32,10 +32,13 @@ DEFAULT_RELEASE_API = f'https://api.github.com/repos/{DEFAULT_REPO}/releases/lat
 
 # 加速器前缀列表(按序尝试,提高国内网络可达性)
 # 加速器格式:在 GitHub 原始地址前拼接前缀
+# 2026-08 实测:mirror.ghproxy.com/ghfast.top 已失效,换用以下节点
 ACCELERATOR_PREFIXES = [
     'https://gh-proxy.com/',
-    'https://mirror.ghproxy.com/',
-    'https://ghfast.top/',
+    'https://ghp.keleyaa.com/',
+    'https://g.blfrp.cn/',
+    'https://gh.llkk.cc/',
+    'https://ghpxy.hwinzniej.top/',
     '',  # 最后一个为空 = 直连
 ]
 
@@ -46,10 +49,10 @@ ALLOWED_DOWNLOAD_HOSTS = frozenset({
     'github.com',
     'objects.githubusercontent.com',
     'gh-proxy.com',
-    'mirror.ghproxy.com',
-    'ghfast.top',
-    'gh-proxy.net',
-    'github.moeyy.xyz',
+    'ghp.keleyaa.com',
+    'g.blfrp.cn',
+    'gh.llkk.cc',
+    'ghpxy.hwinzniej.top',
 })
 
 # 安装包文件名模式(用于从资产名提取版本号)

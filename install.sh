@@ -4,7 +4,7 @@
 #==============================================================
 # 用法(在任意全新服务器上执行,多加速器自动切换):
 #
-#   for p in "https://gh-proxy.com/https/" "https://ghfast.top/https/" "https://mirror.ghproxy.com/https/" "https://"; do
+#   for p in "https://gh-proxy.com/https/" "https://ghp.keleyaa.com/https/" "https://g.blfrp.cn/https/" "https://gh.llkk.cc/https/" "https://ghpxy.hwinzniej.top/https/" "https://"; do
 #     curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
 #   done && sudo bash /tmp/canteen-install.sh
 #
@@ -49,10 +49,13 @@ fi
 # 配置
 #==============================================================
 # git 克隆通道(依次尝试,最后一个为直连兜底;国内服务器 GitHub 直连经常超时/重置)
+# 2026-08 实测:ghfast.top/mirror.ghproxy.com 已失效,换用以下节点
 GIT_CHANNELS=(
     "https://gh-proxy.com/https://github.com/"
-    "https://ghfast.top/https://github.com/"
-    "https://mirror.ghproxy.com/https://github.com/"
+    "https://ghp.keleyaa.com/https://github.com/"
+    "https://g.blfrp.cn/https://github.com/"
+    "https://gh.llkk.cc/https://github.com/"
+    "https://ghpxy.hwinzniej.top/https://github.com/"
     "https://github.com/"
 )
 REPO_URL="https://github.com/MingTu01/canteen.git"

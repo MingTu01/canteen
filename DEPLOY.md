@@ -63,7 +63,7 @@ canteen upgrade all
 ```bash
 # 在任意全新服务器上执行(root 或 sudo):
 # 多加速器自动切换,一个不行自动换下一个
-for p in "https://gh-proxy.com/https/" "https://ghfast.top/https/" "https://mirror.ghproxy.com/https/" "https://"; do
+for p in "https://gh-proxy.com/https/" "https://ghp.keleyaa.com/https/" "https://g.blfrp.cn/https/" "https://gh.llkk.cc/https/" "https://ghpxy.hwinzniej.top/https/" "https://"; do
   curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
 done && sudo bash /tmp/canteen-install.sh
 
@@ -81,7 +81,7 @@ sudo bash /tmp/canteen-install.sh /opt/my-canteen
 
 > **国内服务器加速**：若 GitHub raw 访问慢，可先手动 clone 再运行：
 > ```bash
-> git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
+> git clone -b deploy https://gh-proxy.com/https://github.com/MingTu01/canteen.git /opt/canteen
 > cd /opt/canteen && sudo bash install.sh
 > ```
 
@@ -162,7 +162,7 @@ curl -s http://localhost:18082/api/system/health
 # 方式二：初始化 git 仓库跟踪 deploy 分支（一次性，后续可用 canteen upgrade）
 cd /opt/canteen
 git init
-git remote add origin https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git
+git remote add origin https://gh-proxy.com/https://github.com/MingTu01/canteen.git
 git fetch origin deploy
 git checkout -b deploy FETCH_HEAD
 # 此后可用 canteen upgrade 正常升级
@@ -601,7 +601,7 @@ sudo mkdir -p /opt/canteen
 sudo chown -R $(whoami):$(whoami) /opt/canteen
 
 # 用普通用户克隆(这样 /opt/canteen 直接归你所有,无需后续 chown)
-git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
+git clone -b deploy https://gh-proxy.com/https://github.com/MingTu01/canteen.git /opt/canteen
 cd /opt/canteen
 chmod +x *.sh scripts/*.sh
 ```

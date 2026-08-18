@@ -10,8 +10,8 @@
 
 ```bash
 # 多加速器自动切换,一个不行自动换下一个
-for p in https://gh-proxy.com/https:// https://ghfast.top/https:// https://mirror.ghproxy.com/https/ https://; do
-  curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+for p in "https://gh-proxy.com/https/" "https://ghp.keleyaa.com/https/" "https://g.blfrp.cn/https/" "https://gh.llkk.cc/https/" "https://ghpxy.hwinzniej.top/https/" "https://"; do
+  curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
 done && sudo bash /tmp/canteen-install.sh
 ```
 
@@ -97,8 +97,8 @@ canteen/
 
 ```bash
 # 多加速器自动切换,一个不行自动换下一个
-for p in https://gh-proxy.com/https:// https://ghfast.top/https:// https://mirror.ghproxy.com/https/ https://; do
-  curl -fsSL "${p}raw.githubusercontent.com/MingTu01/canteen/deploy/install.sh" -o /tmp/canteen-install.sh && break
+for p in "https://gh-proxy.com/https/" "https://ghp.keleyaa.com/https/" "https://g.blfrp.cn/https/" "https://gh.llkk.cc/https/" "https://ghpxy.hwinzniej.top/https/" "https://"; do
+  curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
 done && sudo bash /tmp/canteen-install.sh
 ```
 

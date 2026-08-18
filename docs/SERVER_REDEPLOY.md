@@ -273,8 +273,8 @@ df -h /opt
 ```bash
 cd /opt
 
-# 国内服务器使用 api.gitproxy.dev 加速
-git clone -b deploy https://api.gitproxy.dev/https://github.com/MingTu01/canteen.git /opt/canteen
+# 国内服务器使用 gh-proxy.com 加速
+git clone -b deploy https://gh-proxy.com/https://github.com/MingTu01/canteen.git /opt/canteen
 
 cd /opt/canteen
 

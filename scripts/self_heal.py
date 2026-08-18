@@ -80,9 +80,11 @@ JAVA_FORMAT_VERSION = "2.0"
 
 # GitHub 加速器(国内服务器直连 GitHub 会超时)
 GITHUB_PROXIES = [
-    "https://api.gitproxy.dev/https://github.com/",
     "https://gh-proxy.com/https://github.com/",
-    "https://ghfast.top/https://github.com/",
+    "https://ghp.keleyaa.com/https://github.com/",
+    "https://g.blfrp.cn/https://github.com/",
+    "https://gh.llkk.cc/https://github.com/",
+    "https://ghpxy.hwinzniej.top/https://github.com/",
 ]
 
 GREEN = "\033[0;32m"

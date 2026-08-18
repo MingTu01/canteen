@@ -253,9 +253,11 @@ get_current_branch() {
 # 与 upgrade.sh 保持一致,用于升级前版本检查
 #==============================================================
 GITHUB_PROXIES=(
-    "https://api.gitproxy.dev/https://github.com/"
     "https://gh-proxy.com/https://github.com/"
-    "https://ghfast.top/https://github.com/"
+    "https://ghp.keleyaa.com/https://github.com/"
+    "https://g.blfrp.cn/https://github.com/"
+    "https://gh.llkk.cc/https://github.com/"
+    "https://ghpxy.hwinzniej.top/https://github.com/"
 )
 
 # 为项目配置 GitHub 加速器(逐个探测可用性,成功后固定使用)

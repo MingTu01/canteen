@@ -463,7 +463,7 @@ def switch_to_config_mode(self):
 | `window_mode` | string | `"fullscreen"` | `"fullscreen"`（全屏无边框）或 `"windowed"`（1280×800 窗口） |
 | `card_interval` | float | `2.0` | 读卡防抖间隔（秒），推荐 1.0~3.0 |
 | `idle_timeout` | int | `30` | 无操作自动返回待机页时间（秒），0=永不。**注意：超时逻辑实际由前端实现**，Python 端仅在 `config.py` 中存取该值并通过 `/__api__/config` 返回给前端，自身不参与计时。 |
-| `update_check_url` | string | `""` | 在线更新检测地址；留空则依次尝试默认 GitHub Releases API + 各加速器前缀（gh-proxy.com / mirror.ghproxy.com / ghfast.top / 直连） |
+| `update_check_url` | string | `""` | 在线更新检测地址；留空则依次尝试默认 GitHub Releases API + 各加速器前缀（gh-proxy.com / ghp.keleyaa.com / g.blfrp.cn / gh.llkk.cc / ghpxy.hwinzniej.top / 直连） |
 | `ignored_version` | string | `""` | 用户「忽略此版本」记录的版本号；远端版本等于该值时不再弹窗（直到出现更新的版本） |
 
 > **注意**：管理员密码验证由后端 `/api/admin/login` 接口完成（BCrypt），**config.json 中无 `admin_password_hash` 字段**。
@@ -757,9 +757,9 @@ dist/canteen-terminal/
 
 ## 15. 在线更新（updater.py）
 
-- **版本检测**：启动时后台线程调 `check_for_update`——读 GitHub Releases latest（`update_check_url` 配置优先，否则依次尝试加速器前缀 gh-proxy.com / mirror.ghproxy.com / ghfast.top / 直连）；远端版本号大于当前版本且不等于 `ignored_version` 时弹窗（下载更新 / 取消 / 忽略此版本）
+- **版本检测**：启动时后台线程调 `check_for_update`——读 GitHub Releases latest（`update_check_url` 配置优先，否则依次尝试加速器前缀 gh-proxy.com / ghp.keleyaa.com / g.blfrp.cn / gh.llkk.cc / ghpxy.hwinzniej.top / 直连）；远端版本号大于当前版本且不等于 `ignored_version` 时弹窗（下载更新 / 取消 / 忽略此版本）
 - **当前版本号**：`resolve_current_version()` 优先读随 EXE 发布的 `VERSIONS.json` 的 `terminal.version` 字段（EXE 同目录 / `_internal/`，开发模式读仓库根），文件缺失才回退内置常量 `CURRENT_VERSION`（当前 1.0.28）
-- **下载安全**：候选地址（原始 + 加速器叠加）逐个校验 `_is_allowed_download_url`——必须 https 且 host 在白名单 `ALLOWED_DOWNLOAD_HOSTS`（github.com / objects.githubusercontent.com / gh-proxy.com / mirror.ghproxy.com / ghfast.top / gh-proxy.net / github.moeyy.xyz，含子域名），否则拒绝；版本清单（release 资产 sha256/digest 字段）提供 sha256 时下载后**强制校验**，不匹配删除文件抛异常拒绝安装（未提供时记录 warning 继续下载）
+- **下载安全**：候选地址（原始 + 加速器叠加）逐个校验 `_is_allowed_download_url`——必须 https 且 host 在白名单 `ALLOWED_DOWNLOAD_HOSTS`（github.com / objects.githubusercontent.com / gh-proxy.com / ghp.keleyaa.com / g.blfrp.cn / gh.llkk.cc / ghpxy.hwinzniej.top，含子域名），否则拒绝；版本清单（release 资产 sha256/digest 字段）提供 sha256 时下载后**强制校验**，不匹配删除文件抛异常拒绝安装（未提供时记录 warning 继续下载）
 - **静默安装**：下载到 `%LOCALAPPDATA%\CanteenTerminal\updates\`，`run_installer` 以 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART` 启动安装包并退出本程序；installer.iss 在升级安装前 `BackupUserConfig`、安装后 `RestoreUserConfig`，保留 `%APPDATA%` 用户配置
 
 ## 16. 守护进程（watchdog.py → watchdog.exe）
