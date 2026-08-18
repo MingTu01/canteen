@@ -201,6 +201,7 @@ services:
         condition: service_healthy
     ports:
       # P0-1 安全修复:绑定 127.0.0.1,仅允许本机访问
+      # 外部访问通过 1panel/Nginx 反向代理
       # 宿主机端口 18080(不常用端口,避免与系统 nginx/apache 80 端口冲突)
       - "127.0.0.1:18080:80"
     volumes:
@@ -220,6 +221,7 @@ services:
         condition: service_healthy
     ports:
       # P0-1 安全修复:绑定 127.0.0.1,仅允许本机访问
+      # 外部访问通过 1panel/Nginx 反向代理
       # 宿主机端口 18081(不常用端口,避免冲突)
       - "127.0.0.1:18081:80"
     volumes:

@@ -220,6 +220,13 @@ get_status_line() {
         echo -e "${RED}Docker 未安装${NC}"
         return
     fi
+    # 权限检测:普通用户不在 docker 组时 docker ps 报权限错误,
+    # 旧版 2>/dev/null 吞掉错误导致计数为 0,面板误报"未运行"
+    # (容器实际正常运行,常见于 usermod -aG docker 后未重新登录)
+    if ! docker ps >/dev/null 2>&1; then
+        echo -e "${YELLOW}Docker 无权限${NC}"
+        return
+    fi
     local running total=5
     running=$(docker ps --filter "name=canteen-" --format '{{.Names}}' 2>/dev/null | wc -l)
     if [ "$running" -ge 5 ] 2>/dev/null; then
@@ -413,7 +420,16 @@ menu_status() {
     echo -e "${BLUE}========== 服务状态 ==========${NC}"
     echo ""
     docker compose ps 2>/dev/null || {
-        error "Docker Compose 未运行"
+        if ! docker ps >/dev/null 2>&1; then
+            error "Docker 权限不足:当前用户无法访问 Docker(容器实际可能在正常运行)"
+            echo ""
+            echo "  修复方法(任选其一):"
+            echo "    1) 重新登录 SSH 后再试(加入 docker 组后需重新登录才生效)"
+            echo "    2) 当前会话执行: newgrp docker"
+            echo "    3) 临时使用: sudo canteen"
+        else
+            error "Docker Compose 未运行"
+        fi
         pause
         return
     }
