@@ -1,9 +1,10 @@
 {
-  "version": "0.0.57",
+  "version": "0.0.58",
   "buildTime": "2026-08-18",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
-    "V0.0.57 公告推送带图+订阅引导改至首次登录:①公告/活动推送支持配图:带图时优先客服图文卡片(封面图+标题+摘要+链接),48h窗口外回退订阅消息纯文字(微信一次性订阅模板仅支持content字段,平台限制无法带图);②配图URL构造:http(s)外链直接用,/uploads/本地存储经ImageSignService签名后拼接H5公网域名(部署同域反代微信可拉取);③移除V0.0.56无人点击的关注引导卡片,订阅引导改为H5首次登录改密成功后居中弹窗(仅同意/拒绝,见H5 V0.0.48);④无图公告与订单推送维持订阅消息优先+43101回退客服文本",
+    "V0.0.58 接管公众号菜单与自动回复(启用服务器配置后公众号后台自动回复/自定义菜单失效,只能API管理):①新增syncDefaultMenu下发底部菜单(单个「在线订餐」view按钮→H5首页,重复调用即覆盖,用户端约5分钟刷新);②新增POST /api/wechat/menu/sync管理端点(仅管理员)重新下发菜单;③任意用户消息统一回复欢迎语+订餐指引(点击底部菜单【在线订餐】开始点餐);④wechat_setup.py新增下发菜单步骤(第5步)",
+    "V0.0.57 公告推送带图+订阅引导改至首次登录:①公告/活动推送支持配图:带图时优先客服图文卡片(封面图+标题+摘要+链接),48h窗口外回退订阅消息纯文字(微信一次性订阅模板仅支持content字段,平台限制无法带图);②配图URL构造:http(s)外链直接用,/uploads/本地存储经ImageSignService签名后拼接H5公网域名(部署同域反代微信可拉取);③订阅引导改为H5首次登录改密成功后居中弹窗(仅同意/拒绝,见H5 V0.0.48);④无图公告与订单推送维持订阅消息优先+43101回退客服文本",
     "V0.0.56 微信推送降门槛:48小时客服消息回退:①新增客服消息通道(message/custom/send,关注/互动后48小时窗口内可送达,无需订阅授权);②下单/公告推送无订阅额度(43101)时回退客服文本消息,刚关注(48h内互动过)的员工无需任何授权即可收到推送",
     "V0.0.55 修正微信一次性订阅消息发送端点:V0.0.54误用message/subscribe/bizsend,依官方新文档改为POST /cgi-bin/message/template/subscribe(接口英文名templateSubscribe,必填touser/template_id/scene字符串/title≤15字/data.content.value≤200字);同步修正wechat_setup.py测试发送端点与部署文档(新版开发者平台每号仅一个固定一次性订阅消息模板,无需申请,通知/订单共用,scene=1000/1001区分)",
     "V0.0.43 修复超单次限购BUG+辣度角标加辣字+无图透明:①修复下单提示\"超过单次限购\"BUG:OrderService.createOrder校验maxPerOrder时仅判断!=null,当maxPerOrder=0(前端defaultDish默认0表示不限)时1>0恒成立导致所有菜品下单失败,修正为null/0/负数均视为不限(maxPerOrder>0才校验);②H5菜品卡片右上角辣椒角标前增加\"辣\"字(span dish-card__spice-label 11px加粗红色);③H5菜品无图片时不再显示emoji占位,改为透明背景显示卡片底色(移除categoryEmoji函数与__emoji样式,__img-wrap background从$brand-muted改为transparent)",

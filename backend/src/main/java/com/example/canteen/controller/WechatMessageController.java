@@ -1,5 +1,6 @@
 package com.example.canteen.controller;
 
+import com.example.canteen.security.PermissionUtils;
 import com.example.canteen.service.WechatMessageService;
 import com.example.canteen.service.WechatNotifyService;
 import org.slf4j.Logger;
@@ -36,6 +37,21 @@ public class WechatMessageController {
                                    WechatNotifyService wechatNotifyService) {
         this.wechatMessageService = wechatMessageService;
         this.wechatNotifyService = wechatNotifyService;
+    }
+
+    /**
+     * 重新下发默认底部菜单(单个「在线订餐」按钮 → H5 首页)。
+     * 启用服务器配置后公众号后台菜单失效,菜单只能通过本接口管理。
+     * 调用后用户端约 5 分钟刷新(重新进入公众号会话页生效)。
+     */
+    @PostMapping("/menu/sync")
+    public ResponseEntity<Map<String, Object>> syncMenu() {
+        PermissionUtils.requireAdmin();
+        String error = wechatNotifyService.syncDefaultMenu();
+        if (error == null) {
+            return ResponseEntity.ok(Map.of("success", true, "message", "菜单下发成功,约5分钟后用户端刷新"));
+        }
+        return ResponseEntity.badRequest().body(Map.of("success", false, "error", error));
     }
 
     /**

@@ -22,6 +22,9 @@ import java.util.Arrays;
  * 当前支持:
  * - GET 接入签名校验(公众号后台启用服务器配置时微信会GET回调校验)
  * - POST 接收事件:关注(subscribe)→被动回复图文卡片,引导员工进入H5订餐
+ * - POST 接收消息:任意消息→统一回复欢迎语+订餐指引(引导点底部菜单【在线订餐】)
+ *   (启用服务器配置后公众号后台自动回复/自定义菜单失效,均由本系统接管:
+ *    底部菜单走 WechatNotifyService.syncDefaultMenu / POST /api/wechat/menu/sync)
  *
  * 明文模式(不加密):XML明文传输,subscribe事件与回复均不含敏感信息,风险可控。
  * 如需安全模式(加密),需引入 wxbizmsgcrypt SDK,此处暂不实现。
@@ -115,9 +118,9 @@ public class WechatMessageService {
                 // 取消关注(unsubscribe)等事件:不回复
                 return "";
             }
-            // 其他消息类型(文本/图片等):回复引导文本
-            return buildTextReply(fromUserName, toUserName,
-                    "欢迎来到" + canteenName + "，点击底部菜单【去订餐】即可在线点餐。");
+            // 其他消息类型(文本/图片等):统一回复欢迎语 + 订餐指引
+            // (启用服务器配置后公众号后台自动回复失效,所有自动回复由此接管)
+            return buildTextReply(fromUserName, toUserName, buildGuideText());
         } catch (Exception e) {
             log.warn("处理微信消息异常: {}", e.getMessage());
             return "";
@@ -139,8 +142,7 @@ public class WechatMessageService {
         // 未配置封面图或H5域名:回退文本回复
         if (h5Url == null || h5BannerUrl == null || h5BannerUrl.isBlank()) {
             return buildTextReply(openid, ghId,
-                    "欢迎关注" + canteenName + "！\n点击下方卡片或底部菜单【去订餐】开始在线点餐。\n"
-                            + "首次使用需用手机号登录并绑定微信，之后即可一键免密订餐。");
+                    "欢迎关注" + canteenName + "！\n" + buildGuideText());
         }
 
         // 图文消息(单条)
@@ -159,6 +161,12 @@ public class WechatMessageService {
                 + "</item>"
                 + "</Articles>"
                 + "</xml>";
+    }
+
+    /** 统一订餐指引文案(回复用户消息与欢迎语回退共用) */
+    private String buildGuideText() {
+        return "点击底部菜单【在线订餐】即可开始点餐。\n"
+                + "首次使用需用手机号登录并绑定微信，之后一键免密订餐。";
     }
 
     /** 构造文本回复XML */

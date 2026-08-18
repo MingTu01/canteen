@@ -117,6 +117,87 @@ public class WechatNotifyService {
     }
 
     // ============================================================
+    // 自定义菜单管理(启用服务器配置后公众号后台菜单失效,只能API管理)
+    // ============================================================
+
+    /**
+     * 下发默认底部菜单:单个「在线订餐」按钮(view → H5 首页)。
+     * 重复调用即为覆盖更新(微信 menu/create 会整体替换旧菜单)。
+     * 用户端约 5 分钟后刷新(重新进入公众号会话页拉取)。
+     *
+     * @return 成功返回 null,失败返回错误描述
+     */
+    @SuppressWarnings("unchecked")
+    public String syncDefaultMenu() {
+        String accessToken = getAccessToken();
+        if (accessToken == null) {
+            return "微信未配置或 access_token 获取失败";
+        }
+        String h5Url = buildH5Url("/");
+        if (h5Url == null) {
+            return "H5 地址未配置(WECHAT_H5_BASE_URL)";
+        }
+        Map<String, Object> button = new HashMap<>();
+        button.put("type", "view");
+        button.put("name", "在线订餐");
+        button.put("url", h5Url);
+        Map<String, Object> body = new HashMap<>();
+        body.put("button", List.of(button));
+
+        String apiUrl = "https://api.weixin.qq.com/cgi-bin/menu/create?access_token=" + accessToken;
+        try {
+            ResponseEntity<Map> resp = restTemplate.postForEntity(apiUrl, body, Map.class);
+            Map<String, Object> result = resp.getBody();
+            if (result != null) {
+                Object errcode = result.get("errcode");
+                if (errcode == null || "0".equals(errcode.toString())) {
+                    log.info("微信底部菜单下发成功: 在线订餐 → {}", h5Url);
+                    return null;
+                }
+                String err = "errcode=" + errcode + ", errmsg=" + result.get("errmsg");
+                log.error("微信底部菜单下发失败: {}", err);
+                return err;
+            }
+            return "微信返回空响应";
+        } catch (Exception e) {
+            log.error("微信底部菜单下发异常: {}", e.getMessage());
+            return e.getMessage();
+        }
+    }
+
+    /**
+     * 删除全部自定义菜单(含个性化菜单)。
+     *
+     * @return 成功返回 null,失败返回错误描述
+     */
+    @SuppressWarnings("unchecked")
+    public String deleteWechatMenu() {
+        String accessToken = getAccessToken();
+        if (accessToken == null) {
+            return "微信未配置或 access_token 获取失败";
+        }
+        try {
+            ResponseEntity<Map> resp = restTemplate.getForEntity(
+                    "https://api.weixin.qq.com/cgi-bin/menu/delete?access_token=" + accessToken, Map.class);
+            Map<String, Object> result = resp.getBody();
+            if (result != null) {
+                Object errcode = result.get("errcode");
+                if (errcode == null || "0".equals(errcode.toString())) {
+                    log.info("微信底部菜单已删除");
+                    return null;
+                }
+                String err = "errcode=" + errcode + ", errmsg=" + result.get("errmsg");
+                log.error("微信底部菜单删除失败: {}", err);
+                return err;
+            }
+            return "微信返回空响应";
+        } catch (Exception e) {
+            log.error("微信底部菜单删除异常: {}", e.getMessage());
+            return e.getMessage();
+        }
+    }
+
+    // ============================================================
     // access_token 管理
     // ============================================================
 
