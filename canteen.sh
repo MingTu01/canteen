@@ -223,8 +223,19 @@ get_status_line() {
     # 权限检测:普通用户不在 docker 组时 docker ps 报权限错误,
     # 旧版 2>/dev/null 吞掉错误导致计数为 0,面板误报"未运行"
     # (容器实际正常运行,常见于 usermod -aG docker 后未重新登录)
+    # 此时退化为端口健康检查,仍给出真实状态
     if ! docker ps >/dev/null 2>&1; then
-        echo -e "${YELLOW}Docker 无权限${NC}"
+        local ok=0
+        curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1 && ok=$((ok+1))
+        curl -sf -o /dev/null http://localhost:18080/ >/dev/null 2>&1 && ok=$((ok+1))
+        curl -sf -o /dev/null http://localhost:18081/ >/dev/null 2>&1 && ok=$((ok+1))
+        if [ "$ok" -eq 3 ]; then
+            echo -e "${GREEN}运行中 ${ok}/3${NC} (无docker权限)"
+        elif [ "$ok" -gt 0 ]; then
+            echo -e "${YELLOW}部分运行 ${ok}/3${NC} (无docker权限)"
+        else
+            echo -e "${RED}未运行${NC} (无docker权限,建议 sudo canteen 确认)"
+        fi
         return
     fi
     local running total=5
@@ -419,21 +430,7 @@ menu_status() {
     echo ""
     echo -e "${BLUE}========== 服务状态 ==========${NC}"
     echo ""
-    docker compose ps 2>/dev/null || {
-        if ! docker ps >/dev/null 2>&1; then
-            error "Docker 权限不足:当前用户无法访问 Docker(容器实际可能在正常运行)"
-            echo ""
-            echo "  修复方法(任选其一):"
-            echo "    1) 重新登录 SSH 后再试(加入 docker 组后需重新登录才生效)"
-            echo "    2) 当前会话执行: newgrp docker"
-            echo "    3) 临时使用: sudo canteen"
-        else
-            error "Docker Compose 未运行"
-        fi
-        pause
-        return
-    }
-    echo ""
+    # 健康检查(端口探测,无需 docker 权限,永远先显示真实服务状态)
     info "健康检查..."
     # 后端
     if curl -sf http://localhost:18082/api/system/health >/dev/null 2>&1; then
@@ -452,9 +449,17 @@ menu_status() {
         fi
     done
 
-    # 容器运行时间和资源使用
+    # 容器运行时间和资源使用(需要 docker 权限)
     echo ""
     echo -e "${BLUE}---------- 容器详情 ----------${NC}"
+    if ! docker ps >/dev/null 2>&1; then
+        warn "当前用户无 docker 权限,跳过容器详情(上方健康检查已反映服务真实状态)"
+        echo "  修复方法(任选其一):"
+        echo "    1) 重新登录 SSH 后再试(加入 docker 组后需重新登录才生效)"
+        echo "    2) 当前会话执行: newgrp docker"
+        echo "    3) 临时使用: sudo canteen"
+    else
+    docker compose ps 2>/dev/null || true
     local containers=("canteen-backend" "canteen-admin" "canteen-h5" "canteen-mysql" "canteen-redis")
     printf "  %-20s %-12s %-10s %-10s\n" "容器" "运行时间" "CPU" "内存"
     printf "  %-20s %-12s %-10s %-10s\n" "----" "--------" "---" "----"
@@ -473,6 +478,7 @@ menu_status() {
             printf "  %-20s %-12s %-10s %-10s\n" "$c" "未运行" "-" "-"
         fi
     done
+    fi
 
     # 磁盘
     echo ""
@@ -482,8 +488,8 @@ menu_status() {
     disk_avail=$(df -h "$PROJECT_DIR" | awk 'NR==2{print $4}')
     info "磁盘: 总计 ${disk_total}, 已用 ${disk_usage}, 可用 ${disk_avail}"
 
-    # Docker 数据大小
-    if command -v docker &>/dev/null; then
+    # Docker 数据大小(需要 docker 权限)
+    if docker ps >/dev/null 2>&1; then
         local docker_size
         docker_size=$(docker system df --format "{{.Size}}" 2>/dev/null | head -1 || echo "?")
         info "Docker 镜像占用: ${docker_size}"
