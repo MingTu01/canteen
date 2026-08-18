@@ -48,39 +48,43 @@ fi
 #==============================================================
 # 配置
 #==============================================================
-# GitHub 加速器列表(国内服务器直连 GitHub 会超时,必须走加速器)
-GITHUB_PROXIES=(
-    "https://api.gitproxy.dev/https://github.com/"
+# git 克隆通道(依次尝试,最后一个为直连兜底;国内服务器 GitHub 直连经常超时/重置)
+GIT_CHANNELS=(
     "https://gh-proxy.com/https://github.com/"
     "https://ghfast.top/https://github.com/"
+    "https://mirror.ghproxy.com/https://github.com/"
+    "https://github.com/"
 )
+REPO_URL="https://github.com/MingTu01/canteen.git"
 BRANCH="deploy"
 DEFAULT_INSTALL_DIR="/opt/canteen"
 INSTALL_DIR="${1:-$DEFAULT_INSTALL_DIR}"
 
-# 为项目配置 GitHub 加速器(git url.insteadOf 重写)
-# 自动探测可用的加速器,逐个尝试 ls-remote,成功后固定使用
-setup_git_proxy() {
-    local dir="${1:-$INSTALL_DIR}"
+# 以实际用户身份运行 git。
+# 关键:sudo 必须带 -H 让 HOME 指向真实用户主目录,否则 sudo -u 默认继承
+# root 的 HOME=/root,git 写全局配置时报权限错误;旧版该错误被 2>/dev/null
+# 吞掉,配合 set -e 造成脚本"无声退出"(空目录上 git config 直接 fatal)。
+run_git() {
+    if [[ "$REAL_USER" != "root" ]]; then
+        sudo -u "$REAL_USER" -H git "$@"
+    else
+        git "$@"
+    fi
+}
 
-    # 先清除旧的 insteadOf 配置
-    for p in "${GITHUB_PROXIES[@]}"; do
-        git -C "$dir" config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
-        sudo -u "$REAL_USER" git -C "$dir" config --unset-all "url.${p}.insteadOf" 2>/dev/null || true
-    done
+# 通道可读名称(用于日志)
+channel_label() {
+    if [[ "$1" == "https://github.com/" ]]; then
+        echo "直连"
+    else
+        echo "$1" | sed 's|^https://||;s|/https://github.com/$||'
+    fi
+}
 
-    # 逐个尝试加速器
-    for proxy in "${GITHUB_PROXIES[@]}"; do
-        sudo -u "$REAL_USER" git -C "$dir" config "url.${proxy}.insteadOf" "https://github.com/" 2>/dev/null
-        if sudo -u "$REAL_USER" git -C "$dir" ls-remote "https://github.com/MingTu01/canteen.git" HEAD 2>/dev/null | head -1 | grep -q '.'; then
-            info "GitHub 加速器: $(echo "$proxy" | sed 's|/https://github.com/||')"
-            return 0
-        fi
-        sudo -u "$REAL_USER" git -C "$dir" config --unset-all "url.${proxy}.insteadOf" 2>/dev/null || true
-    done
-
-    warn "所有 GitHub 加速器均不可用,尝试直连..."
-    return 1
+# 通过指定通道运行 git(-c 内联 url.insteadOf 重写,不污染全局配置)
+git_via() {
+    local channel="$1"; shift
+    run_git -c "url.${channel}.insteadOf=https://github.com/" "$@"
 }
 
 #==============================================================
@@ -156,30 +160,60 @@ info "git 已就绪: $(git --version)"
 #==============================================================
 step "3/4 克隆仓库(deploy 分支,含预构建产物)"
 
+# 安装目录合法性(防止极端输入)
+if [[ -z "$INSTALL_DIR" || "$INSTALL_DIR" == "/" ]]; then
+    error "非法安装目录: '${INSTALL_DIR}'"
+    exit 1
+fi
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "目录已存在,更新代码..."
     cd "$INSTALL_DIR"
     # 修正 git safe.directory(避免 dubious ownership 错误)
-    sudo -u "$REAL_USER" git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
-    # 配置 GitHub 加速器(国内服务器必须走代理)
-    setup_git_proxy "$INSTALL_DIR"
-    sudo -u "$REAL_USER" git fetch origin "$BRANCH" 2>/dev/null || git fetch origin 2>/dev/null || true
-    sudo -u "$REAL_USER" git checkout "$BRANCH" 2>/dev/null || true
-    sudo -u "$REAL_USER" git pull origin "$BRANCH" 2>/dev/null || git pull origin 2>/dev/null || true
+    run_git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+    run_git checkout "$BRANCH" 2>/dev/null || true
+    update_ok=0
+    for ch in "${GIT_CHANNELS[@]}"; do
+        info "尝试更新通道: $(channel_label "$ch")"
+        if git_via "$ch" pull origin "$BRANCH"; then
+            update_ok=1
+            break
+        fi
+        warn "通道 $(channel_label "$ch") 更新失败,尝试下一个..."
+    done
+    if [[ $update_ok -ne 1 ]]; then
+        error "所有通道(含直连)均无法更新代码,请检查服务器出网(安全组/防火墙)"
+        exit 1
+    fi
 else
     info "克隆仓库到 ${INSTALL_DIR} ..."
-    # 先以 root 创建安装目录(父目录如 /opt 通常归 root 所有,普通用户无权创建)
-    mkdir -p "$INSTALL_DIR"
-    # 将安装目录所有权交给实际用户,再以其身份克隆(避免文件归 root 所有)
-    if [[ "$REAL_USER" != "root" ]]; then
-        chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
-    fi
-    # 配置 GitHub 加速器(在临时空目录中设置全局 insteadOf,影响后续 clone)
-    setup_git_proxy "$INSTALL_DIR"
-    if [[ "$REAL_USER" != "root" ]]; then
-        sudo -u "$REAL_USER" git clone --branch "$BRANCH" --single-branch "https://github.com/MingTu01/canteen.git" "$INSTALL_DIR"
-    else
-        git clone --branch "$BRANCH" --single-branch "https://github.com/MingTu01/canteen.git" "$INSTALL_DIR"
+    clone_ok=0
+    for ch in "${GIT_CHANNELS[@]}"; do
+        info "尝试克隆通道: $(channel_label "$ch")"
+        # 清理上次失败残留(否则 git clone 报目录非空),再以 root 建目录并移交所有权
+        rm -rf "${INSTALL_DIR:?}"
+        mkdir -p "$INSTALL_DIR"
+        if [[ "$REAL_USER" != "root" ]]; then
+            chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
+        fi
+        if git_via "$ch" clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"; then
+            clone_ok=1
+            # 记住成功通道(写入仓库本地配置),后续 deploy.sh 的 git pull 自动走同一通道
+            run_git -C "$INSTALL_DIR" config "url.${ch}.insteadOf" "https://github.com/" 2>/dev/null || true
+            break
+        fi
+        warn "通道 $(channel_label "$ch") 克隆失败,换下一个通道重试..."
+    done
+    if [[ $clone_ok -ne 1 ]]; then
+        error "所有克隆通道(含直连)均失败"
+        echo ""
+        echo "  排查建议:"
+        echo "    1) 确认服务器能访问外网:"
+        echo "       curl -fsSL --max-time 10 https://github.com -o /dev/null && echo 网络OK"
+        echo "    2) 或手动克隆后重跑本脚本(目录必须为空或不存在):"
+        echo "       sudo git clone -b deploy https://gh-proxy.com/https://github.com/MingTu01/canteen.git $INSTALL_DIR"
+        echo "       sudo git clone -b deploy https://github.com/MingTu01/canteen.git $INSTALL_DIR"
+        exit 1
     fi
     cd "$INSTALL_DIR"
 fi
@@ -198,10 +232,13 @@ if [[ ! -f "deploy/backend/app.jar" ]]; then
         case "$choice" in
             2)
                 info "切换到 main 分支..."
-                setup_git_proxy "$INSTALL_DIR"
-                sudo -u "$REAL_USER" git fetch origin main 2>/dev/null || true
-                sudo -u "$REAL_USER" git checkout main 2>/dev/null || true
-                sudo -u "$REAL_USER" git pull origin main 2>/dev/null || true
+                for ch in "${GIT_CHANNELS[@]}"; do
+                    if git_via "$ch" fetch origin main; then break; fi
+                done
+                run_git checkout main 2>/dev/null || true
+                for ch in "${GIT_CHANNELS[@]}"; do
+                    if git_via "$ch" pull origin main; then break; fi
+                done
                 ;;
             3)
                 exit 1
@@ -233,7 +270,8 @@ chmod +x "$INSTALL_DIR"/scripts/*.sh 2>/dev/null || true
 
 # 5.3 git safe.directory(避免 dubious ownership)
 info "配置 git safe.directory..."
-sudo -u "$REAL_USER" git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+run_git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
 # 5.4 创建运行时目录并设置权限
 for d in backup uploads logs; do
