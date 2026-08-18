@@ -6,9 +6,9 @@
 #          deploy 分支(orphan 分支,独立历史)。
 # 服务器只需跟踪 deploy 分支,git pull 即可更新,无需构建。
 #
-# deploy 分支包含一键安装脚本 install.sh,服务器执行(多加速器自动切换):
-#   for p in "https://gh-proxy.com/https/" "https://ghp.keleyaa.com/https/" "https://g.blfrp.cn/https/" "https://gh.llkk.cc/https/" "https://ghpxy.hwinzniej.top/https/" "https://"; do
-#     curl -fsSL --connect-timeout 8 --max-time 60 "${p}raw.githubusercontent.com/MingTu01/canteen/main/install.sh" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
+# deploy 分支包含一键安装脚本 install.sh,服务器执行(多通道自动切换,jsdelivr CDN 优先):
+#   for u in "https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh" "https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh"; do
+#     curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break
 #   done && sudo bash /tmp/canteen-install.sh
 #
 # 相比手动 publish.sh / push_deploy.py 的优势:
