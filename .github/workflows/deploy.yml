@@ -165,8 +165,9 @@ jobs:
             cp "$WS/scripts/$s" scripts/
             chmod +x "scripts/$s"
           done
-          # Python 自愈脚本
+          # Python 脚本:自愈 + 微信公众号配置(文档引用,必须在服务器可用)
           cp "$WS/scripts/self_heal.py" scripts/ && chmod +x scripts/self_heal.py
+          cp "$WS/scripts/wechat_setup.py" scripts/
 
           # 构建产物
           cp -r "$WS/deploy" deploy
