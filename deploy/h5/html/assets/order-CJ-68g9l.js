@@ -1,1 +1,0 @@
-import{y as e,U as t,a2 as n}from"./index-BFzkUfTs.js";function o(r){return t("/order",r)}function c(){return e("/order/my")}function s(r){return e(`/order/${r}`)}function u(r){return n(`/order/${r}/cancel`)}export{s as a,u as b,o as c,c as g};
