@@ -111,6 +111,17 @@ const openEdit = (row: Employee) => {
 
 const cardNoInput = ref()
 
+/**
+ * 卡号输入处理:去除前导零。
+ * 读卡器(不同型号)可能输出补零到固定位数的卡号(如 0012345678),
+ * 而系统统一存储"无前导零"格式,录入时自动剥离前导零,
+ * 避免同一张卡因位数差异产生多个账号。
+ * 同时过滤非数字字符,保持卡号纯数字。
+ */
+const onCardNoInput = (val: string) => {
+  form.value.cardNo = val.replace(/[^0-9]/g, '').replace(/^0+/, '')
+}
+
 /** 弹窗打开后:聚焦卡号输入框,刷卡即可填入 */
 const onDialogOpened = async () => {
   nextTick(() => cardNoInput.value?.focus())
@@ -145,6 +156,12 @@ const handleToggleStatus = async (row: Employee) => {
 const handleSave = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  // 卡号兜底:保存前再剥离一次前导零与非法字符(防粘贴等旁路场景)
+  form.value.cardNo = String(form.value.cardNo ?? '').replace(/[^0-9]/g, '').replace(/^0+/, '')
+  if (!form.value.cardNo) {
+    ElMessage.warning('卡号不能为空且不能只包含 0')
+    return
+  }
   dialogLoading.value = true
   try {
     if (isEdit.value && form.value.id) {
@@ -356,7 +373,8 @@ const handleImportFile = async (file: UploadFile) => {
       const statusStr = String(r['状态'] ?? r['status'] ?? '').trim()
       const avatarStr = String(r['头像URL'] ?? r['avatar'] ?? r['头像'] ?? '').trim()
       return {
-        cardNo: String(r['卡号'] ?? r['cardNo'] ?? '').trim(),
+        // 卡号规范化:仅数字 + 去前导零(与手动录入规则一致,兼容读卡器补零格式)
+        cardNo: String(r['卡号'] ?? r['cardNo'] ?? '').replace(/[^0-9]/g, '').replace(/^0+/, ''),
         phone: String(r['手机号'] ?? r['phone'] ?? '').trim() || undefined,
         name: String(r['姓名'] ?? r['name'] ?? '').trim(),
         departmentName: String(r['部门名称'] ?? r['departmentName'] ?? '').trim() || undefined,
@@ -951,9 +969,10 @@ const photoStats = computed(() => {
             <ElInput
               ref="cardNoInput"
               v-model="form.cardNo"
-              placeholder="将光标置于此处后刷卡,自动填入卡号"
+              placeholder="将光标置于此处后刷卡,自动填入卡号(首位不为 0)"
               aria-required="true"
               clearable
+              @input="onCardNoInput"
             >
               <template #suffix>
                 <span

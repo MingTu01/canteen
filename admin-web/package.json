@@ -1,6 +1,6 @@
 {
   "name": "canteen-admin",
-  "version": "0.0.45",
+  "version": "0.0.46",
   "type": "module",
   "scripts": {
     "dev": "vite",

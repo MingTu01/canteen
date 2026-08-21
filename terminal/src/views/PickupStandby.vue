@@ -8,7 +8,8 @@
  * - 刷卡/扫码提示(USB 读卡器和扫码枪作为键盘设备,Enter 结束输入)
  *   - 先尝试刷卡(员工接口),失败再尝试支付码/身份二维码
  *
- * 生产环境:仅支持 USB 读卡器/扫码枪(键盘模拟输入)
+ * 设备策略:读卡器与扫码枪均为 USB HID 键盘模拟设备(无摄像头适配),
+ * 提示文字固定为"请刷卡或扫码取餐",不做设备在线检测轮询(低性能设备减负)。
  */
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
@@ -17,13 +18,11 @@ import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2, Camera, ScanLine, Search } from 'lucide-vue-next'
+import { CreditCard, Loader2, Search } from 'lucide-vue-next'
 
 import Modal from '@/components/Modal.vue'
 import OrderQueryModal from '@/components/OrderQueryModal.vue'
 import { useCardReader } from '@/composables/useCardReader'
-import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
-import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
 
 const router = useRouter()
 const clock = ref('')
@@ -82,21 +81,20 @@ const dismissError = () => {
 }
 
 /**
- * 统一输入处理:USB 读卡器、扫码枪和摄像头扫码都作为键盘设备,Enter 结束输入。
+ * 统一输入处理:USB 读卡器、扫码枪都作为键盘设备,Enter 结束输入。
  *
  * @param code 扫码/刷卡内容
- * @param fromCamera 是否来自摄像头扫码(默认 false,即来自读卡器/扫码枪)
  *
  * 安全策略:
  * - 读卡器(DLL/USB HID):接受纯数字卡号识别(物理持有,安全)
- * - 扫码枪/摄像头:接受一次性支付码(32位hex)+ 身份二维码,不接受纯卡号(防远程冒充)
+ * - 扫码枪(HID):接受一次性支付码(32位hex)+ 身份二维码,不接受纯卡号(防远程冒充)
  *
  * 依次尝试:
  *   1. 旧版身份二维码(以 { 开头,兼容)→ /terminal/verify-qrcode
- *   2. 一次性支付码(32位hex)→ /terminal/verify-paycode(扫码枪/摄像头都接受)
- *   3. 刷卡识别(仅读卡器/扫码枪,摄像头拒绝)→ 本地缓存
+ *   2. 一次性支付码(32位hex)→ /terminal/verify-paycode(扫码枪接受)
+ *   3. 刷卡识别 → 本地缓存
  */
-const handleInput = async (code: string, fromCamera = false) => {
+const handleInput = async (code: string) => {
   if (scanning.value || !code) return
   scanning.value = true
   try {
@@ -121,7 +119,7 @@ const handleInput = async (code: string, fromCamera = false) => {
     }
 
     // 2. 一次性支付码:32 位 hex(小写)→ /terminal/verify-paycode
-    //    扫码枪和摄像头都接受,核销即失效,防截图重放
+    //    扫码枪接受,核销即失效,防截图重放
     //    大小写归一化:部分 HID 扫码枪出厂输出大写,后端按小写 key 核销
     const payCode = trimmed.toLowerCase()
     if (/^[0-9a-f]{32}$/.test(payCode)) {
@@ -138,29 +136,21 @@ const handleInput = async (code: string, fromCamera = false) => {
       }
     }
 
-    // 3. 作为卡号识别员工(仅读卡器/扫码枪,摄像头不接受纯卡号防远程冒充)
-    if (!fromCamera) {
-      try {
-        const emp = await getEmployeeByCardNo(trimmed)
-        if (emp) {
-          resetPickupFlow()
-          pickupStore.employee = emp
-          router.push('/pickup/verify')
-          return
-        }
-      } catch { /* 非员工卡 */ }
-    }
+    // 3. 作为卡号识别员工(读卡器/扫码枪,优先查本地缓存,毫秒级)
+    try {
+      const emp = await getEmployeeByCardNo(trimmed)
+      if (emp) {
+        resetPickupFlow()
+        pickupStore.employee = emp
+        router.push('/pickup/verify')
+        return
+      }
+    } catch { /* 非员工卡 */ }
 
     // 所有方式均未匹配
-    if (fromCamera) {
-      showErrorWithAutoClose('取餐失败', '请扫描H5「我的」页生成的支付码')
-    } else {
-      showErrorWithAutoClose('取餐失败', '卡号不存在')
-    }
+    showErrorWithAutoClose('取餐失败', '卡号不存在')
   } catch (e: any) {
-    // 摄像头扫码异常(网络错误等)与未匹配区分文案,便于现场排查
-    showErrorWithAutoClose('取餐失败',
-      fromCamera ? '请扫描H5「我的」页生成的支付码' : '卡号不存在')
+    showErrorWithAutoClose('取餐失败', '卡号不存在')
   } finally {
     scanning.value = false
   }
@@ -181,54 +171,10 @@ useCardReader((cardNo) => {
   handleInput(cardNo)
 })
 
-// ===== 摄像头后台扫码(无感,与读卡器并行) =====
-// 自动启动摄像头,持续扫码,与读卡器同时工作,接受同一个防抖间隔
-const cameraSupported = isCameraSupported()
-const videoRef = ref<HTMLVideoElement | null>(null)
-const cameraActive = ref(false) // 摄像头是否已启动
-
-const {
-  start: startCamera,
-  stop: stopCamera,
-  cameraAvailable,
-} = useCameraScanner(
-  (code) => {
-    // 摄像头扫描到码:关闭弹窗并走统一输入处理
-    // fromCamera=true:摄像头不接受纯卡号识别员工(防远程冒充)
-    if (showError.value) dismissError()
-    if (showOrderQuery.value) showOrderQuery.value = false
-    handleInput(code, true)
-  },
-  // 同码 30 秒冷却(内置默认):防摄像头流冻结/视野内常驻码反复触发错误弹窗
-)
-
-// ===== 设备在线检测(读卡器 + 摄像头) =====
-// 读卡器:Python Shell 环境 3 秒轮询真实硬件状态;摄像头:由 cameraAvailable 驱动
-const { hasCardReader, hasCamera } = useDevicePresence(cameraAvailable)
-
-/** 待机页提示文字(根据在线设备动态变化) */
-const scanHint = computed(() =>
-  getScanHint(hasCardReader.value, hasCamera.value, true),
-)
-
-/** 待机页图标:确定只有读卡器(无摄像头)用 CreditCard,其余用 CreditCard(默认)
- *  不再使用 ScanLine:USB HID 读卡器无法检测,默认显示 CreditCard 更通用 */
-const showScanIcon = computed(() => false)
-
-/** 主刷卡图标点击:根据设备显示对应提示
- *  USB HID 读卡器无法检测,提示需兼顾刷卡和扫码 */
+/** 主刷卡图标点击:显示固定提示(读卡器/扫码枪均为 HID 设备) */
 const onCardClick = () => {
   if (scanning.value) return
-  if (hasCardReader.value && !hasCamera.value) {
-    // 确定只有 DLL 读卡器(无摄像头):只提示刷卡
-    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上')
-  } else if (hasCamera.value) {
-    // 有摄像头(可能还有 USB HID 读卡器):都提示
-    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或扫描支付码/身份二维码')
-  } else {
-    // 无摄像头无读卡器:USB HID 读卡器/扫码枪可能存在,都提示
-    showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描支付码')
-  }
+  showErrorWithAutoClose('提示', '请将员工卡放置在读卡器上,或使用扫码枪扫描支付码')
 }
 
 onMounted(() => {
@@ -237,19 +183,11 @@ onMounted(() => {
   timer = window.setInterval(updateClock, 1000)
   // 前台拉取品牌信息(首次加载也立即展示缓存,再异步校验)
   fetchBranding()
-  // 自动启动摄像头后台扫码(无感,与读卡器并行)
-  if (cameraSupported) {
-    // 等待 DOM 渲染 <video> 后再启动
-    setTimeout(async () => {
-      cameraActive.value = await startCamera(videoRef.value)
-    }, 200)
-  }
 })
 onUnmounted(() => {
   clearInterval(timer)
   if (successTimer) clearTimeout(successTimer)
   if (errorTimer) clearTimeout(errorTimer)
-  stopCamera()
 })
 </script>
 
@@ -277,7 +215,7 @@ onUnmounted(() => {
         <div class="pickup-standby__date">{{ dateLabel }}</div>
       </div>
 
-      <!-- 刷卡区(呼吸动画) -->
+      <!-- 刷卡区 -->
       <div class="pickup-standby__scan-section">
         <button
           class="pickup-standby__scan-btn"
@@ -287,32 +225,13 @@ onUnmounted(() => {
         >
           <Loader2 v-if="scanning" class="spinner" :size="56" />
           <div v-else class="pickup-standby__scan-icon">
-            <ScanLine v-if="showScanIcon" :size="56" />
-            <CreditCard v-else :size="56" />
+            <CreditCard :size="56" />
           </div>
         </button>
         <div class="pickup-standby__scan-hint">
-          {{ scanning ? '识别中...' : scanHint }}
+          {{ scanning ? '识别中...' : '请刷卡或扫码取餐' }}
         </div>
-
-        <!-- 摄像头扫码按钮 -->
       </div>
-    </div>
-
-    <!-- 摄像头后台扫码(隐藏 video,仅用于 ZXing 解码) -->
-    <video
-      v-if="cameraSupported"
-      ref="videoRef"
-      autoplay
-      playsinline
-      muted
-      class="pickup-standby__camera-hidden"
-    />
-
-    <!-- 摄像头状态指示器(右上角小图标) -->
-    <div v-if="cameraSupported" class="pickup-standby__camera-status">
-      <Camera :size="16" />
-      <span class="pickup-standby__camera-status-dot" :class="cameraActive ? 'pickup-standby__camera-status-dot--on' : ''" />
     </div>
 
     <!-- 取餐成功提示(非阻塞,2 秒后消失) -->
@@ -426,7 +345,7 @@ onUnmounted(() => {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* 刷卡区(白色玻璃态呼吸动画) */
+/* 刷卡区 */
 .pickup-standby__scan-section {
   display: flex;
   flex-direction: column;
@@ -444,14 +363,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  /* X86 低端集显:animation 与 transition 并存会反复重建合成层导致闪烁,
-     删除 transition 仅保留 pulse 动画(transform/opacity,见 style.css keyframes) */
-  animation: pulse-ring 2.4s ease-in-out infinite;
+  /* X86 低端设备:取消脉冲等持续动画,GPU 持续重绘会导致闪烁/高负载 */
 }
 .pickup-standby__scan-btn:active { transform: scale(0.95); }
 .pickup-standby__scan-btn--loading {
   background: rgba(255, 255, 255, 0.1);
-  animation: none;
 }
 .pickup-standby__scan-icon {
   width: 100px;
@@ -482,43 +398,6 @@ onUnmounted(() => {
   font-size: var(--fs-lg);
   font-weight: 700;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-}
-
-/* 摄像头后台扫码:隐藏 video 元素(ZXing 解码用,用户不可见) */
-.pickup-standby__camera-hidden {
-  position: absolute;
-  width: 2px;
-  height: 2px;
-  opacity: 0;
-  pointer-events: none;
-  top: -9999px;
-  left: -9999px;
-}
-
-/* 摄像头状态指示器(右上角小图标) */
-.pickup-standby__camera-status {
-  position: fixed;
-  top: 20px;
-  right: 24px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.6);
-  font-size: var(--fs-xs);
-}
-.pickup-standby__camera-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(239, 68, 68, 0.8);
-}
-.pickup-standby__camera-status-dot--on {
-  background: rgba(7, 193, 96, 0.9);
-  box-shadow: 0 0 6px rgba(7, 193, 96, 0.6);
 }
 
 /* 竖屏适配 */

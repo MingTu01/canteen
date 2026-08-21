@@ -213,19 +213,6 @@ class FullscreenWebPage(QWebEnginePage):
         # 阻止 target=_blank 弹出新窗口
         return None
 
-    def featurePermissionRequested(self, url, feature):
-        """自动授予摄像头/媒体权限。
-
-        PyQtWebEngine 默认拒绝 getUserMedia 请求,导致前端
-        navigator.mediaDevices.enumerateDevices() 拿不到摄像头设备。
-        终端是本地应用,自动授予 MediaVideoCapture 权限即可。
-        """
-        if feature == QWebEnginePage.MediaVideoCapture:
-            self.setFeaturePermission(url, QWebEnginePage.MediaVideoCapture, QWebEnginePage.PermissionGrantedByUser)
-            print(f'[WebEngine] 已授予摄像头权限: {url.toString()}')
-        else:
-            super().featurePermissionRequested(url, feature)
-
 
 class TerminalWindow(QWidget):
     """终端主窗口:全屏无边框 + QWebEngineView。"""

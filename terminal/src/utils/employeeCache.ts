@@ -125,26 +125,43 @@ export async function getEmployeeByCardNo(cardNo: string): Promise<CachedEmploye
 
 /**
  * 生成卡号的多种格式变体,兼容 USB 读卡器(OUR_IDR.dll)和 HID 键盘模拟读卡器。
- * 返回数组:原始卡号、去前导零、仅数字、后10位、后8位
+ *
+ * 读卡器型号差异:同一张卡可能输出不同位数(常见 WG26/WG34 协议会
+ * 在卡号前补 0 到固定位数,如 0012345678)。
+ * admin 端已统一"无前导零"录入,但历史数据可能是补零格式,
+ * 因此变体同时覆盖"去零"与"补零"双向,配合后 10/8 位截断:
+ *   1. 原始卡号(精确)
+ *   2. 去前导零(读卡器补零 → 数据库无零格式)
+ *   3. 仅数字(去分隔符,如 WG26 "123;45678")
+ *   4. 补零到 10 位 / 8 位(读卡器短卡号 → 数据库补零旧数据)
+ *   5. 后 10 位 / 后 8 位(读卡器输出更长序列)
  */
 function generateCardNoVariants(cardNo: string): string[] {
   if (!cardNo) return []
   const trimmed = cardNo.trim()
-  const variants = [trimmed]
-  // 去除前导零
-  const noZeros = trimmed.replace(/^0+/, '')
-  if (noZeros && noZeros !== trimmed) variants.push(noZeros)
-  // 仅保留数字
-  const digitsOnly = trimmed.replace(/[^0-9]/g, '')
-  if (digitsOnly && digitsOnly !== trimmed) {
-    variants.push(digitsOnly)
-    const digitsNoZeros = digitsOnly.replace(/^0+/, '')
-    if (digitsNoZeros && digitsNoZeros !== digitsOnly) variants.push(digitsNoZeros)
+  const variants: string[] = []
+  const push = (v: string) => {
+    if (v && !variants.includes(v)) variants.push(v)
   }
-  // 后10位
-  if (digitsOnly.length > 10) variants.push(digitsOnly.substring(digitsOnly.length - 10))
-  // 后8位
-  if (digitsOnly.length > 8) variants.push(digitsOnly.substring(digitsOnly.length - 8))
+
+  push(trimmed)
+
+  // 仅保留数字(在读卡器输出含分隔符时提前得到纯数字形式)
+  const digitsOnly = trimmed.replace(/[^0-9]/g, '')
+  push(digitsOnly)
+
+  // 去前导零(最常见:读卡器补零输出,数据库为无零格式)
+  const noZeros = digitsOnly.replace(/^0+/, '')
+  push(noZeros)
+
+  // 补零到固定位数(反向兼容:数据库历史数据为补零格式,读卡器输出短卡号)
+  if (noZeros && noZeros.length < 10) push(noZeros.padStart(10, '0'))
+  if (noZeros && noZeros.length < 8) push(noZeros.padStart(8, '0'))
+
+  // 后 10 位 / 后 8 位(读卡器输出更长序列时截断)
+  if (digitsOnly.length > 10) push(digitsOnly.substring(digitsOnly.length - 10))
+  if (digitsOnly.length > 8) push(digitsOnly.substring(digitsOnly.length - 8))
+
   return variants
 }
 

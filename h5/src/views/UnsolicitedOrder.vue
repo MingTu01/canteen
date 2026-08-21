@@ -61,6 +61,20 @@ const currentMealLabel = computed(() => {
   return mt ? formatMealType(mt) : '未知'
 })
 
+/**
+ * 是否已到当前餐别的用餐开始时间。
+ * 未到开始时间时,页面显示"未到用餐时间",不显示服务器时间/日期等信息。
+ */
+const isMealTimeArrived = computed((): boolean => {
+  if (!serverTime.value || !currentMealType.value) return false
+  const slot = diningTimes.value.find((s) => s.mealType === currentMealType.value)
+  // 无该餐别时段配置时,视为已到用餐时间(兜底,不影响原有逻辑)
+  if (!slot) return true
+  const startMin = parseTimeToMinutes(slot.startTime)
+  if (startMin < 0) return true
+  return serverTime.value.minutes >= startMin
+})
+
 /** 当前餐别的菜单 */
 const currentMenu = computed(() => {
   const mt = currentMealType.value
@@ -277,16 +291,24 @@ onUnmounted(() => {
       <section class="unsolicited__meal-info">
         <div class="unsolicited__meal-row">
           <span class="unsolicited__meal-label">当前餐别</span>
-          <span class="unsolicited__meal-value">{{ currentMealLabel }}</span>
+          <span
+            class="unsolicited__meal-value"
+            :class="{ 'unsolicited__meal-value--pending': !isMealTimeArrived }"
+          >
+            {{ isMealTimeArrived ? currentMealLabel : '未到用餐时间' }}
+          </span>
         </div>
-        <div class="unsolicited__meal-row">
-          <span class="unsolicited__meal-label">服务器时间</span>
-          <span class="unsolicited__meal-value">{{ serverTime?.time || '--:--' }}</span>
-        </div>
-        <div class="unsolicited__meal-row">
-          <span class="unsolicited__meal-label">日期</span>
-          <span class="unsolicited__meal-value">{{ serverTime?.date || '-' }}</span>
-        </div>
+        <!-- 已到用餐时间才显示服务器时间/日期;未到时只显示"未到用餐时间" -->
+        <template v-if="isMealTimeArrived">
+          <div class="unsolicited__meal-row">
+            <span class="unsolicited__meal-label">服务器时间</span>
+            <span class="unsolicited__meal-value">{{ serverTime?.time || '--:--' }}</span>
+          </div>
+          <div class="unsolicited__meal-row">
+            <span class="unsolicited__meal-label">日期</span>
+            <span class="unsolicited__meal-value">{{ serverTime?.date || '-' }}</span>
+          </div>
+        </template>
       </section>
 
       <!-- 提示:需打菜人员确认 -->
@@ -492,6 +514,10 @@ onUnmounted(() => {
   color: #1989fa;
   font-weight: 600;
   font-size: 16px;
+}
+/* 未到用餐时间:橙色提示态 */
+.unsolicited__meal-value--pending {
+  color: #fa8c16;
 }
 
 .unsolicited__notice {

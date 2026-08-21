@@ -28,7 +28,6 @@ import {
   Monitor,
   CreditCard,
   Timer,
-  Camera,
   Usb,
   RefreshCw,
   CheckCircle,
@@ -46,7 +45,6 @@ import {
   idleTimeoutSeconds,
   isPythonShell,
 } from '@/store/terminalSettings'
-import { isCameraSupported } from '@/composables/useCameraScanner'
 import TopBar from '@/components/TopBar.vue'
 
 const router = useRouter()
@@ -70,10 +68,6 @@ const bindError = ref('')
 const bindSuccess = ref(false)
 let bindSuccessTimer: ReturnType<typeof setTimeout> | null = null
 
-// 探测状态:用于按钮文案与提示
-const probing = ref(false)
-const probeMessage = ref('')
-
 // ===== 解绑(需管理员密码二次校验,防止未授权人员物理接触后解绑) =====
 const unbindConfirmVisible = ref(false)
 const unbindVerifying = ref(false)
@@ -92,17 +86,13 @@ const runtimeSaving = ref(false)
 const runtimeMsg = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 let runtimeMsgTimer: ReturnType<typeof setTimeout> | null = null
 
-// ===== 设备状态检查(读卡器 + 摄像头/扫码枪) =====
+// ===== 设备状态检查(读卡器;扫码枪为 HID 键盘模拟设备,无需单独检测) =====
 /** 读卡器状态(null = 未检测) */
 const cardReaderStatus = ref<CardReaderStatus | null>(null)
-/** 摄像头设备列表 */
-const cameraDevices = ref<{ label: string; deviceId: string }[]>([])
 /** 设备检测中 */
 const deviceChecking = ref(false)
 /** 读卡器重启中 */
 const cardReaderRestarting = ref(false)
-/** 摄像头是否支持 */
-const cameraSupported = isCameraSupported()
 
 /**
  * 检测读卡器状态(Python Shell 环境)。
@@ -121,38 +111,11 @@ const checkCardReader = async () => {
   }
 }
 
-/**
- * 检测摄像头/扫码枪设备。
- * 使用 navigator.mediaDevices.enumerateDevices() 枚举视频输入设备。
- * 需要先获得 getUserMedia 权限才能拿到设备 label。
- */
-const checkCameras = async () => {
-  if (!cameraSupported) {
-    cameraDevices.value = []
-    return
-  }
-  try {
-    // 先请求权限,这样才能拿到设备 label
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-    stream.getTracks().forEach((t) => t.stop())
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    cameraDevices.value = devices
-      .filter((d) => d.kind === 'videoinput')
-      .map((d) => ({
-        label: d.label || `摄像头 ${d.deviceId.slice(0, 8)}`,
-        deviceId: d.deviceId,
-      }))
-  } catch {
-    // 权限被拒绝或无摄像头
-    cameraDevices.value = []
-  }
-}
-
 /** 一键检查所有设备 */
 const checkAllDevices = async () => {
   deviceChecking.value = true
   try {
-    await Promise.all([checkCardReader(), checkCameras()])
+    await checkCardReader()
   } finally {
     deviceChecking.value = false
   }
@@ -239,83 +202,12 @@ const reloadBound = () => {
 }
 
 /**
- * 自动探测后端端口。
- * 用户输入 "http://192.168.10.79" 时,自动尝试常见端口找到后端。
- * 探测用 no-cors fetch:只要 TCP 连通就认为端口可用(opaque 响应也 resolve)。
- *
- * @param baseUrl 用户输入的基础地址
- * @returns 探测到的完整 URL(含端口);无需探测或探测失败返回 null
+ * 端口规则(一次性解决连接问题):
+ * - 填写端口 → 使用填写的端口(如 https://canteen.xxx.com:8443)
+ * - 不填端口 → http 默认 80、https 默认 443(浏览器/axios 自动处理)
+ * - 不做任何端口探测:no-cors 探测在 HTTPS(证书校验/反代)下会误判失败,
+ *   导致"无法连接服务器"。连通性由绑定请求本身验证,失败时展示真实错误。
  */
-async function probeBackendPort(baseUrl: string): Promise<string | null> {
-  let parsed: URL
-  try {
-    // 允许不带协议的输入,如 "192.168.10.79"
-    if (!/^https?:\/\//i.test(baseUrl)) {
-      baseUrl = 'http://' + baseUrl
-    }
-    parsed = new URL(baseUrl)
-  } catch {
-    return null
-  }
-
-  const protocol = parsed.protocol
-  const hostname = parsed.hostname
-
-  // 已显式带端口 → 不探测
-  if (parsed.port) return null
-
-  // 候选端口:按可能性排序
-  const candidates = protocol === 'https:'
-    ? [443, 8443, 8080, 9080, 9000]
-    : [8080, 80, 8443, 8888, 9090, 3000, 5000, 81, 82, 83, 8081, 8082, 9000]
-
-  // 探测单个端口:2 秒超时,no-cors 模式只检测连通性
-  const probe = (port: number): Promise<number | null> => {
-    return new Promise((resolve) => {
-      const controller = new AbortController()
-      const timer = setTimeout(() => {
-        controller.abort()
-        resolve(null)
-      }, 2000)
-      fetch(`${protocol}//${hostname}:${port}/api/system/health`, {
-        mode: 'no-cors',
-        signal: controller.signal,
-        cache: 'no-cache',
-      }).then(() => {
-        clearTimeout(timer)
-        resolve(port)
-      }).catch(() => {
-        clearTimeout(timer)
-        resolve(null)
-      })
-    })
-  }
-
-  // 并行探测,第一个成功即返回
-  return new Promise((resolve) => {
-    let settled = false
-    let remaining = candidates.length
-    candidates.forEach(port => {
-      probe(port).then(result => {
-        if (settled) return
-        if (result !== null) {
-          settled = true
-          // 默认端口不显式写出
-          if ((protocol === 'http:' && result === 80) ||
-              (protocol === 'https:' && result === 443)) {
-            resolve(`${protocol}//${hostname}`)
-          } else {
-            resolve(`${protocol}//${hostname}:${result}`)
-          }
-        } else {
-          remaining--
-          if (remaining === 0) resolve(null)
-        }
-      })
-    })
-  })
-}
-
 const doBind = async () => {
   bindError.value = ''
   // serverUrl 允许留空(同源开发模式)
@@ -330,28 +222,11 @@ const doBind = async () => {
 
   binding.value = true
 
-  // 自动探测端口:用户输入的地址没带端口时,尝试常见端口
+  // 标准化地址:不带协议时补 http://(端口留空即用协议默认端口)
   let finalServerUrl = form.value.serverUrl.trim()
-  if (finalServerUrl && !/^https?:\/\/[^\s/]+:\d+/i.test(finalServerUrl)) {
-    probing.value = true
-    probeMessage.value = '正在探测服务器端口...'
-    try {
-      const detected = await probeBackendPort(finalServerUrl)
-      if (detected) {
-        finalServerUrl = detected
-        form.value.serverUrl = detected // 回填到表单,用户可见
-        probeMessage.value = ''
-      } else {
-        probing.value = false
-        bindError.value = '无法连接服务器,请检查地址或手动指定端口(如 :8080)'
-        binding.value = false
-        return
-      }
-    } catch {
-      probing.value = false
-      // 探测失败不阻断,继续用原地址尝试绑定(让后端给出明确错误)
-    }
-    probing.value = false
+  if (finalServerUrl && !/^https?:\/\//i.test(finalServerUrl)) {
+    finalServerUrl = 'http://' + finalServerUrl
+    form.value.serverUrl = finalServerUrl
   }
 
   try {
@@ -371,8 +246,13 @@ const doBind = async () => {
       goRun()
     }, 800)
   } catch (e: any) {
-    const msg = e?.response?.data?.message || e?.message || '绑定失败'
-    bindError.value = msg
+    if (e?.code === 'ERR_NETWORK' || e?.code === 'ECONNABORTED' || !e?.response) {
+      // 网络层失败:无法建立连接(地址错误/端口不通/证书问题)
+      bindError.value = `无法连接 ${finalServerUrl || '同源服务'},请检查地址是否正确、端口是否开放(http 默认 80,https 默认 443)`
+    } else {
+      const msg = e?.response?.data?.message || e?.message || '绑定失败'
+      bindError.value = msg
+    }
   } finally {
     binding.value = false
   }
@@ -485,8 +365,6 @@ async function prefillServerUrl() {
 
 /** 设备状态轮询定时器 */
 let devicePollTimer: ReturnType<typeof setInterval> | null = null
-/** devicechange 事件处理函数引用 */
-let deviceChangeHandler: (() => void) | null = null
 
 onMounted(async () => {
   reloadBound()
@@ -502,16 +380,6 @@ onMounted(async () => {
   if (isPythonShell.value) {
     devicePollTimer = setInterval(checkCardReader, 3000)
   }
-
-  // 摄像头热插拔监听(devicechange 事件)
-  // 拔掉/插入摄像头时自动重新枚举,状态实时更新
-  if (cameraSupported && navigator.mediaDevices) {
-    deviceChangeHandler = () => {
-      // 延迟 500ms 等设备枚举稳定
-      setTimeout(checkCameras, 500)
-    }
-    navigator.mediaDevices.addEventListener('devicechange', deviceChangeHandler)
-  }
 })
 onBeforeUnmount(() => {
   if (bindSuccessTimer) clearTimeout(bindSuccessTimer)
@@ -520,11 +388,6 @@ onBeforeUnmount(() => {
   if (devicePollTimer) {
     clearInterval(devicePollTimer)
     devicePollTimer = null
-  }
-  // 清理 devicechange 监听
-  if (deviceChangeHandler && navigator.mediaDevices) {
-    navigator.mediaDevices.removeEventListener('devicechange', deviceChangeHandler)
-    deviceChangeHandler = null
   }
 })
 </script>
@@ -744,35 +607,6 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
               </div>
-
-              <!-- 摄像头/扫码枪状态 -->
-              <div class="settings__device-item">
-                <div class="settings__device-icon" :class="cameraDevices.length > 0 ? 'settings__device-icon--ok' : 'settings__device-icon--err'">
-                  <CheckCircle v-if="cameraDevices.length > 0" :size="20" />
-                  <XCircle v-else :size="20" />
-                </div>
-                <div class="settings__device-info">
-                  <div class="settings__device-name">
-                    <Camera :size="14" />
-                    <span>摄像头/扫码枪</span>
-                    <span
-                      class="settings__device-badge"
-                      :class="cameraDevices.length > 0 ? 'settings__device-badge--ok' : 'settings__device-badge--err'"
-                    >
-                      {{ cameraDevices.length > 0 ? `已连接(${cameraDevices.length}个)` : '未检测到' }}
-                    </span>
-                  </div>
-                  <div v-if="cameraDevices.length > 0" class="settings__device-desc">
-                    <div v-for="cam in cameraDevices" :key="cam.deviceId" class="settings__device-sub">
-                      · {{ cam.label }}
-                    </div>
-                  </div>
-                  <div v-else class="settings__device-desc">
-                    <template v-if="!cameraSupported">浏览器不支持摄像头 API</template>
-                    <template v-else>未检测到摄像头设备,或权限被拒绝。USB 扫码枪(键盘模拟)不需要摄像头,可正常使用。</template>
-                  </div>
-                </div>
-              </div>
             </div>
           </section>
 
@@ -812,12 +646,12 @@ onBeforeUnmount(() => {
             </p>
             <div class="settings__form">
               <div class="settings__field">
-                <label class="settings__label">服务器地址(留空=同源开发模式,可省略端口自动探测)</label>
+                <label class="settings__label">服务器地址(留空=同源开发模式;未填端口时 http 默认 80、https 默认 443)</label>
                 <input
                   v-model="form.serverUrl"
                   type="text"
                   class="settings__input"
-                  placeholder="如 http://192.168.10.79 或 https://canteen.xxx.com (端口可省略)"
+                  placeholder="如 http://192.168.10.79:8080 或 https://canteen.xxx.com"
                 />
               </div>
               <div class="settings__field-row">
@@ -897,11 +731,6 @@ onBeforeUnmount(() => {
             <Info :size="18" class="settings__alert-icon" />
             <span>{{ bindError }}</span>
           </div>
-          <!-- 探测中提示 -->
-          <div v-if="probing" class="settings__alert settings__alert--info">
-            <Loader2 :size="18" class="spinner" />
-            <span>{{ probeMessage || '正在探测服务器端口...' }}</span>
-          </div>
           <!-- 成功提示 -->
           <div v-if="bindSuccess" class="settings__alert settings__alert--success">
             <CheckCircle2 :size="18" class="settings__alert-icon" />
@@ -911,12 +740,12 @@ onBeforeUnmount(() => {
           <!-- 绑定按钮 -->
           <button
             class="settings__primary-btn btn-press"
-            :disabled="binding || probing"
+            :disabled="binding"
             @click="doBind"
           >
-            <Loader2 v-if="binding || probing" class="spinner" :size="22" />
+            <Loader2 v-if="binding" class="spinner" :size="22" />
             <Save v-else :size="22" />
-            <span>{{ probing ? '探测中...' : (binding ? '绑定中...' : '测试并绑定') }}</span>
+            <span>{{ binding ? '绑定中...' : '测试并绑定' }}</span>
           </button>
         </template>
 

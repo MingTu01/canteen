@@ -6,11 +6,12 @@
  * - 食堂品牌背景图(若有)
  * - 顶栏:Logo + 食堂名称
  * - 中央:大时钟 + 日期
- * - 底部:刷卡区(脉冲动画)
+ * - 底部:刷卡区
  *
  * 刷卡成功 → 跳转 /order/menu
  *
- * 生产环境:仅支持 USB 读卡器(键盘模拟输入)与点击刷卡按钮提示
+ * 设备策略:读卡器与扫码枪均为 USB HID 键盘模拟设备(无摄像头适配),
+ * 提示文字固定为"请刷卡",不做设备在线检测轮询(低性能设备减负)。
  */
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
@@ -19,11 +20,9 @@ import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey, fullDateLabel, pad2 } from '@/utils'
-import { CreditCard, Loader2, Camera, ScanLine } from 'lucide-vue-next'
+import { CreditCard, Loader2 } from 'lucide-vue-next'
 
 import { useCardReader } from '@/composables/useCardReader'
-import { useCameraScanner, isCameraSupported } from '@/composables/useCameraScanner'
-import { useDevicePresence, getScanHint } from '@/composables/useDevicePresence'
 
 const router = useRouter()
 const clock = ref('')
@@ -45,19 +44,18 @@ const updateClock = () => {
 /**
  * 统一输入处理。
  * @param input 扫码/刷卡内容
- * @param fromCamera 是否来自摄像头扫码(默认 false,即来自读卡器/扫码枪)
  *
  * 安全策略:
  * - 读卡器(DLL/USB HID):接受纯数字卡号识别(物理持有,安全)
- * - 扫码枪/摄像头:接受一次性支付码(32位hex,核销即失效)+ 旧版JSON身份二维码(兼容)
+ * - 扫码枪(HID):接受一次性支付码(32位hex,核销即失效)+ 旧版JSON身份二维码(兼容)
  *   不接受纯卡号(防远程冒充:攻击者知道卡号即可生成二维码)
  *
  * 识别顺序:
  *   1. JSON 身份二维码(以 { 开头,兼容旧版)→ /terminal/verify-qrcode
  *   2. 32 位 hex 支付码 → /terminal/verify-paycode(一次性,防重放)
- *   3. 纯数字卡号(仅读卡器/扫码枪,摄像头拒绝)→ 本地缓存识别
+ *   3. 纯数字卡号 → 本地缓存识别
  */
-const scan = async (input: string, fromCamera = false) => {
+const scan = async (input: string) => {
   if (scanning.value || !input.trim()) return
   scanning.value = true
   scanError.value = ''
@@ -84,7 +82,7 @@ const scan = async (input: string, fromCamera = false) => {
     }
 
     // 2. 一次性支付码:32 位 hex(小写)→ /terminal/verify-paycode
-    //    扫码枪和摄像头都接受,核销即失效,防截图重放
+    //    扫码枪接受,核销即失效,防截图重放
     //    大小写归一化:部分 HID 扫码枪出厂输出大写,后端按小写 key 核销
     const payCode = trimmed.toLowerCase()
     if (/^[0-9a-f]{32}$/.test(payCode)) {
@@ -102,14 +100,7 @@ const scan = async (input: string, fromCamera = false) => {
       }
     }
 
-    // 3. 摄像头扫码不接受纯卡号识别员工(安全:防远程冒充)
-    //    攻击者知道卡号即可生成纯文本二维码,摄像头扫到就能冒充员工
-    if (fromCamera) {
-      scanError.value = '请扫描H5「我的」页生成的取餐码'
-      return
-    }
-
-    // 4. 读卡器/扫码枪:作为卡号识别员工(优先查本地缓存,毫秒级)
+    // 3. 读卡器/扫码枪:作为卡号识别员工(优先查本地缓存,毫秒级)
     const emp = await getEmployeeByCardNo(trimmed)
     if (emp) {
       resetOrderFlow()
@@ -143,52 +134,15 @@ useCardReader((cardNo) => {
   scan(cardNo)
 })
 
-// ===== 摄像头后台扫码(无感,与读卡器并行) =====
-// 自动启动摄像头,持续扫码,与读卡器同时工作,接受同一个防抖间隔
-const cameraSupported = isCameraSupported()
-const videoRef = ref<HTMLVideoElement | null>(null)
-const cameraActive = ref(false) // 摄像头是否已启动
-
-const {
-  start: startCamera,
-  stop: stopCamera,
-  cameraAvailable,
-} = useCameraScanner(
-  (code) => {
-    scan(code, true)  // fromCamera=true:摄像头扫码不接受纯卡号(防远程冒充)
-  },
-  // 同码 30 秒冷却(内置默认):防摄像头流冻结/视野内常驻码反复触发错误提示
-)
-
-// ===== 设备在线检测(读卡器 + 摄像头) =====
-// 读卡器:Python Shell 环境 3 秒轮询真实硬件状态;摄像头:由 cameraAvailable 驱动
-const { hasCardReader, hasCamera } = useDevicePresence(cameraAvailable)
-
-/** 待机页提示文字(根据在线设备动态变化) */
-const scanHint = computed(() =>
-  getScanHint(hasCardReader.value, hasCamera.value, false),
-)
-
-/** 待机页图标:统一用 CreditCard
- *  不再使用 ScanLine:USB HID 读卡器无法检测,默认显示 CreditCard 更通用 */
-const showScanIcon = computed(() => false)
-
 onMounted(() => {
   resetOrderFlow()
   updateClock()
   timer = window.setInterval(updateClock, 1000)
   fetchBranding({ background: true })
-  // 自动启动摄像头后台扫码(无感,与读卡器并行)
-  if (cameraSupported) {
-    setTimeout(async () => {
-      cameraActive.value = await startCamera(videoRef.value)
-    }, 200)
-  }
 })
 onUnmounted(() => {
   clearInterval(timer)
   if (scanErrorTimer) clearTimeout(scanErrorTimer)
-  stopCamera()
 })
 </script>
 
@@ -225,36 +179,17 @@ onUnmounted(() => {
           :disabled="scanning"
         >
           <Loader2 v-if="scanning" class="spinner" :size="56" />
-          <div v-else class="standby__scan-icon card-pulse">
-            <ScanLine v-if="showScanIcon" :size="56" />
-            <CreditCard v-else :size="56" />
+          <div v-else class="standby__scan-icon">
+            <CreditCard :size="56" />
           </div>
         </button>
         <div class="standby__scan-hint">
-          {{ scanning ? '识别中...' : scanHint }}
+          {{ scanning ? '识别中...' : '请刷卡' }}
         </div>
 
         <!-- 错误提示 -->
         <div v-if="scanError" class="standby__error">{{ scanError }}</div>
-
-        <!-- 摄像头扫码按钮 -->
       </div>
-    </div>
-
-    <!-- 摄像头后台扫码(隐藏 video,仅用于 ZXing 解码) -->
-    <video
-      v-if="cameraSupported"
-      ref="videoRef"
-      autoplay
-      playsinline
-      muted
-      class="standby__camera-hidden"
-    />
-
-    <!-- 摄像头状态指示器(右上角小图标) -->
-    <div v-if="cameraSupported" class="standby__camera-status">
-      <Camera :size="16" />
-      <span class="standby__camera-status-dot" :class="cameraActive ? 'standby__camera-status-dot--on' : ''" />
     </div>
   </main>
 </template>
@@ -359,14 +294,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  /* X86 低端集显:animation 与 transition 并存会反复重建合成层导致闪烁,
-     删除 transition 仅保留 pulse 动画(transform/opacity,见 style.css keyframes) */
-  animation: pulse-ring 2.4s ease-in-out infinite;
+  /* X86 低端设备:取消脉冲等持续动画,GPU 持续重绘会导致闪烁/高负载 */
 }
 .standby__scan-btn:active { transform: scale(0.95); }
 .standby__scan-btn--loading {
   background: rgba(255, 255, 255, 0.1);
-  animation: none;
 }
 .standby__scan-icon {
   width: 100px;
@@ -388,43 +320,6 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.9);
   color: white;
   font-size: var(--fs-sm);
-}
-
-/* 摄像头后台扫码:隐藏 video 元素(ZXing 解码用,用户不可见) */
-.standby__camera-hidden {
-  position: absolute;
-  width: 2px;
-  height: 2px;
-  opacity: 0;
-  pointer-events: none;
-  top: -9999px;
-  left: -9999px;
-}
-
-/* 摄像头状态指示器(右上角小图标) */
-.standby__camera-status {
-  position: fixed;
-  top: 20px;
-  right: 24px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.6);
-  font-size: var(--fs-xs);
-}
-.standby__camera-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(239, 68, 68, 0.8);
-}
-.standby__camera-status-dot--on {
-  background: rgba(7, 193, 96, 0.9);
-  box-shadow: 0 0 6px rgba(7, 193, 96, 0.6);
 }
 
 /* 底部设备信息(已移除,管理入口改为右上角 6 次点击) */

@@ -116,14 +116,15 @@ const statusInfo = (s: number) => {
   }
 }
 
-/** 拉取订单列表(reset=true 时回到第一页) */
+/**
+ * 拉取订单列表(reset=true 时回到第一页)。
+ * 低性能设备优化:reset 不立即清空旧列表,新数据到达后一次性替换,
+ * 避免列表先闪空白再闪数据的两次重排(旧数据保留期间列表高度稳定)。
+ */
 const fetchOrders = async (reset = false) => {
   if (storeId.value == null) return
   loading.value = true
-  if (reset) {
-    page.value = 1
-    orders.value = []
-  }
+  if (reset) page.value = 1
   try {
     const params: Record<string, number | string> = {
       startDate: queryDate.value,
@@ -145,7 +146,7 @@ const fetchOrders = async (reset = false) => {
       total.value = data.total || 0
     }
   } catch {
-    if (reset) orders.value = []
+    /* 请求失败保留旧列表,不清空(避免闪烁) */
   } finally {
     loading.value = false
   }
@@ -267,7 +268,7 @@ const orderTotal = (o: Order) => {
   return (o.items || []).reduce((s, it) => s + lineTotal(it), 0)
 }
 
-// 弹窗打开时初始化并拉取当天订单;关闭时清理详情
+// 弹窗打开时初始化并拉取当天订单;关闭时清理状态与列表
 watch(
   () => props.modelValue,
   (open) => {
@@ -281,7 +282,10 @@ watch(
       detailOrder.value = null
       fetchOrders(true)
     } else {
+      // 关闭时清空列表,释放 DOM(低性能设备减负),下次打开重新加载
       detailOrder.value = null
+      orders.value = []
+      total.value = 0
     }
   },
 )
@@ -289,8 +293,8 @@ watch(
 
 <template>
   <Teleport to="body">
-    <Transition name="oqm">
-      <div v-if="modelValue" class="oqm__overlay">
+    <!-- 低性能设备优化:不用 Transition 过渡(透明度渐变会整帧重绘大 DOM,低端 GPU 上表现为"闪一下"),直接渲染 -->
+    <div v-if="modelValue" class="oqm__overlay">
         <div class="oqm__panel">
           <!-- ========== 查询主界面 ========== -->
           <template v-if="view === 'list'">
@@ -375,7 +379,7 @@ watch(
             <div class="oqm__list no-scrollbar">
               <!-- 加载中(首次) -->
               <div v-if="loading && orders.length === 0" class="oqm__state">
-                <Loader2 :size="32" class="oqm__spin spinner" />
+                <Loader2 :size="32" class="oqm__spin" />
                 <span>加载中...</span>
               </div>
 
@@ -416,7 +420,7 @@ watch(
                     :disabled="loading"
                     @click="loadMore"
                   >
-                    <Loader2 v-if="loading" :size="16" class="spinner" />
+                    <Loader2 v-if="loading" :size="16" />
                     {{ loading ? '加载中...' : '加载更多' }}
                   </button>
                 </div>
@@ -469,7 +473,7 @@ watch(
             <!-- 汇总小票(不滚动,所有菜一屏显示) -->
             <div class="oqm__receipt-summary">
               <div v-if="summaryLoading" class="oqm__state">
-                <Loader2 :size="32" class="oqm__spin spinner" />
+                <Loader2 :size="32" class="oqm__spin" />
                 <span>统计中...</span>
               </div>
 
@@ -519,9 +523,8 @@ watch(
           </template>
         </div>
 
-        <!-- ========== 订单详情(小票子弹窗) ========== -->
-        <Transition name="oqm-detail">
-          <div v-if="detailOrder" class="oqm__detail-overlay">
+        <!-- ========== 订单详情(小票子弹窗,直接渲染无过渡) ========== -->
+        <div v-if="detailOrder" class="oqm__detail-overlay">
             <div class="oqm__receipt">
               <!-- 关闭按钮 -->
               <button class="oqm__receipt-close btn-press" aria-label="关闭" @click="detailOrder = null">
@@ -613,10 +616,8 @@ watch(
                 —— 感谢您的使用 ——
               </div>
             </div>
-          </div>
-        </Transition>
-      </div>
-    </Transition>
+        </div>
+    </div>
   </Teleport>
 </template>
 
@@ -682,7 +683,7 @@ watch(
   gap: 8px;
 }
 
-/* 通用按钮 */
+/* 通用按钮(低性能设备:不做 transition 过渡,状态切换瞬时完成) */
 .oqm__btn {
   display: inline-flex;
   align-items: center;
@@ -696,7 +697,6 @@ watch(
   font-size: var(--fs-sm);
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.12s ease, opacity 0.15s ease;
 }
 .oqm__btn:disabled {
   opacity: 0.5;
@@ -1285,25 +1285,6 @@ watch(
   color: var(--doubao-muted-foreground);
   letter-spacing: 1px;
 }
-
-/* ============ 动画 ============ */
-.oqm-enter-active { transition: opacity 0.2s ease; }
-.oqm-enter-active .oqm__panel {
-  transition: opacity 0.2s ease;
-}
-.oqm-enter-from { opacity: 0; }
-.oqm-enter-from .oqm__panel { opacity: 0; }
-.oqm-leave-active { transition: opacity 0.15s ease; }
-.oqm-leave-to { opacity: 0; }
-
-.oqm-detail-enter-active { transition: opacity 0.18s ease; }
-.oqm-detail-enter-active .oqm__receipt {
-  transition: opacity 0.18s ease;
-}
-.oqm-detail-enter-from { opacity: 0; }
-.oqm-detail-enter-from .oqm__receipt { opacity: 0; }
-.oqm-detail-leave-active { transition: opacity 0.13s ease; }
-.oqm-detail-leave-to { opacity: 0; }
 
 /* ============ 响应式 ============ */
 @media (max-width: 768px) {
