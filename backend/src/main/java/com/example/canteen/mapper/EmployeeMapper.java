@@ -16,11 +16,18 @@ public interface EmployeeMapper extends BaseMapper<Employee> {
     Employee selectByCardNoAndStore(@Param("cardNo") String cardNo, @Param("storeId") Long storeId);
 
     /**
-     * 卡号全局存在性检查。
-     * 不过滤 is_deleted,以便精确对齐数据库 employee.card_no 全局唯一索引(含已逻辑删除记录)。
+     * 同门店内卡号存在性检查(仅活跃员工 is_deleted=0)。
+     * 卡号允许跨门店重复,只要求同一门店内唯一;仅校验活跃员工,删除后卡号可复用。
      * excludeId 非空时排除自身(用于编辑场景)。
      */
-    int countByCardNoExcludeId(@Param("cardNo") String cardNo, @Param("excludeId") Long excludeId);
+    int countByCardNoStoreExcludeId(@Param("cardNo") String cardNo, @Param("storeId") Long storeId, @Param("excludeId") Long excludeId);
+
+    /**
+     * 手机号全局存在性检查(仅活跃员工 is_deleted=0)。
+     * 手机号是 H5 登录全系统唯一凭证(登录时后端按手机号自动定位门店)。
+     * excludeId 非空时排除自身(用于编辑场景)。
+     */
+    int countByPhoneExcludeId(@Param("phone") String phone, @Param("excludeId") Long excludeId);
 
     /** 手机号 + 门店查询(H5/小程序登录用) */
     Employee selectByPhoneAndStore(@Param("phone") String phone, @Param("storeId") Long storeId);

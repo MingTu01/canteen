@@ -11,9 +11,15 @@
         LIMIT 1
     </select>
 
-    <select id="countByCardNoExcludeId" resultType="int">
+    <select id="countByCardNoStoreExcludeId" resultType="int">
         SELECT COUNT(*) FROM employee
-        WHERE card_no = #{cardNo}
+        WHERE card_no = #{cardNo} AND store_id = #{storeId} AND is_deleted = 0
+        <if test="excludeId != null">AND id != #{excludeId}</if>
+    </select>
+
+    <select id="countByPhoneExcludeId" resultType="int">
+        SELECT COUNT(*) FROM employee
+        WHERE phone = #{phone} AND is_deleted = 0
         <if test="excludeId != null">AND id != #{excludeId}</if>
     </select>
 

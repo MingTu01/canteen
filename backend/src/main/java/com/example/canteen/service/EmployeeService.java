@@ -94,7 +94,7 @@ public class EmployeeService {
 
     public Employee createEmployee(Employee employee) {
         SecurityContext.checkStoreAccess(employee.getStoreId());
-        // 手机号必填(H5/小程序登录凭证,同店内唯一)
+        // 手机号必填(H5/小程序登录凭证,全系统唯一,登录时后端自动定位门店)
         if (employee.getPhone() == null || employee.getPhone().isBlank()) {
             throw new BusinessException("手机号不能为空");
         }
@@ -102,9 +102,13 @@ public class EmployeeService {
         if (employee.getCardNo() == null || employee.getCardNo().isBlank()) {
             throw new BusinessException("卡号不能为空");
         }
-        // 卡号全局唯一(对齐数据库 employee.card_no 唯一索引,含已逻辑删除记录),避免唯一索引冲突报 500
-        if (employeeMapper.countByCardNoExcludeId(employee.getCardNo(), null) > 0) {
+        // 卡号同一门店内唯一(跨门店可重复),仅校验活跃员工,删除后卡号可复用
+        if (employeeMapper.countByCardNoStoreExcludeId(employee.getCardNo(), employee.getStoreId(), null) > 0) {
             throw new BusinessException("卡号已存在: " + employee.getCardNo());
+        }
+        // 手机号全系统唯一(H5 登录按手机号自动定位门店),仅校验活跃员工,删除后手机号可复用
+        if (employeeMapper.countByPhoneExcludeId(employee.getPhone(), null) > 0) {
+            throw new BusinessException("手机号已存在: " + employee.getPhone());
         }
         // P1-6 修复 Mass Assignment:强制重置敏感字段,防止前端注入
         employee.setId(null);               // 防止覆盖已有记录
@@ -149,10 +153,16 @@ public class EmployeeService {
         SecurityContext.checkStoreAccess(existing.getStoreId());
         // 禁止通过 update 修改 storeId(防跨租户移动员工),用 existing.storeId 覆盖
         employee.setStoreId(existing.getStoreId());
-        // 卡号全局唯一校验(编辑场景,排除自身),避免唯一索引冲突报 500
+        // 卡号同一门店内唯一校验(编辑场景,排除自身),跨门店可重复
         if (employee.getCardNo() != null && !employee.getCardNo().isBlank()
-                && employeeMapper.countByCardNoExcludeId(employee.getCardNo(), employee.getId()) > 0) {
+                && employeeMapper.countByCardNoStoreExcludeId(
+                        employee.getCardNo(), existing.getStoreId(), employee.getId()) > 0) {
             throw new BusinessException("卡号已存在: " + employee.getCardNo());
+        }
+        // 手机号全系统唯一校验(编辑场景,排除自身)
+        if (employee.getPhone() != null && !employee.getPhone().isBlank()
+                && employeeMapper.countByPhoneExcludeId(employee.getPhone(), employee.getId()) > 0) {
+            throw new BusinessException("手机号已存在: " + employee.getPhone());
         }
         // P0-1 禁止通过 update 修改敏感字段:余额(只能走 recharge)/密码新鲜度/删除标记/强制改密标记
         // 设为 null 后,MyBatis Plus 默认 NOT_NULL 策略会跳过这些字段不更新
@@ -219,16 +229,19 @@ public class EmployeeService {
                 Employee existing = employeeMapper.selectByNameAndStore(e.getName().trim(), storeId);
                 if (existing != null) {
                     boolean changed = false;
-                    // 更新卡号(有变化且不与其他人冲突)
+                    // 更新卡号(有变化且不与同门店其他人冲突)
                     if (e.getCardNo() != null && !e.getCardNo().equals(existing.getCardNo())) {
-                        if (employeeMapper.countByCardNoExcludeId(e.getCardNo(), existing.getId()) > 0) {
+                        if (employeeMapper.countByCardNoStoreExcludeId(e.getCardNo(), existing.getStoreId(), existing.getId()) > 0) {
                             throw new BusinessException("卡号已存在: " + e.getCardNo());
                         }
                         existing.setCardNo(e.getCardNo());
                         changed = true;
                     }
-                    // 更新手机号(有变化才更新)
+                    // 更新手机号(有变化才更新,全局唯一校验)
                     if (e.getPhone() != null && !e.getPhone().equals(existing.getPhone())) {
+                        if (employeeMapper.countByPhoneExcludeId(e.getPhone(), existing.getId()) > 0) {
+                            throw new BusinessException("手机号已存在: " + e.getPhone());
+                        }
                         existing.setPhone(e.getPhone());
                         changed = true;
                     }
@@ -263,9 +276,13 @@ public class EmployeeService {
                 }
 
                 // 未匹配到已有员工:新建
-                // 卡号唯一性校验(全局,对齐数据库唯一索引含已删除记录)
-                if (employeeMapper.countByCardNoExcludeId(e.getCardNo(), null) > 0) {
+                // 卡号唯一性校验(同门店内,仅活跃员工)
+                if (employeeMapper.countByCardNoStoreExcludeId(e.getCardNo(), storeId, null) > 0) {
                     throw new BusinessException("卡号已存在");
+                }
+                // 手机号全系统唯一校验(仅活跃员工)
+                if (employeeMapper.countByPhoneExcludeId(e.getPhone(), null) > 0) {
+                    throw new BusinessException("手机号已存在");
                 }
                 e.setStoreId(storeId);
                 // P1-6 修复 Mass Assignment:批量导入也强制重置敏感字段

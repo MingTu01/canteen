@@ -8,7 +8,6 @@ import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.DiningTimeSlotMapper;
 import com.example.canteen.mapper.DishCategoryMapper;
 import com.example.canteen.mapper.DishMapper;
-import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.mapper.FeedbackMapper;
 import com.example.canteen.mapper.GroupOrderMapper;
 import com.example.canteen.mapper.MaterialMapper;
@@ -26,7 +25,6 @@ import com.example.canteen.entity.Department;
 import com.example.canteen.entity.DiningTimeSlot;
 import com.example.canteen.entity.Dish;
 import com.example.canteen.entity.DishCategory;
-import com.example.canteen.entity.Employee;
 import com.example.canteen.entity.Feedback;
 import com.example.canteen.entity.GroupOrder;
 import com.example.canteen.entity.Material;
@@ -52,7 +50,6 @@ public class StoreService {
 
     private final StoreMapper storeMapper;
     private final AdminMapper adminMapper;
-    private final EmployeeMapper employeeMapper;
     private final DishMapper dishMapper;
     private final DishCategoryMapper dishCategoryMapper;
     private final DepartmentMapper departmentMapper;
@@ -72,7 +69,6 @@ public class StoreService {
 
     public StoreService(StoreMapper storeMapper,
                         AdminMapper adminMapper,
-                        EmployeeMapper employeeMapper,
                         DishMapper dishMapper,
                         DishCategoryMapper dishCategoryMapper,
                         DepartmentMapper departmentMapper,
@@ -91,7 +87,6 @@ public class StoreService {
                         JdbcTemplate jdbcTemplate) {
         this.storeMapper = storeMapper;
         this.adminMapper = adminMapper;
-        this.employeeMapper = employeeMapper;
         this.dishMapper = dishMapper;
         this.dishCategoryMapper = dishCategoryMapper;
         this.departmentMapper = departmentMapper;
@@ -155,9 +150,11 @@ public class StoreService {
      *
      * 清理策略:
      * 1) admin:物理删除该店管理员账号(禁用会产生不可见/不可登录/不可重建的孤儿账号)
-     * 2) employee/dish:软删除(is_deleted=1),保留审计痕迹
-     * 3) 明细子表先删,其余关联表物理删除,避免 id 复用导致跨店数据串扰
-     * 4) 最后物理删除 store 表记录
+     * 2) employee:物理删除(员工卡号/手机号是跨店唯一标识,软删除残留会导致新食堂
+     *    无法复用相同卡号/手机号,故删除食堂时彻底清理)
+     * 3) dish:软删除
+     * 4) 明细子表先删,其余关联表物理删除,避免 id 复用导致跨店数据串扰
+     * 5) 最后物理删除 store 表记录
      *
      * 注:该食堂的备份文件(store{N}_*.json.gz)刻意保留 —— 删除后仍可从备份恢复整个食堂。
      *
@@ -186,8 +183,10 @@ public class StoreService {
             adminMapper.delete(new LambdaQueryWrapper<Admin>().eq(Admin::getStoreId, id));
         }
 
-        // 2) employee:软删除(is_deleted=1),保留审计痕迹
-        employeeMapper.delete(new LambdaQueryWrapper<Employee>().eq(Employee::getStoreId, id));
+        // 2) employee:物理删除(员工卡号/手机号作为跨店唯一标识,软删除会残留占用,
+        //    导致新食堂无法复用相同卡号/手机号。用 JdbcTemplate 原生 DELETE 绕过
+        //    MyBatis-Plus 逻辑删除,确保彻底清理)
+        jdbcTemplate.update("DELETE FROM employee WHERE store_id = ?", id);
 
         // 3) dish:软删除
         dishMapper.delete(new LambdaQueryWrapper<Dish>().eq(Dish::getStoreId, id));

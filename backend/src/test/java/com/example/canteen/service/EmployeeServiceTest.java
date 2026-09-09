@@ -133,8 +133,9 @@ class EmployeeServiceTest {
         newEmployee.setBalance(new BigDecimal("100.00"));
         newEmployee.setStatus(1);
 
-        // createEmployee 校验卡号唯一性
-        when(employeeMapper.countByCardNoExcludeId("CARD999", null)).thenReturn(0);
+        // createEmployee 校验卡号(同店唯一)+手机号(全局唯一)
+        when(employeeMapper.countByCardNoStoreExcludeId("CARD999", 1L, null)).thenReturn(0);
+        when(employeeMapper.countByPhoneExcludeId("13800000099", null)).thenReturn(0);
         when(employeeMapper.insert(any(Employee.class))).thenAnswer(invocation -> {
             Employee emp = invocation.getArgument(0);
             emp.setId(10L);
