@@ -1,6 +1,8 @@
 package com.example.canteen.service;
 
 import com.example.canteen.entity.Employee;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.canteen.mapper.EmployeeMapper;
 import com.example.canteen.security.JwtTokenProvider;
 import com.example.canteen.security.LoginRateLimiter;
@@ -44,6 +46,7 @@ public class WechatAuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final LoginRateLimiter rateLimiter;
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${wechat.app-id:}")
     private String appId;
@@ -215,7 +218,6 @@ public class WechatAuthService {
      * 用授权 code 换取 openid(调用微信 API)。
      * code 为一次性,5 分钟有效,只能使用一次。
      */
-    @SuppressWarnings("unchecked")
     private String exchangeCodeForOpenid(String code) {
         if (!isConfigured()) {
             log.warn("微信登录未配置 AppID/AppSecret,无法换取 openid");
@@ -227,12 +229,17 @@ public class WechatAuthService {
                 + "&code=" + code
                 + "&grant_type=authorization_code";
         try {
-            ResponseEntity<Map> resp = restTemplate.getForEntity(url, Map.class);
-            Map<String, Object> body = resp.getBody();
-            if (body == null) {
+            // 微信公共服务号在报错/异常时可能返回 text/plain 而非 application/json,
+            // 直接反序列化为 Map 会因无匹配的 HttpMessageConverter(content-type 不识别)
+            // 抛 "no suitable HttpMessageConverter found",导致 openid 换不到、登录失败。
+            // 改为先取文本,再用 ObjectMapper 解析,彻底规避 content-type 差异。
+            ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
+            String text = resp.getBody();
+            if (text == null || text.isBlank()) {
                 log.error("微信 API 返回空响应");
                 return null;
             }
+            Map<String, Object> body = objectMapper.readValue(text, new TypeReference<Map<String, Object>>() {});
             // 检查错误码
             Object errcode = body.get("errcode");
             if (errcode != null && !"".equals(errcode.toString()) && !"0".equals(errcode.toString())) {
