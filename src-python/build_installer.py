@@ -8,8 +8,15 @@
 
 前置条件:
   - Node.js 18+ (构建前端)
-  - Python 3.10+ 32 位 (PyInstaller 打包,因 OUR_IDR.dll 是 32 位)
-    pip install PyQt5 PyQtWebEngine pyinstaller
+  - Python 3.7.9 32 位 (PyInstaller 打包;必须 3.7——
+    3.8+ 加载 .pyd 用 LoadLibraryEx 的 LOAD_LIBRARY_SEARCH_* 标志(CPython
+    bpo-36085),该标志需要 Win7 SP1 + KB2533623 补丁,未打补丁的 Win7 报
+    "DLL load failed ... 参数错误"(ERROR_INVALID_PARAMETER);
+    3.9+ 还缺 api-ms-win-core-path-l1-1-0.dll 直接无法启动;
+    OUR_IDR.dll 是 32 位)
+    pip install PyQt5==5.15.10 PyQt5-Qt5==5.15.2 PyQtWebEngine==5.15.6 \
+        PyQtWebEngine-Qt5==5.15.2 PyQt5-sip==12.13.0 PyInstaller==5.13.2 \
+        pywin32-ctypes
   - Inno Setup 6+ (打包安装包)
     https://jrsoftware.org/isdl.php
   - CH375 驱动文件放入 src-python/drivers/
@@ -245,19 +252,45 @@ def main():
     print(f'{Color.CYAN}企业智慧食堂终端 - 安装包打包脚本{Color.NC}')
     print(f'{Color.CYAN}{"=" * 60}{Color.NC}')
 
-    # 强制检查:必须用 32 位 Python 打包(兼容 Win7 32 位 + OUR_IDR.dll 32 位)
+    # 强制检查:必须用 32 位 Python 3.7 打包
+    # - 32 位:OUR_IDR.dll 是 32 位,Win7 32 位系统兼容
+    # - 3.7:CPython 3.8 起,加载 .pyd 扩展改用 LoadLibraryEx 的
+    #   LOAD_LIBRARY_SEARCH_DEFAULT_DIRS|LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+    #   标志(bpo-36085),该标志在未打 KB2533623 补丁的 Win7 上返回
+    #   ERROR_INVALID_PARAMETER("参数错误"),导致 import ctypes/PyQt5 时报
+    #   "DLL load failed while importing _ctypes: 参数错误"。
+    #   Python 3.7 用老式 LOAD_WITH_ALTERED_SEARCH_PATH,Win7 原生支持。
+    # - 3.9+:python3x.dll 依赖 api-ms-win-core-path-l1-1-0.dll(Win8+ API),
+    #   Win7 直接无法启动。
     import ctypes
     bits = ctypes.sizeof(ctypes.c_void_p) * 8
+    ver_minor = sys.version_info[1]
     info(f'当前 Python: {sys.version.split()[0]} ({bits} 位)')
     if bits != 32:
         err(f'必须使用 32 位 Python 打包(当前 {bits} 位),兼容 Win7 32 位系统')
-        err(f'请使用: C:\\Python310-32\\python.exe build_installer.py')
+        err(f'请使用: C:\\Python379-32\\python.exe build_installer.py')
         sys.exit(1)
-    ok('Python 位数检查通过(32 位,兼容 Win7 32 位)')
+    if sys.version_info[:2] != (3, 7):
+        err(f'必须使用 Python 3.7 打包(当前 {sys.version_info[0]}.{ver_minor})')
+        err('Python 3.8 加载 .pyd 需要 Win7 KB2533623 补丁,未打补丁报"参数错误"')
+        err('Python 3.9+ 缺 api-ms-win-core-path-l1-1-0.dll,Win7 无法启动')
+        err('请使用: C:\\Python379-32\\python.exe build_installer.py')
+        sys.exit(1)
+    ok('Python 环境检查通过(3.7 32 位,兼容未打补丁的 Win7)')
 
     try:
         # 0. 检查驱动文件
         check_drivers()
+
+        # 0.5 检查 VC++ x86 运行库安装包(Win7 必需:系统无 UCRT 时
+        # python38.dll/Qt5 报"丢失 api-ms-win-crt-xxx.dll"无法启动)
+        redist = SCRIPT_DIR / 'redist' / 'vc_redist.x86.exe'
+        if not redist.exists():
+            err('缺少 redist/vc_redist.x86.exe(VC++ 2015-2022 x86 运行库)')
+            err('Win7 没有内置 Universal CRT,必须随安装包分发并自动安装')
+            err('下载地址: https://aka.ms/vs/17/release/vc_redist.x86.exe')
+            sys.exit(1)
+        ok(f'VC++ x86 运行库就绪({redist.stat().st_size // 1024} KB,Win7 必需)')
 
         if not args.only_iss and not args.skip_web:
             build_frontend()

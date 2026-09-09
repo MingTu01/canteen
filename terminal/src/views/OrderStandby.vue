@@ -20,6 +20,7 @@ import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { toDateKey, fullDateLabel, pad2 } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { CreditCard, Loader2 } from 'lucide-vue-next'
 
 import { useCardReader } from '@/composables/useCardReader'
@@ -36,7 +37,7 @@ const storeName = computed(() => branding.value?.name || '企业智慧食堂')
 let timer = 0
 let scanErrorTimer: ReturnType<typeof setTimeout> | null = null
 const updateClock = () => {
-  const now = new Date()
+  const now = serverDate()
   clock.value = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
   dateLabel.value = fullDateLabel(now)
 }
@@ -71,7 +72,7 @@ const scan = async (input: string) => {
           if (resp.data.code === 200 && resp.data.data) {
             resetOrderFlow()
             orderStore.employee = resp.data.data
-            orderStore.selectedDate = toDateKey(new Date())
+            orderStore.selectedDate = toDateKey(serverDate())
             router.push('/order/menu')
             return
           }
@@ -91,7 +92,7 @@ const scan = async (input: string) => {
         if (resp.data.code === 200 && resp.data.data) {
           resetOrderFlow()
           orderStore.employee = resp.data.data
-          orderStore.selectedDate = toDateKey(new Date())
+          orderStore.selectedDate = toDateKey(serverDate())
           router.push('/order/menu')
           return
         }
@@ -105,7 +106,7 @@ const scan = async (input: string) => {
     if (emp) {
       resetOrderFlow()
       orderStore.employee = emp
-      orderStore.selectedDate = toDateKey(new Date())
+      orderStore.selectedDate = toDateKey(serverDate())
       router.push('/order/menu')
       return
     }

@@ -13,6 +13,7 @@ import { useRouter } from 'vue-router'
 import { orderStore, resetOrderFlow } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
 import { fullDateLabel, pad2 } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { Utensils, Search, Home } from 'lucide-vue-next'
 import UserInfoBar from '@/components/UserInfoBar.vue'
 import BrandingHeader from '@/components/BrandingHeader.vue'
@@ -27,7 +28,7 @@ const dateLabel = ref('')
 let timer = 0
 
 const updateClock = () => {
-  const now = new Date()
+  const now = serverDate()
   clock.value = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
   dateLabel.value = fullDateLabel(now)
 }

@@ -9,6 +9,7 @@ import AdminEntryZone from '@/components/AdminEntryZone.vue'
 import BrandingBg from '@/components/BrandingBg.vue'
 import { brandingState, purgeOldBrandingCache, fetchBranding } from '@/store/branding'
 import { loadRuntimeConfig } from '@/store/terminalSettings'
+import { startServerTimeSync } from '@/utils/serverTime'
 
 const route = useRoute()
 
@@ -43,6 +44,8 @@ onMounted(() => {
   // 加载 Python 侧运行时配置(window_mode/card_interval/idle_timeout)
   // 浏览器环境静默跳过(保留默认值)
   loadRuntimeConfig().catch(() => {})
+  // 启动服务器时间同步(所有业务时间以服务器为准,防止改本机时间)
+  startServerTimeSync()
 })
 
 // 路由变化时检查(终端绑定/解绑后自动同步)

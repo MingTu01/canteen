@@ -21,6 +21,12 @@ export const windowMode = ref<TerminalRuntimeConfig['window_mode']>('fullscreen'
 /** 读卡防抖间隔(秒,展示用,实际由 Python 侧 card_reader 处理) */
 export const cardInterval = ref(2.0)
 
+/** 渲染模式(展示用,重启后由 Python 启动逻辑生效) */
+export const gpuMode = ref<'auto' | 'software'>('auto')
+
+/** 屏幕键盘模式(v-osk 指令读取,实时生效) */
+export const oskMode = ref<'auto' | 'off'>('auto')
+
 /** 是否为 Python Shell 环境(决定是否支持运行时配置) */
 export const isPythonShell = ref(false)
 
@@ -38,6 +44,8 @@ export async function loadRuntimeConfig(): Promise<void> {
   idleTimeoutSeconds.value = cfg.idle_timeout
   windowMode.value = cfg.window_mode
   cardInterval.value = cfg.card_interval
+  if (cfg.gpu_mode === 'software' || cfg.gpu_mode === 'auto') gpuMode.value = cfg.gpu_mode
+  if (cfg.osk_mode === 'off' || cfg.osk_mode === 'auto') oskMode.value = cfg.osk_mode
 }
 
 /** 是否已加载过运行时配置 */

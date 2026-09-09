@@ -105,12 +105,12 @@ DEFAULT_CONFIG_JSON = """{
   //
   // 填写示例:
   //   局域网部署: "http://192.168.1.100:8080"
-  //   域名部署:   "https://canteen.908521.xyz"
+  //   域名部署:   "https://api.yongjia2088.top"
   //   注意:不要带末尾斜杠 /,不要带 /api 后缀(程序会自动拼接)
   //
   // 管理员密码验证由后端 /api/admin/login 接口完成,
   // 无需在此文件配置密码,使用系统现有的管理员账号即可。
-  "server_url": "https://canteen.908521.xyz",
+  "server_url": "https://api.yongjia2088.top",
 
   // ============================================================
   // 终端运行参数
@@ -145,7 +145,26 @@ DEFAULT_CONFIG_JSON = """{
 
   // 用户选择"忽略此版本"后记录的最新版本号
   // 程序启动检测时,若远端版本等于该值则不再弹窗(直到出现更新的版本)
-  "ignored_version": ""
+  "ignored_version": "",
+
+  // [高级] 自定义 Chromium 启动参数(追加到内置参数之后)
+  // 用于老系统(Win7)渲染问题的远程排查实验,如:
+  //   "--use-angle=swiftshader"  用 SwiftShader 软件OpenGL渲染
+  //   "--disable-gpu"            禁用GPU(1.0.40+ Win7已自动附加)
+  // 日常留空("")即可;修改后需重启应用生效
+  "chromium_flags_extra": "",
+
+  // 渲染加速模式:
+  //   "auto"     启动时探测显卡驱动(Win7),可用则硬件加速(页面流畅),
+  //              无驱动/驱动过老自动退回软件渲染(保证亮屏)
+  //   "software" 强制软件渲染(最稳,老机页面较慢;个别设备自动模式黑屏时改此项)
+  "gpu_mode": "auto",
+
+  // 屏幕键盘(触屏设备):
+  //   "auto" 触屏点击输入框(搜索/配置页/管理员验证)自动唤起系统屏幕键盘,
+  //          失焦自动收起;鼠标/物理键盘操作不触发
+  //   "off"  关闭(接了物理键盘的设备建议关闭)
+  "osk_mode": "auto"
 }
 """
 
@@ -211,15 +230,21 @@ def read_full_config():
     cfg_path = get_config_path()
     # 默认值(与 DEFAULT_CONFIG_JSON 中的预设地址保持一致)
     result = {
-        'server_url': 'https://canteen.908521.xyz',
+        'server_url': 'https://api.yongjia2088.top',
         'window_mode': DEFAULT_WINDOW_MODE,
         'card_interval': DEFAULT_CARD_INTERVAL,
         'idle_timeout': DEFAULT_IDLE_TIMEOUT,
         'update_check_url': '',
         'ignored_version': '',
+        'chromium_flags_extra': '',
+        'gpu_mode': 'auto',
+        'osk_mode': 'auto',
     }
     try:
-        with open(cfg_path, 'r', encoding='utf-8') as f:
+        # utf-8-sig:兼容带 BOM 的 UTF-8(Windows 记事本"UTF-8"编码默认带 BOM,
+        # Win7 老记事本尤甚;用 utf-8 读会报 "Unexpected UTF-8 BOM" 导致整份配置
+        # 被忽略静默回退默认值)。utf-8-sig 对无 BOM 文件同样兼容。
+        with open(cfg_path, 'r', encoding='utf-8-sig') as f:
             content = f.read()
         cleaned = strip_json_comments(content)
         data = json.loads(cleaned)
@@ -237,6 +262,12 @@ def read_full_config():
                 result['update_check_url'] = data['update_check_url']
             if isinstance(data.get('ignored_version'), str):
                 result['ignored_version'] = data['ignored_version']
+            if isinstance(data.get('chromium_flags_extra'), str):
+                result['chromium_flags_extra'] = data['chromium_flags_extra']
+            if data.get('gpu_mode') in ('auto', 'software'):
+                result['gpu_mode'] = data['gpu_mode']
+            if data.get('osk_mode') in ('auto', 'off'):
+                result['osk_mode'] = data['osk_mode']
     except Exception as e:
         print(f'[Config] 读取配置失败: {e}')
     return result
@@ -252,7 +283,7 @@ def write_config(updates):
     # 读取现有配置(已含默认值)
     current = read_full_config()
     # 合并更新
-    for key in ('server_url', 'window_mode', 'card_interval', 'idle_timeout', 'update_check_url', 'ignored_version'):
+    for key in ('server_url', 'window_mode', 'card_interval', 'idle_timeout', 'update_check_url', 'ignored_version', 'chromium_flags_extra', 'gpu_mode', 'osk_mode'):
         if key in updates:
             current[key] = updates[key]
     # 写回(不带注释,但 JSON 格式化)
@@ -315,6 +346,29 @@ def validate_config_value(key, value):
         # 忽略版本号:仅作本地记录,任意字符串皆可
         if not isinstance(value, str):
             return 'ignored_version 必须是字符串'
+        return None
+
+    if key == 'chromium_flags_extra':
+        # 自定义 Chromium 参数:仅允许安全字符集(防注入其他环境/配置内容)
+        if not isinstance(value, str):
+            return 'chromium_flags_extra 必须是字符串'
+        if len(value) > 300:
+            return 'chromium_flags_extra 过长(最多 300 字符)'
+        # 白名单:字母/数字/空格/横线/等号/逗号/下划线/冒号/斜线/点
+        if value and not re.fullmatch(r'[A-Za-z0-9 \-=,_:/.]+', value):
+            return 'chromium_flags_extra 含非法字符(仅允许 --flag=value 形式的参数)'
+        return None
+
+    if key == 'gpu_mode':
+        # 枚举项:渲染模式只允许自动检测/强制软件渲染两种取值
+        if value not in ('auto', 'software'):
+            return 'gpu_mode 只允许 auto 或 software'
+        return None
+
+    if key == 'osk_mode':
+        # 枚举项:屏幕键盘只允许触屏自动唤起/关闭两种取值
+        if value not in ('auto', 'off'):
+            return 'osk_mode 只允许 auto 或 off'
         return None
 
     return f'不支持的配置项: {key}'

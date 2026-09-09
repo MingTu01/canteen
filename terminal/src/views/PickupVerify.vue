@@ -8,9 +8,11 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { loadConfig } from '@/api'
+import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { fetchBranding } from '@/store/branding'
 import { toDateKey, mealTypeLabel } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { useMealTimeSlots } from '@/composables/useMealTimeSlots'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { useCardReader } from '@/composables/useCardReader'
@@ -110,7 +112,7 @@ const fetchAndAdvance = async () => {
   try {
     const resp = await api.get(`/order/employee/${employee.value.id}`)
     const list: any[] = resp.data?.code === 200 ? (resp.data.data ?? []) : []
-    const today = toDateKey(new Date())
+    const today = toDateKey(serverDate())
     // 关键:只保留当前时段餐次的订单,绝对避免"午餐时段核销早餐订单"的错配
     const pending = list
       .filter((o) => o.date === today && o.status === 1 && Number(o.mealType) === curMealType)
@@ -160,24 +162,63 @@ const fetchAndAdvance = async () => {
 }
 
 /**
- * 处理新刷卡(弹窗显示时):识别员工并重新查询订单。
- * 不导航到待机页,直接在当前页处理新卡号,实现"刷卡即切换"。
+ * 处理新刷卡/扫码(弹窗显示时):识别员工并重新查询订单。
+ * 不导航到待机页,直接在当前页处理新输入,实现"刷卡/扫码即切换"。
+ * 识别顺序与待机页 handleInput 一致:身份二维码 → 一次性支付码 → 卡号。
  */
-const handleNewCard = async (cardNo: string) => {
-  const trimmed = cardNo.trim()
+const handleNewCard = async (code: string) => {
+  const trimmed = code.trim()
   if (!trimmed) return
+  /** 识别成功:重置流程,设置新员工,重新查询订单 */
+  const startNewFlow = (emp: NonNullable<typeof pickupStore.employee>) => {
+    resetPickupFlow()
+    pickupStore.employee = emp
+    done = false
+    startedAt.value = Date.now()
+    fetchAndAdvance()
+  }
   try {
-    const empResp = await api.get(`/terminal/employee/${encodeURIComponent(trimmed)}`)
-    if (empResp.data.code === 200 && empResp.data.data) {
-      // 识别成功:重置流程,设置新员工,重新查询订单
-      resetPickupFlow()
-      pickupStore.employee = empResp.data.data
-      done = false
-      startedAt.value = Date.now()
-      fetchAndAdvance()
-      return
+    // 1. 旧版身份二维码:内容为 JSON 对象(以 { 开头,含 sign 签名)→ 兼容
+    if (trimmed.startsWith('{')) {
+      try {
+        const qr = JSON.parse(trimmed)
+        if (qr.sign && qr.cardNo && qr.storeId && qr.employeeId && qr.expire) {
+          const resp = await api.post('/terminal/verify-qrcode', qr)
+          if (resp.data.code === 200 && resp.data.data) {
+            startNewFlow(resp.data.data)
+            return
+          }
+        }
+      } catch {
+        /* 非合法二维码 JSON,继续按其他方式处理 */
+      }
     }
-    // 未识别为员工:提示卡号不存在
+
+    // 2. 一次性支付码:32 位 hex(小写)→ /terminal/verify-paycode
+    //    大小写归一化:部分 HID 扫码枪出厂输出大写,后端按小写 key 核销
+    const payCode = trimmed.toLowerCase()
+    if (/^[0-9a-f]{32}$/.test(payCode)) {
+      try {
+        const resp = await api.post('/terminal/verify-paycode', { code: payCode })
+        if (resp.data.code === 200 && resp.data.data) {
+          startNewFlow(resp.data.data)
+          return
+        }
+      } catch {
+        /* 支付码无效或已使用,继续尝试卡号识别 */
+      }
+    }
+
+    // 3. 作为卡号识别员工(读卡器/扫码枪,优先查本地缓存,毫秒级)
+    try {
+      const emp = await getEmployeeByCardNo(trimmed)
+      if (emp) {
+        startNewFlow(emp)
+        return
+      }
+    } catch { /* 非员工卡 */ }
+
+    // 所有方式均未匹配
     showErrorWithAutoClose('取餐失败', '卡号不存在')
   } catch {
     showErrorWithAutoClose('取餐失败', '卡号不存在')
@@ -185,8 +226,8 @@ const handleNewCard = async (cardNo: string) => {
 }
 
 /**
- * 读卡器:弹窗显示时接受刷卡,关闭弹窗并处理新卡号。
- * 弹窗未显示时(验证中/跳转中)不接受刷卡,避免干扰流程。
+ * 读卡器:弹窗显示时接受刷卡/扫码,关闭弹窗并处理新输入。
+ * 弹窗未显示时(验证中/跳转中)不接受输入,避免干扰流程。
  */
 useCardReader((cardNo) => {
   if (!showError.value) return

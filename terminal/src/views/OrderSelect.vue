@@ -32,6 +32,7 @@ import { useMealConfig } from '@/composables/useMealConfig'
 import { useOrderConfig } from '@/composables/useOrderConfig'
 import { formatMoney } from '@/composables/useFormat'
 import { toDateKey, dateWindow, parseDateKey, relativeLabel, pad2, shortDate, dateRelLabel } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { mealTypeLabel } from '@/utils'
 import { menuInvalidated, getCachedMenu, cacheMenu } from '@/utils/cache'
 import { ShoppingCart, X, Plus, Minus, Trash2 } from 'lucide-vue-next'
@@ -48,7 +49,7 @@ const router = useRouter()
  * 配置加载后 config 变化会自动重算起始日期与日期窗口。
  */
 const { loadConfig, isOrderableByDeadline } = useOrderConfig()
-const now = new Date()
+const now = serverDate()
 const startDateKey = computed(() => {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const tomorrow = new Date(today)

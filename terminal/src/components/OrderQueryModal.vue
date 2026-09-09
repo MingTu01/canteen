@@ -20,11 +20,13 @@ import { formatMoney, formatDateTime } from '@/composables/useFormat'
 import {
   mealTypeLabel, toDateKey,
 } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import {
   Search, X, ChevronLeft, Loader2, FileText,
   CheckCircle2, Clock, Utensils,
 } from 'lucide-vue-next'
 import DatePicker from '@/components/DatePicker.vue'
+import FilterDropdown from '@/components/FilterDropdown.vue'
 
 interface OrderItem {
   dishId: number
@@ -62,7 +64,7 @@ const storeName = computed(() => loadConfig()?.storeName || '当前门店')
 /** 视图:list=查询主界面,summary=订单汇总 */
 const view = ref<'list' | 'summary'>('list')
 
-const today = toDateKey(new Date())
+const today = toDateKey(serverDate())
 
 /* ============ 日期选择器(复用订餐页月历组件,无限制筛选模式) ============
  * 作为纯筛选器使用,不做任何日期限制:
@@ -78,6 +80,23 @@ const keyword = ref('')
 const mealFilter = ref(0)
 /** 就餐状态筛选:all=全部 eaten=已吃 uneaten=未吃 */
 const statusFilter = ref<'all' | 'eaten' | 'uneaten'>('all')
+
+/**
+ * 下拉选项(自绘 FilterDropdown,X86 老机禁用原生 select:
+ * 原生 select 弹出列表是 Chromium 原生窗口控件,独立于页面 DOM 的
+ * 渲染合成路径,软件渲染/低端 GPU 上点击直接卡死界面)。
+ */
+const mealOptions = [
+  { value: 0, label: '全部' },
+  { value: 1, label: '早餐' },
+  { value: 2, label: '午餐' },
+  { value: 3, label: '晚餐' },
+]
+const statusOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'uneaten', label: '未吃' },
+  { value: 'eaten', label: '已吃' },
+]
 
 const orders = ref<Order[]>([])
 const loading = ref(false)
@@ -333,6 +352,7 @@ watch(
                 <div class="oqm__search-wrap">
                   <input
                     v-model="keyword"
+                    v-osk
                     type="text"
                     placeholder="输入姓名或卡号"
                     class="oqm__text-input"
@@ -344,25 +364,24 @@ watch(
                 </div>
               </label>
 
-              <!-- 餐别选择 -->
+              <!-- 餐别选择(自绘下拉,原生 select 在 X86 老机点击卡死) -->
               <label class="oqm__field">
                 <span class="oqm__field-label">餐别</span>
-                <select v-model="mealFilter" class="oqm__select" @change="onFilterChange">
-                  <option :value="0">全部</option>
-                  <option :value="1">早餐</option>
-                  <option :value="2">午餐</option>
-                  <option :value="3">晚餐</option>
-                </select>
+                <FilterDropdown
+                  v-model="mealFilter"
+                  :options="mealOptions"
+                  @change="onFilterChange"
+                />
               </label>
 
-              <!-- 就餐状态选择 -->
+              <!-- 就餐状态选择(自绘下拉,同上) -->
               <label class="oqm__field">
                 <span class="oqm__field-label">状态</span>
-                <select v-model="statusFilter" class="oqm__select" @change="onFilterChange">
-                  <option value="all">全部</option>
-                  <option value="uneaten">未吃</option>
-                  <option value="eaten">已吃</option>
-                </select>
+                <FilterDropdown
+                  v-model="statusFilter"
+                  :options="statusOptions"
+                  @change="onFilterChange"
+                />
               </label>
             </div>
 
@@ -756,8 +775,7 @@ watch(
   font-weight: 700;
   color: var(--doubao-muted-foreground);
 }
-.oqm__text-input,
-.oqm__select {
+.oqm__text-input {
   height: 40px;
   padding: 0 12px;
   border: 1.5px solid var(--doubao-border);
@@ -770,8 +788,7 @@ watch(
   /* X86 终端禁用 box-shadow 过渡:0 -> 3px 会触发合成层重建,低端机闪烁 */
   transition: border-color 0.15s ease;
 }
-.oqm__text-input:focus,
-.oqm__select:focus {
+.oqm__text-input:focus {
   border-color: var(--doubao-primary);
 }
 

@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import api from '@/api'
+import { serverDate } from '@/utils/serverTime'
 
 /**
  * 就餐时段配置 composable(对齐后端 GET /api/terminal/meal-slots)。
@@ -87,10 +88,10 @@ export function useMealTimeSlots() {
   /**
    * 判断当前时间是否在指定餐次的就餐时段内。
    * @param mealType 餐次 1/2/3
-   * @param now 当前时间(可选,默认 new Date())
+   * @param now 当前时间(可选,默认服务器时间,防止改本机时间绕过时段限制)
    * @returns true=在时段内可核销;false=未到/已过/未配置
    */
-  const isWithinDiningTime = (mealType: number, now: Date = new Date()): boolean => {
+  const isWithinDiningTime = (mealType: number, now: Date = serverDate()): boolean => {
     const slot = getSlotByMealType(mealType)
     if (!slot) return false
     const nowMin = now.getHours() * 60 + now.getMinutes()
@@ -103,7 +104,7 @@ export function useMealTimeSlots() {
    * 识别当前时间所属的餐次(用于"现在只能核销哪个餐次")。
    * @returns 命中时段的 mealType;空档期或未配置返回 null
    */
-  const getCurrentMealType = (now: Date = new Date()): number | null => {
+  const getCurrentMealType = (now: Date = serverDate()): number | null => {
     const nowMin = now.getHours() * 60 + now.getMinutes()
     for (const slot of slots.value) {
       const startMin = timeToMinutes(slot.startTime)

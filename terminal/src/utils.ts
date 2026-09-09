@@ -8,6 +8,7 @@
 
 import type { Component } from 'vue'
 import { Sunrise, Sun, Sunset, Moon, Beef, Leaf, Salad, Soup, Wheat, Coffee, Utensils } from 'lucide-vue-next'
+import { serverDate, serverNow } from '@/utils/serverTime'
 
 /** 餐别中文标签(对齐 H5 formatMealType,保留以兼容老代码) */
 export function mealTypeLabel(t: number): string {
@@ -81,7 +82,7 @@ export function weekdayLabel(s: string): string {
  * 用于 sticky 日期指示器(无极滑动切换日期时显示当前可视日期的相对标签)。
  */
 export function dateRelLabel(s: string): string {
-  const today = toDateKey(new Date())
+  const today = toDateKey(serverDate())
   if (s === today) return '今天'
   if (s === shiftKey(today, 1)) return '明天'
   if (s === shiftKey(today, 2)) return '后天'
@@ -110,11 +111,11 @@ export function fullDateLabel(d: Date): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${WEEK[d.getDay()]}`
 }
 
-/** 相对今天:今天/明天/昨天,否则空串 */
+/** 相对今天:今天/明天/昨天,否则空串(以服务器时间为准) */
 export function relativeLabel(s: string): string {
-  const today = toDateKey(new Date())
-  const tom = toDateKey(new Date(Date.now() + 86400000))
-  const yes = toDateKey(new Date(Date.now() - 86400000))
+  const today = toDateKey(serverDate())
+  const tom = toDateKey(new Date(serverNow() + 86400000))
+  const yes = toDateKey(new Date(serverNow() - 86400000))
   if (s === today) return '今天'
   if (s === tom) return '明天'
   if (s === yes) return '昨天'

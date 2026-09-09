@@ -21,6 +21,10 @@ export interface TerminalRuntimeConfig {
   card_interval: number
   /** 无操作自动返回待机页时间(秒,0=永不) */
   idle_timeout: number
+  /** 渲染模式:auto=启动时探测显卡,可用则硬件加速 / software=强制软件渲染(最稳) */
+  gpu_mode?: 'auto' | 'software'
+  /** 屏幕键盘:auto=触屏点击输入框自动唤起 / off=关闭 */
+  osk_mode?: 'auto' | 'off'
 }
 
 /** 检测当前 shell 环境 */
@@ -85,6 +89,88 @@ export async function setRuntimeConfig(updates: Partial<TerminalRuntimeConfig>):
     return !!data.ok
   } catch {
     return false
+  }
+}
+
+/**
+ * 唤起 Windows 屏幕键盘(osk.exe)。
+ * 触屏设备点击输入框时由 v-osk 指令调用;仅 Python Shell 环境有效。
+ */
+export async function showOsk(): Promise<boolean> {
+  if (detectShell() !== 'python') return false
+  try {
+    const res = await fetch('/__api__/osk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'show' }),
+    })
+    const data = await res.json()
+    return !!data.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 关闭屏幕键盘(未运行时为无害空操作)。
+ */
+export async function hideOsk(): Promise<void> {
+  if (detectShell() !== 'python') return
+  try {
+    await fetch('/__api__/osk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'hide' }),
+    })
+  } catch {
+    /* 静默失败 */
+  }
+}
+
+/** 单次网络探测结果 */
+export interface NetProbeStep {
+  ok: boolean
+  status?: number
+  error?: string
+  error_type?: string
+  elapsed_ms?: number
+  ip?: string
+}
+
+/** 网络诊断结果(Python /__api__/net_diagnose) */
+export interface NetDiagnosis {
+  ok: boolean
+  url: string
+  steps: {
+    dns?: NetProbeStep
+    strict?: NetProbeStep
+    direct?: NetProbeStep
+    relaxed?: NetProbeStep
+  }
+  diagnosis?: {
+    type: 'dns_fail' | 'net_ok' | 'proxy_issue' | 'cert_fail' | 'tls_rejected' | 'unreachable'
+    message: string
+  }
+  error?: string
+}
+
+/**
+ * 网络诊断(仅 Python Shell):DNS → 直连(禁代理) → 忽略证书 逐步探测,
+ * 定位"浏览器能访问但终端连不上"(后端无日志 = 请求未到达后端)。
+ * 用于绑定失败时自动展示具体原因。
+ */
+export async function netDiagnose(url: string): Promise<NetDiagnosis | null> {
+  const shell = detectShell()
+  if (shell !== 'python') return null
+  try {
+    const res = await fetch('/__api__/net_diagnose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+    return (await res.json()) as NetDiagnosis
+  } catch {
+    return null
   }
 }
 

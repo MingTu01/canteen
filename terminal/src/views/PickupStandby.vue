@@ -18,6 +18,7 @@ import { getEmployeeByCardNo } from '@/utils/employeeCache'
 import { pickupStore, resetPickupFlow } from '@/store/pickup'
 import { brandingState, fetchBranding } from '@/store/branding'
 import { fullDateLabel, pad2 } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { CreditCard, Loader2, Search } from 'lucide-vue-next'
 
 import Modal from '@/components/Modal.vue'
@@ -51,7 +52,7 @@ const showOrderQuery = ref(false)
 let timer = 0
 let successTimer: ReturnType<typeof setTimeout> | null = null
 const updateClock = () => {
-  const now = new Date()
+  const now = serverDate()
   clock.value = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
   dateLabel.value = fullDateLabel(now)
 }

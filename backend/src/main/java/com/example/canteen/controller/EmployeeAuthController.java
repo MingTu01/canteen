@@ -237,12 +237,23 @@ public class EmployeeAuthController {
         if (!wechatAuthService.isConfigured()) {
             return ApiResponse.error(503, "微信登录未配置,请联系管理员设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET");
         }
-        // 拼接完整回调地址:协议 + 域名 + redirect(默认 /login)
+        String redirectPath = (redirect == null || redirect.isBlank()) ? "/login" : redirect;
+
+        // 优先使用配置的 WECHAT_H5_BASE_URL 构造回调地址,保证域名与公众号后台「网页授权域名」
+        // 完全一致,规避反向代理下 Host 头不一致导致的 10003 错误。生产环境应已配置 WECHAT_H5_BASE_URL。
+        String h5BaseUrl = wechatAuthService.getH5BaseUrl();
+        if (h5BaseUrl != null && !h5BaseUrl.isBlank()) {
+            String authUrl = wechatAuthService.getH5AuthUrl(redirectPath);
+            Map<String, Object> cfData = new HashMap<>();
+            cfData.put("authUrl", authUrl);
+            return ApiResponse.success(cfData);
+        }
+
+        // 兜底(开发环境未配置 WECHAT_H5_BASE_URL):按请求 Host 拼接完整回调地址
         String scheme = httpRequest.getScheme();
         String host = httpRequest.getServerName();
         int port = httpRequest.getServerPort();
         String contextPath = httpRequest.getContextPath();
-        String redirectPath = (redirect == null || redirect.isBlank()) ? "/login" : redirect;
         // 反向代理场景:优先使用 X-Forwarded-Proto / X-Forwarded-Host
         String xProto = httpRequest.getHeader("X-Forwarded-Proto");
         String xHost = httpRequest.getHeader("X-Forwarded-Host");

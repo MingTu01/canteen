@@ -37,12 +37,14 @@ import { loadConfig, bindTerminal, clearConfig, saveConfig, type TerminalConfig 
 import { clearBranding } from '@/store/branding'
 import { destroyLocalCache } from '@/utils/cache'
 import { destroyEmployeeCache } from '@/utils/employeeCache'
-import { getServerUrl, setRuntimeConfig, getDeviceStatus, restartCardReader, type CardReaderStatus } from '@/api/shellApi'
+import { getServerUrl, setRuntimeConfig, getDeviceStatus, restartCardReader, netDiagnose, type CardReaderStatus } from '@/api/shellApi'
 import {
   loadRuntimeConfig,
   windowMode,
   cardInterval,
   idleTimeoutSeconds,
+  gpuMode,
+  oskMode,
   isPythonShell,
 } from '@/store/terminalSettings'
 import TopBar from '@/components/TopBar.vue'
@@ -66,6 +68,8 @@ const form = ref({
 const binding = ref(false)
 const bindError = ref('')
 const bindSuccess = ref(false)
+/** 网络诊断进行中(绑定失败后自动诊断 DNS/代理/证书) */
+const bindDiagnosing = ref(false)
 let bindSuccessTimer: ReturnType<typeof setTimeout> | null = null
 
 // ===== 解绑(需管理员密码二次校验,防止未授权人员物理接触后解绑) =====
@@ -81,6 +85,8 @@ const runtimeForm = ref({
   windowMode: 'fullscreen' as 'fullscreen' | 'windowed',
   cardInterval: 2.0,
   idleTimeout: 30,
+  gpuMode: 'auto' as 'auto' | 'software',
+  oskMode: 'auto' as 'auto' | 'off',
 })
 const runtimeSaving = ref(false)
 const runtimeMsg = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
@@ -153,6 +159,8 @@ function syncRuntimeForm() {
   runtimeForm.value.windowMode = windowMode.value
   runtimeForm.value.cardInterval = cardInterval.value
   runtimeForm.value.idleTimeout = idleTimeoutSeconds.value
+  runtimeForm.value.gpuMode = gpuMode.value
+  runtimeForm.value.oskMode = oskMode.value
 }
 
 /**
@@ -169,6 +177,8 @@ async function saveRuntimeConfig(): Promise<boolean> {
       window_mode: runtimeForm.value.windowMode,
       card_interval: Number(runtimeForm.value.cardInterval),
       idle_timeout: Number(runtimeForm.value.idleTimeout),
+      gpu_mode: runtimeForm.value.gpuMode,
+      osk_mode: runtimeForm.value.oskMode,
     }
     const ok = await setRuntimeConfig(updates)
     if (ok) {
@@ -207,6 +217,9 @@ const reloadBound = () => {
  * - 不填端口 → http 默认 80、https 默认 443(浏览器/axios 自动处理)
  * - 不做任何端口探测:no-cors 探测在 HTTPS(证书校验/反代)下会误判失败,
  *   导致"无法连接服务器"。连通性由绑定请求本身验证,失败时展示真实错误。
+ *
+ * 网络层失败时自动触发 Python 侧网络诊断(DNS/代理/证书/连通性逐步探测),
+ * 把具体原因直接展示在错误框里,不再让运维面对一句笼统的"无法连接"。
  */
 const doBind = async () => {
   bindError.value = ''
@@ -246,9 +259,25 @@ const doBind = async () => {
       goRun()
     }, 800)
   } catch (e: any) {
+    console.error('[Settings] 绑定失败:', e?.code || '', e?.message || e)
     if (e?.code === 'ERR_NETWORK' || e?.code === 'ECONNABORTED' || !e?.response) {
       // 网络层失败:无法建立连接(地址错误/端口不通/证书问题)
-      bindError.value = `无法连接 ${finalServerUrl || '同源服务'},请检查地址是否正确、端口是否开放(http 默认 80,https 默认 443)`
+      // 明确列出实际请求的完整 URL(含协议),避免"填错地址而不自知"
+      bindError.value = `无法连接 ${finalServerUrl || '同源服务'},请检查地址是否正确、端口是否开放(http 默认 80,https 默认 443)\n实际请求: ${(finalServerUrl || '').replace(/\/$/, '')}/api/terminal/bind`
+      // 自动网络诊断(仅 Python Shell):DNS → 代理 → 证书 逐步排查
+      if (finalServerUrl) {
+        bindDiagnosing.value = true
+        try {
+          const diag = await netDiagnose(finalServerUrl)
+          if (diag?.diagnosis?.message) {
+            bindError.value += `\n[诊断] ${diag.diagnosis.message}`
+          }
+        } catch {
+          /* 诊断失败不影响主提示 */
+        } finally {
+          bindDiagnosing.value = false
+        }
+      }
     } else {
       const msg = e?.response?.data?.message || e?.message || '绑定失败'
       bindError.value = msg
@@ -505,6 +534,7 @@ onBeforeUnmount(() => {
                 <input
                   id="cfg-card-interval"
                   v-model.number="runtimeForm.cardInterval"
+                  v-osk
                   type="number"
                   min="0.5"
                   max="10"
@@ -523,6 +553,7 @@ onBeforeUnmount(() => {
                 <input
                   id="cfg-idle-timeout"
                   v-model.number="runtimeForm.idleTimeout"
+                  v-osk
                   type="number"
                   min="0"
                   max="3600"
@@ -530,6 +561,56 @@ onBeforeUnmount(() => {
                   class="settings__input"
                 />
                 <p class="settings__field-hint">用户在选菜/取餐页面无操作超过此时间后自动返回待机页。0 表示永不自动返回。</p>
+              </div>
+
+              <!-- 渲染加速(Win7 老机提速:自动=显卡可用则硬件加速) -->
+              <div class="settings__field">
+                <label class="settings__label">
+                  <Monitor :size="14" />
+                  渲染加速
+                </label>
+                <div class="settings__seg-group">
+                  <button
+                    class="seg-btn btn-press"
+                    :class="{ 'seg-btn--active': runtimeForm.gpuMode === 'auto' }"
+                    @click="runtimeForm.gpuMode = 'auto'"
+                  >
+                    自动检测
+                  </button>
+                  <button
+                    class="seg-btn btn-press"
+                    :class="{ 'seg-btn--active': runtimeForm.gpuMode === 'software' }"
+                    @click="runtimeForm.gpuMode = 'software'"
+                  >
+                    软件渲染(最稳)
+                  </button>
+                </div>
+                <p class="settings__field-hint">自动检测:启动时探测显卡驱动,可用则启用硬件加速(页面更快);无驱动自动退回软件渲染。若个别设备自动模式下黑屏,改选软件渲染。重启后生效。</p>
+              </div>
+
+              <!-- 屏幕键盘(触屏设备) -->
+              <div class="settings__field">
+                <label class="settings__label">
+                  <CreditCard :size="14" />
+                  屏幕键盘
+                </label>
+                <div class="settings__seg-group">
+                  <button
+                    class="seg-btn btn-press"
+                    :class="{ 'seg-btn--active': runtimeForm.oskMode === 'auto' }"
+                    @click="runtimeForm.oskMode = 'auto'"
+                  >
+                    触屏自动唤起
+                  </button>
+                  <button
+                    class="seg-btn btn-press"
+                    :class="{ 'seg-btn--active': runtimeForm.oskMode === 'off' }"
+                    @click="runtimeForm.oskMode = 'off'"
+                  >
+                    关闭
+                  </button>
+                </div>
+                <p class="settings__field-hint">开启后,触屏设备点击搜索框/配置页/管理员验证等输入框时自动弹出系统屏幕键盘,失焦自动收起;接物理键盘操作的输入不触发。</p>
               </div>
 
               <!-- 错误提示(仅保存失败时显示) -->
@@ -649,6 +730,7 @@ onBeforeUnmount(() => {
                 <label class="settings__label">服务器地址(留空=同源开发模式;未填端口时 http 默认 80、https 默认 443)</label>
                 <input
                   v-model="form.serverUrl"
+                  v-osk
                   type="text"
                   class="settings__input"
                   placeholder="如 http://192.168.10.79:8080 或 https://canteen.xxx.com"
@@ -659,6 +741,7 @@ onBeforeUnmount(() => {
                   <label class="settings__label">管理员账号</label>
                   <input
                     v-model="form.username"
+                    v-osk
                     type="text"
                     autocomplete="off"
                     class="settings__input"
@@ -669,6 +752,7 @@ onBeforeUnmount(() => {
                   <label class="settings__label">管理员密码</label>
                   <input
                     v-model="form.password"
+                    v-osk
                     type="password"
                     autocomplete="off"
                     class="settings__input"
@@ -679,6 +763,7 @@ onBeforeUnmount(() => {
                 <label class="settings__label">食堂安全码</label>
                 <input
                   v-model="form.securityCode"
+                  v-osk
                   type="text"
                   class="settings__input settings__input--code"
                   placeholder="8 位安全码(向超管索取)"
@@ -688,6 +773,7 @@ onBeforeUnmount(() => {
                 <label class="settings__label">设备标识(可选)</label>
                 <input
                   v-model="form.deviceLabel"
+                  v-osk
                   type="text"
                   class="settings__input"
                   placeholder="如:前台订餐机"
@@ -726,10 +812,12 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <!-- 错误提示 -->
-          <div v-if="bindError" class="settings__alert settings__alert--error">
+          <!-- 错误提示(含自动网络诊断结论,pre-line 支持多行) -->
+          <div v-if="bindError" class="settings__alert settings__alert--error settings__alert--pre">
             <Info :size="18" class="settings__alert-icon" />
             <span>{{ bindError }}</span>
+            <Loader2 v-if="bindDiagnosing" :size="16" class="settings__diag-spinner" />
+            <em v-if="bindDiagnosing" class="settings__diag-hint">正在诊断网络...</em>
           </div>
           <!-- 成功提示 -->
           <div v-if="bindSuccess" class="settings__alert settings__alert--success">
@@ -789,6 +877,7 @@ onBeforeUnmount(() => {
         <div class="modal__form">
           <input
             v-model="unbindForm.username"
+            v-osk
             type="text"
             placeholder="超管或本店管理员账号"
             autocomplete="off"
@@ -797,6 +886,7 @@ onBeforeUnmount(() => {
           />
           <input
             v-model="unbindForm.password"
+            v-osk
             type="password"
             placeholder="管理员密码"
             autocomplete="off"
@@ -1077,6 +1167,19 @@ onBeforeUnmount(() => {
   color: #2563eb;
 }
 .settings__alert-icon { flex-shrink: 0; }
+/* 多行错误提示(网络诊断结论,换行展示) */
+.settings__alert--pre span {
+  white-space: pre-line;
+  line-height: 1.5;
+}
+/* 诊断中的小 spinner(不转,低性能设备减负;用闪烁提示) */
+.settings__diag-spinner { flex-shrink: 0; }
+.settings__diag-hint {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: var(--fs-xs);
+  opacity: 0.8;
+}
 
 /* ============ 终端运行设置表单 ============ */
 .settings__runtime-form {

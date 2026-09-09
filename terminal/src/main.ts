@@ -5,6 +5,7 @@ import App from './App.vue'
 import { cleanExpiredCache as cleanAvatarCache } from './utils/imageCache'
 import { initBrandingFromCache } from './store/branding'
 import { initTokenFromShell } from './api'
+import { vOsk } from './directives/osk'
 
 // 启动时清理过期头像缓存
 cleanAvatarCache()
@@ -60,4 +61,6 @@ window.addEventListener('unhandledrejection', (e) => {
 })
 
 app.use(router)
+// v-osk:触屏设备点击输入框自动唤起屏幕键盘(仅 Python Shell + osk_mode 非 off)
+app.directive('osk', vOsk)
 app.mount('#app')

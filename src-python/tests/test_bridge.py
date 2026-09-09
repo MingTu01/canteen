@@ -120,6 +120,40 @@ class TestSetConfigValidation:
         assert result['ok'] is False
         assert self.written is None
 
+    def test_gpu_mode_and_osk_mode_valid(self, bridge):
+        """设置页保存运行设置时带 gpu_mode/osk_mode(1.0.45 新增),应全部通过。
+
+        回归:validate_config_value 曾缺这两个 key 的校验分支,任何值都落到
+        「不支持的配置项」兜底被拒,设置页报「保存失败,请检查配置文件权限」。
+        """
+        result = bridge.handle_api('set_config', {
+            'window_mode': 'fullscreen',
+            'card_interval': 2,
+            'idle_timeout': 30,
+            'gpu_mode': 'software',
+            'osk_mode': 'off',
+        })
+        assert result['ok'] is True
+        assert self.written == {
+            'window_mode': 'fullscreen',
+            'card_interval': 2,
+            'idle_timeout': 30,
+            'gpu_mode': 'software',
+            'osk_mode': 'off',
+        }
+
+    def test_gpu_mode_invalid_rejected(self, bridge):
+        """gpu_mode 非法枚举值应被拒绝且不落盘。"""
+        result = bridge.handle_api('set_config', {'gpu_mode': 'ultra'})
+        assert result['ok'] is False
+        assert self.written is None
+
+    def test_osk_mode_invalid_rejected(self, bridge):
+        """osk_mode 非法枚举值应被拒绝且不落盘。"""
+        result = bridge.handle_api('set_config', {'osk_mode': 'always'})
+        assert result['ok'] is False
+        assert self.written is None
+
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='DPAPI 仅 Windows 可用')
 class TestTokenStorage:

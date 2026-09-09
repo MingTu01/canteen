@@ -102,19 +102,28 @@ if getattr(sys, 'frozen', False) and sys.platform == 'win32':
 
     _exe_dir = os.path.dirname(sys.executable)
     _exe_dir_short = get_short_path(_exe_dir)
-    _qt_bin = os.path.join(_exe_dir_short, '_internal', 'PyQt5', 'Qt5', 'bin')
-    _qt_root = os.path.join(_exe_dir_short, '_internal', 'PyQt5', 'Qt5')
-    _qt_webengine_process = os.path.join(_qt_bin, 'QtWebEngineProcess.exe')
-    if os.path.exists(_qt_webengine_process):
-        os.environ['QTWEBENGINEPROCESS_PATH'] = _qt_webengine_process
-    # Chromium 资源目录(含 icudtl.dat 和 .pak 文件)
-    _qt_resources = os.path.join(_qt_root, 'resources')
-    if os.path.exists(_qt_resources):
-        os.environ['QTWEBENGINE_RESOURCES_PATH'] = _qt_resources
-    # Chromium locales 目录
-    _qt_locales = os.path.join(_qt_root, 'translations', 'qtwebengine_locales')
-    if os.path.exists(_qt_locales):
-        os.environ['QTWEBENGINE_LOCALES_PATH'] = _qt_locales
+    # 兼容两种 PyInstaller onedir 布局:
+    #   PyInstaller 6.x: 依赖位于 _internal\ 子目录
+    #   PyInstaller 5.x(Python 3.7/Win7 兼容): 依赖平铺于 EXE 同目录
+    _qt_root = None
+    for _sub in ('_internal', '.'):
+        _cand = os.path.join(_exe_dir_short, _sub, 'PyQt5', 'Qt5')
+        if os.path.exists(os.path.join(_cand, 'bin', 'QtWebEngineProcess.exe')):
+            _qt_root = _cand
+            break
+    if _qt_root:
+        _qt_bin = os.path.join(_qt_root, 'bin')
+        _qt_webengine_process = os.path.join(_qt_bin, 'QtWebEngineProcess.exe')
+        if os.path.exists(_qt_webengine_process):
+            os.environ['QTWEBENGINEPROCESS_PATH'] = _qt_webengine_process
+        # Chromium 资源目录(含 icudtl.dat 和 .pak 文件)
+        _qt_resources = os.path.join(_qt_root, 'resources')
+        if os.path.exists(_qt_resources):
+            os.environ['QTWEBENGINE_RESOURCES_PATH'] = _qt_resources
+        # Chromium locales 目录
+        _qt_locales = os.path.join(_qt_root, 'translations', 'qtwebengine_locales')
+        if os.path.exists(_qt_locales):
+            os.environ['QTWEBENGINE_LOCALES_PATH'] = _qt_locales
     # Chromium flags 说明:
     #   --no-sandbox: 完全禁用渲染器进程沙箱。
     #   必须使用 --no-sandbox!否则渲染器进程的文件系统沙箱会阻止 IndexedDB
@@ -128,31 +137,87 @@ if getattr(sys, 'frozen', False) and sys.platform == 'win32':
     #
     #   --disable-gpu-sandbox: 禁用 GPU 沙箱(终端/虚拟机环境下 GPU 沙箱常因
     #   驱动问题导致渲染异常)。
-    os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--no-sandbox --disable-gpu-sandbox --disable-software-rasterizer --enable-media-stream --use-fake-ui-for-media-stream'
+    #
+    #   Win7 黑屏根治:老 GPU 驱动下 ANGLE(D3D11→D3D9)硬件合成初始化失败,
+    #   页面渲染全黑但进程不崩溃、无报错(Win8+/Win10/Win11 驱动正常无此问题)。
+    #   终端页面为普通 Vue 界面(无 WebGL/3D/视频),纯软件渲染性能完全够用,
+    #   故 Win7(NT 6.1)上追加 --disable-gpu --disable-gpu-compositing 强制
+    #   软件合成,彻底规避驱动兼容性问题。
+    #   注:无 manifest 的程序在 Win8+ 上 GetVersionEx 会被兼容性垫片谎报为
+    #   6.2,但 Win7 本身如实上报 6.1,因此 "<= 6.1" 判定 Win7 是可靠的。
+    _common_flags = '--no-sandbox --disable-gpu-sandbox --enable-media-stream --use-fake-ui-for-media-stream'
+    _is_win7 = False
+    try:
+        _win_ver = sys.getwindowsversion()
+        _is_win7 = (_win_ver.major, _win_ver.minor) <= (6, 1)
+        print(f'[Diag] Windows 版本: {_win_ver.major}.{_win_ver.minor} (build {_win_ver.build})')
+    except Exception:
+        pass
+    # 用户配置的渲染模式(config.json gpu_mode):
+    #   software = 强制软件渲染(Win7 自动生效;低端显卡/驱动异常的实体机
+    #              在设置页手动切换,与 Win7 走同一条验证过的软件渲染链路)
+    #   auto(默认) = 按系统自动(Win7 强制软件,其他保留 GPU 硬件加速)
+    _gpu_mode = 'auto'
+    try:
+        from config import read_full_config as _read_gpu_cfg
+        _gpu_mode = str(_read_gpu_cfg().get('gpu_mode', 'auto'))
+    except Exception:
+        pass
+    _force_software = _is_win7 or _gpu_mode == 'software'
+    if _force_software:
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = (
+            _common_flags + ' --disable-gpu --disable-gpu-compositing')
+        # 渲染链路(1.0.42 实测教训):
+        #   ✗ QT_QUICK_BACKEND=software —— 与 QWebEngineView 不兼容!WebEngine 的
+        #     页面纹理必须经 GL 上下文上屏,光栅后端下连页面都加载不出来
+        #     (1.0.43 实测:ok=False、DOM 空、截图 2KB)。
+        #   ✓ QT_OPENGL=software —— Qt 强制加载随包 opengl32sw.dll(Mesa llvmpipe
+        #     软件光栅化),无需显卡驱动;页面能加载(ok=True),但 1.0.42 在零驱动
+        #     VM 上仍黑屏,需 GL 探针确认 llvmpipe 是否真的初始化成功。
+        os.environ['QT_OPENGL'] = 'software'
+        _why = 'Win7 系统' if _is_win7 else f'gpu_mode={_gpu_mode} 用户配置'
+        print(f'[Init] 强制软件渲染( {_why} ):Chromium 禁用GPU + Qt 走软件OpenGL(opengl32sw/Mesa llvmpipe)')
+    else:
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = (
+            _common_flags + ' --disable-software-rasterizer')
+        print('[Init] 非 Win7 环境:保留 GPU 硬件加速')
+
+    # 运维远程实验开关:config.json 的 chromium_flags_extra 追加到 Chromium 启动参数
+    # (如 "--use-angle=swiftshader"),用于老系统渲染问题的远程排查,无需重新发版。
+    # 该字段在 read_full_config 有默认值,首次运行 config.json 不存在也能读到。
+    try:
+        from config import read_full_config as _read_cfg
+        _extra = _read_cfg().get('chromium_flags_extra', '')
+        if isinstance(_extra, str) and _extra.strip():
+            os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] += ' ' + _extra.strip()
+            print(f'[Init] 追加自定义 Chromium 参数: {_extra.strip()}')
+    except Exception as _e:
+        print(f'[Init] 读取 chromium_flags_extra 失败(忽略): {_e}')
     # 用短路径写 qt.conf(避免中文路径被 QtWebEngine 的 ANSI API 截断为 ??)
     # 关键:bin/qt.conf 的 Prefix 必须是 ".."(父目录),因为 QtWebEngineProcess.exe
     # 在 bin/ 下,而 resources/ 和 translations/ 在 bin/ 的父目录(Qt5/)下。
     # 之前写成 "Prefix = ." 导致 Qt 在 bin/resources/ 找 icudtl.dat,
     # 报 "Couldn't mmap icu data file" → network service 崩溃 → IndexedDB 无法工作。
-    _bin_qt_conf = os.path.join(_qt_bin, 'qt.conf')
-    try:
-        with open(_bin_qt_conf, 'w', encoding='ascii') as f:
-            f.write('[Paths]\n')
-            f.write('Prefix = ..\n')
-    except Exception:
-        pass
-    _exe_qt_conf = os.path.join(_exe_dir, 'qt.conf')  # 放 EXE 同目录,用原始路径(英文路径下无问题)
-    try:
-        with open(_exe_qt_conf, 'w', encoding='ascii') as f:
-            f.write('[Paths]\n')
-            f.write(f'Prefix = {_qt_root}\n')
-            f.write(f'Binaries = {_qt_bin}\n')
-            f.write(f'Libraries = {_qt_bin}\n')
-            f.write(f'Plugins = {os.path.join(_qt_root, "plugins")}\n')
-            f.write(f'Translations = {os.path.join(_qt_root, "translations")}\n')
-            f.write(f'Resources = {os.path.join(_qt_root, "resources")}\n')
-    except Exception:
-        pass
+    if _qt_root:
+        _bin_qt_conf = os.path.join(_qt_bin, 'qt.conf')
+        try:
+            with open(_bin_qt_conf, 'w', encoding='ascii') as f:
+                f.write('[Paths]\n')
+                f.write('Prefix = ..\n')
+        except Exception:
+            pass
+        _exe_qt_conf = os.path.join(_exe_dir, 'qt.conf')  # 放 EXE 同目录,用原始路径(英文路径下无问题)
+        try:
+            with open(_exe_qt_conf, 'w', encoding='ascii') as f:
+                f.write('[Paths]\n')
+                f.write(f'Prefix = {_qt_root}\n')
+                f.write(f'Binaries = {_qt_bin}\n')
+                f.write(f'Libraries = {_qt_bin}\n')
+                f.write(f'Plugins = {os.path.join(_qt_root, "plugins")}\n')
+                f.write(f'Translations = {os.path.join(_qt_root, "translations")}\n')
+                f.write(f'Resources = {os.path.join(_qt_root, "resources")}\n')
+        except Exception:
+            pass
 
 # ===== 单实例限制(Windows 命名 Mutex)=====
 # 防止多开 EXE 导致:
@@ -253,6 +318,21 @@ class TerminalWindow(QWidget):
             lambda p: print(f'[WebEngine] 加载进度: {p}%'))
         self.view.loadFinished.connect(
             lambda ok: print(f'[WebEngine] 加载完成: ok={ok}'))
+        # 加载完成 3 秒后探测 DOM(区分"页面加载了但黑屏=合成器问题"
+        # vs "前端 JS 失败没挂载=前端问题"),对 Win7 黑屏远程排查至关重要
+        self.view.loadFinished.connect(
+            lambda ok: QTimer.singleShot(3000, self._probe_dom))
+        # 加载完成 1.5 秒后执行 GL 环境探针(黑屏定位的决定性证据):
+        # 直接问 GL 库"你的渲染器是谁"——llvmpipe=软件渲染就绪;
+        # GDI Generic=微软 GL1.1 兜底(WebEngine 需要 2.0+,必黑屏);
+        # 创建失败=零可用 GL 上下文(必黑屏)
+        self.view.loadFinished.connect(
+            lambda ok: QTimer.singleShot(1500, self._gl_probe))
+        # 加载完成 6 秒后保存窗口截图(像素级证据):
+        #   截图有内容但屏幕黑 → 显示驱动/合成层问题
+        #   截图本身全黑       → 应用渲染层问题(配合 QT_QUICK_BACKEND 判断)
+        self.view.loadFinished.connect(
+            lambda ok: QTimer.singleShot(6000, self._save_screenshot))
         # 渲染进程崩溃(QtWebEngineProcess.exe 异常退出)会导致页面白屏/网络失效
         self.page.renderProcessTerminated.connect(
             self._on_render_crash)
@@ -268,6 +348,96 @@ class TerminalWindow(QWidget):
         self.view.setUrl(QUrl(self.url))
 
         print(f'[Window] 窗口已创建(模式: {"全屏" if self._is_fullscreen else "窗口"}),加载: {self.url}')
+        # 屏幕信息(排查小屏/缩放导致的窗口异常,如截图尺寸≠预期窗口尺寸)
+        try:
+            from PyQt5.QtWidgets import QApplication
+            scr = QApplication.primaryScreen()
+            if scr is not None:
+                print(f'[Window] 屏幕分辨率: {scr.size().width()}x{scr.size().height()} '
+                      f'(可用 {scr.availableSize().width()}x{scr.availableSize().height()}, '
+                      f'DPI {scr.logicalDotsPerInch():.0f})')
+        except Exception:
+            pass
+
+    def _gl_probe(self):
+        """GL 环境探针:确认 Qt 实际拿到的 OpenGL 上下文与渲染器(黑屏定位决定性证据)。"""
+        try:
+            import ctypes
+            from PyQt5.QtGui import QOpenGLContext, QOffscreenSurface
+
+            # 1) 试建离屏 GL 上下文(会触发 Qt 按 QT_OPENGL 策略加载对应 DLL)
+            surf = QOffscreenSurface()
+            surf.create()
+            ctx = QOpenGLContext(self)
+            created = ctx.create()
+            gl_ver = gl_rend = ''
+            made = False
+            if created:
+                made = ctx.makeCurrent(surf)
+                if made:
+                    try:
+                        # glGetString 经 opengl32.dll 转发到真实实现(Mesa/显卡)
+                        # 注意:32 位 Windows 的 GL 函数是 stdcall,必须用 WinDLL
+                        # (CDLL 是 cdecl,会报 calling convention 错误)
+                        gl = ctypes.WinDLL('opengl32.dll')
+                        gl.glGetString.restype = ctypes.c_char_p
+                        gl.glGetString.argtypes = [ctypes.c_uint]
+                        gl_ver = (gl.glGetString(0x1F02) or b'').decode('latin1', 'replace')
+                        gl_rend = (gl.glGetString(0x1F01) or b'').decode('latin1', 'replace')
+                    except Exception as e:
+                        gl_ver = f'glGetString异常:{e}'
+                    ctx.doneCurrent()
+
+            # 2) Mesa 软件 GL DLL 是否真的被加载(create 之后查才有意义)
+            sw_loaded = bool(ctypes.windll.kernel32.GetModuleHandleW('opengl32sw.dll'))
+
+            print(f'[Diag] GL 探针: 上下文创建={"成功" if created else "失败"}, '
+                  f'表面绑定={"成功" if made else "失败"}, '
+                  f'opengl32sw.dll已加载={sw_loaded}, '
+                  f'GL_VERSION={gl_ver or "无"}, GL_RENDERER={gl_rend or "无"}')
+            if (created or made) and ('llvmpipe' in gl_rend or sw_loaded):
+                print('[Diag] GL 探针结论: Mesa llvmpipe 软件渲染就绪,无显卡也可正常渲染')
+            elif created and 'GDI Generic' in gl_rend:
+                print('[Diag] GL 探针结论: 仅微软 GDI 通用 GL1.1(WebEngine 需 2.0+,'
+                      '必黑屏)——opengl32sw.dll 未被 Qt 使用,需换 Mesa 加载方式')
+            elif not created:
+                print('[Diag] GL 探针结论: 无法创建任何 GL 上下文,WebEngine 无法上屏,必黑屏')
+        except Exception as e:
+            print(f'[Diag] GL 探针异常: {e}')
+
+    def _save_screenshot(self):
+        """窗口截图诊断:把窗口当前像素保存为 PNG,黑屏排查的像素级证据。"""
+        try:
+            from config import get_local_appdata_dir
+            pix = self.grab()
+            path = os.path.join(get_local_appdata_dir(), 'screenshot.png')
+            ok = pix.save(path, 'PNG')
+            size = os.path.getsize(path) if ok and os.path.exists(path) else -1
+            print(f'[Diag] 窗口截图: {path} ({pix.width()}x{pix.height()}, '
+                  f'{size} 字节, {"已保存" if ok else "保存失败"})')
+            print('[Diag] 提示: 截图全黑(几百字节~2KB)=应用渲染层问题; '
+                  '截图正常(几十KB+)但屏幕黑=显示/合成层问题')
+        except Exception as e:
+            print(f'[Diag] 窗口截图失败: {e}')
+
+    def _probe_dom(self):
+        """DOM 探针:检查 Vue 应用是否真的挂载渲染。
+
+        黑屏排查关键信号:
+          app_children > 0  → 前端已挂载,若用户仍看到黑屏 = 合成器/显示层问题
+          app_children == 0 → 前端 JS 失败(看上方 [JS Error] 日志)
+          返回 None        → runJavaScript 无响应,渲染进程可能已死
+        """
+        js = ("(function(){var a=document.getElementById('app');"
+              "return JSON.stringify({"
+              "title:document.title,"
+              "app_children:a?a.children.length:-1,"
+              "body_len:document.body?document.body.innerHTML.length:0"
+              "})})()")
+        try:
+            self.page.runJavaScript(js, lambda r: print(f'[Diag] DOM 探针: {r}'))
+        except Exception as e:
+            print(f'[Diag] DOM 探针失败: {e}')
 
     def _on_render_crash(self, termination_type, exit_code):
         """渲染进程崩溃诊断 + 自动恢复。
@@ -671,7 +841,16 @@ def main():
         print(f'[Diag] 本地服务器连通测试: 失败! 错误: {e}', flush=True)
 
     # 7. 创建主窗口(根据 window_mode 决定全屏/窗口)
-    is_fullscreen = (cfg['window_mode'] == 'fullscreen')
+    # 首次启动(终端未绑定,token.bin 不存在)强制窗口模式:
+    #   配置/绑定页在 1280x800 窗口中显示,可拖动可缩放,操作方便;
+    # 绑定完成后(token.bin 已由前端绑定成功时经 token_save 写入)按
+    #   window_mode 启动(config.json 默认 fullscreen 即默认全屏);
+    #   且绑定成功 → 前端 goRun → set_config(window_mode) → 动态切全屏。
+    _token_path = os.path.join(get_appdata_dir(), 'token.bin')
+    _terminal_bound = os.path.exists(_token_path) and os.path.getsize(_token_path) > 0
+    is_fullscreen = (cfg['window_mode'] == 'fullscreen') and _terminal_bound
+    if not _terminal_bound:
+        print('[Init] 终端未绑定(首次启动):配置页以窗口模式显示,绑定完成后默认全屏')
     window = TerminalWindow(server_url, fullscreen=is_fullscreen)
 
     # 8. 连接 bridge 信号到窗口操作

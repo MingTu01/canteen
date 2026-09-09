@@ -56,6 +56,10 @@ src-python/data/
 src-python/build/
 src-python/dist/
 
+# Python 终端一键打包工作区与运行库(由 build_installer.py 生成/下载,不提交)
+x86-v2/
+src-python/redist/
+
 # Docker
 docker-compose.override.yml
 

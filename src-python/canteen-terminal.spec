@@ -3,7 +3,7 @@
 PyInstaller 打包配置 - 企业智慧食堂终端(绿色目录版)
 
 打包命令:
-  C:\Python310-32\python.exe -m PyInstaller canteen-terminal.spec --clean --noconfirm
+  C:\Python379-32\python.exe -m PyInstaller canteen-terminal.spec --clean --noconfirm
 
 产物:
   dist/canteen-terminal/canteen-terminal.exe  (绿色目录,内含所有依赖)
@@ -40,6 +40,11 @@ a = Analysis(
         # 把 OUR_IDR.dll 和 IDUSB.DLL 打包进目录(读卡器 SDK 依赖)
         (os.path.join(SRC_DIR, 'OUR_IDR.dll'), '.'),
         (os.path.join(SRC_DIR, 'IDUSB.DLL'), '.'),
+        # opengl32sw.dll(Mesa 软件 OpenGL,16MB)放到 EXE 同目录:
+        # Win7 上 QT_OPENGL=software 时 Qt 按「EXE 目录 → Qt 库路径」顺序查找该
+        # DLL;PyInstaller hook 已把它收进 PyQt5\Qt5\bin,但为防库路径解析失败,
+        # 双保险放一份到根目录(EXE 目录是查找第一位),裸 Win7 也能加载。
+        (os.path.join(QT5_DIR, 'bin', 'opengl32sw.dll'), '.'),
     ],
     datas=[
         # Vue 前端 dist 目录(打包为 web 目录)
@@ -93,6 +98,13 @@ a = Analysis(
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+# ===== 排除 Win8+ 专用模块(Win7 兼容) =====
+# Qt5Bluetooth.dll 与 qtposition_winrt.dll 的导入表引用 api-ms-win-core-winrt
+# (Win8 才有的 API 集);本应用不使用蓝牙/WinRT 定位,排除后在 Win7 上更稳。
+# 仅当模块被显式加载时导入表才会被解析,排除属双保险,同时减小体积。
+WIN8_ONLY_MODULES = ('Qt5Bluetooth.dll', 'qtposition_winrt.dll')
+a.binaries = [b for b in a.binaries if not any(x in b[0] for x in WIN8_ONLY_MODULES)]
 
 exe = EXE(
     pyz,

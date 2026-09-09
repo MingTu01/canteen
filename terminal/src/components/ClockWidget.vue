@@ -7,6 +7,7 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { pad2 } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -16,7 +17,7 @@ const dateLine = ref('')
 let timer = 0
 
 const update = () => {
-  const now = new Date()
+  const now = serverDate()
   clock.value = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
   dateLine.value = `${now.getMonth() + 1}月${now.getDate()}日 ${WEEK[now.getDay()]}`
 }

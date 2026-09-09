@@ -25,7 +25,7 @@
 #define MyAppNameEn "CanteenTerminal"
 ; 版本号默认值;build_installer.py 会从 VERSIONS.json 读取并通过 /DMyAppVersion 覆盖
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.32"
+  #define MyAppVersion "1.0.46"
 #endif
 #define MyAppPublisher "Enterprise Canteen System"
 #define MyAppExeName "canteen-terminal.exe"
@@ -96,6 +96,12 @@ Source: "terminal_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; 保留在安装目录直至卸载结束,不能加 deleteafterinstall,否则卸载时脚本已不存在
 Source: "remove_ch375_driver.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
+; VC++ 2015-2022 x86 运行库(内含 Universal CRT)
+; Win7 没有内置 UCRT(api-ms-win-crt-*.dll),python38.dll/Qt5 全家都依赖它,
+; 缺失时终端报"丢失 api-ms-win-xxx.dll"+"python38.dll LoadLibrary 失败"。
+; 安装时静默执行(已装过则秒过);放 {tmp} 安装完自动清理。
+Source: "redist\vc_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+
 ; CH375 驱动文件(只打包 INF/SYS/CAT/DLL,排除易被安全软件误报的第三方 EXE)
 ; 驱动安装由系统自带 pnputil 完成,不依赖第三方安装程序
 ; 注意:不加 Check: DriverFilesExist,因为该函数检查目标路径,首次安装时文件未复制会返回 false
@@ -118,6 +124,13 @@ Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFil
 Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\watchdog.exe"; IconFilename: "{app}\terminal_icon.ico"; Tasks: startup
 
 [Run]
+; 安装 VC++ x86 运行库(含 Universal CRT,Win7 必需,必须最先执行)
+; /quiet 静默安装,/norestart 不重启;已装过或 Win10/11 自带则秒过。
+; 退出码 3010(成功但需重启)为正常情况,Inno 不检查 [Run] 退出码。
+Filename: "{tmp}\vc_redist.x86.exe"; Parameters: "/install /quiet /norestart"; \
+    StatusMsg: "正在安装 VC++ 运行库(Windows 7 必需)..."; \
+    Flags: runhidden waituntilterminated
+
 ; 安装 CH375 读卡器驱动 - 只使用系统自带 pnputil(不会触发安全软件拦截)
 ; 兼容 Win7/8/8.1(旧语法 -a)和 Win10/11(新语法 /add-driver /install)
 ; 先尝试新语法,失败则回退到旧语法,确保各版本 Windows 均可安装
@@ -132,9 +145,11 @@ Filename: "{cmd}"; Parameters: "/c pnputil /add-driver ""{app}\drivers\CH375WDM.
 
 [UninstallDelete]
 ; 清理安装目录残留(旧版可能在安装目录下留有 data/config.json,或运行时写入的 qt.conf)
+; 注:PyInstaller 6.x 布局在 _internal\ 下,5.x(Python 3.7/Win7 兼容)平铺于 {app}\PyQt5\
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\config.json"
 Type: filesandordirs; Name: "{app}\qt.conf"
+Type: filesandordirs; Name: "{app}\PyQt5\Qt5\bin\qt.conf"
 Type: filesandordirs; Name: "{app}\_internal\PyQt5\Qt5\bin\qt.conf"
 ; 清理驱动移除脚本(卸载完成后不再需要)
 Type: files; Name: "{app}\remove_ch375_driver.cmd"
@@ -240,7 +255,7 @@ end;
 // =============================================================================
 // 卸载初始化:先关闭正在运行的终端进程,询问是否移除驱动
 // =============================================================================
-// 关键:如果终端还在运行,_internal 目录里的 PyQt5 DLL / QtWebEngineProcess.exe
+// 关键:如果终端还在运行,目录里的 PyQt5 DLL / QtWebEngineProcess.exe
 // 会被进程占用,Inno Setup 无法删除这些文件,导致整个安装目录残留。
 // 必须在卸载文件之前(taskkill)关闭进程,并等待文件句柄释放。
 //

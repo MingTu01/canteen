@@ -25,6 +25,7 @@ import { orderStore, resetOrderFlow } from '@/store/order'
 import { useIdleTimer } from '@/composables/useIdleTimer'
 import { useOrderConfig } from '@/composables/useOrderConfig'
 import { toDateKey, dateWindow, shortDate, dateRelLabel } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { menuInvalidated } from '@/utils/cache'
 import TopBar from '@/components/TopBar.vue'
 import DatePicker from '@/components/DatePicker.vue'
@@ -34,8 +35,8 @@ import Modal from '@/components/Modal.vue'
 
 const router = useRouter()
 
-/** 今天 */
-const today = toDateKey(new Date())
+/** 今天(以服务器时间为准,防止改本机时间) */
+const today = toDateKey(serverDate())
 
 /**
  * allDates(DatePicker 全量日历):过去30天 + 未来30天(含今天)。
@@ -113,7 +114,7 @@ const { loadConfig, isCancellableByDeadline } = useOrderConfig()
 /** 订单是否仍可取消(按截止配置判定;无日期视为可取消) */
 const orderCancellable = (order: any) => {
   if (!order?.date) return true
-  return isCancellableByDeadline(order.date, new Date())
+  return isCancellableByDeadline(order.date, serverDate())
 }
 
 /* ============ 无极滑动切换日期(单页堆叠模式,对齐 H5 Order.vue) ============ */

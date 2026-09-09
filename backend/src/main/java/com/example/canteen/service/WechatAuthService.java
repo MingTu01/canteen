@@ -51,6 +51,10 @@ public class WechatAuthService {
     @Value("${wechat.app-secret:}")
     private String appSecret;
 
+    /** H5 访问基础 URL(与公众号后台「网页授权域名」一致,不含端口),用于构造授权回调地址 */
+    @Value("${wechat.h5-base-url:}")
+    private String h5BaseUrl;
+
     /** 微信授权码换 openid 的临时绑定令牌缓存(bindToken → openid),5 分钟过期 */
     private final Map<String, BindEntry> bindTokenCache = new ConcurrentHashMap<>();
     private static final long BIND_TOKEN_TTL_MS = 5L * 60 * 1000;
@@ -77,6 +81,11 @@ public class WechatAuthService {
                 && appSecret != null && !appSecret.isBlank();
     }
 
+    /** H5 基础 URL(用于构造授权回调地址,为空时降级为按请求 Host 拼接) */
+    public String getH5BaseUrl() {
+        return h5BaseUrl;
+    }
+
     /**
      * 生成微信网页授权 URL。
      * 使用 snsapi_base 静默授权,用户无感知,仅获取 openid。
@@ -97,6 +106,32 @@ public class WechatAuthService {
                 + "&scope=snsapi_base"
                 + "&state=" + state
                 + "#wechat_redirect";
+    }
+
+    /**
+     * 基于配置的 WECHAT_H5_BASE_URL 构造微信网页授权 URL。
+     * 相比依赖请求 Host 的 getAuthUrl,这里保证 redirect_uri 的域名与公众号后台
+     * 「网页授权域名」完全一致,避免反向代理下 Host 头不一致导致的
+     * 10003 redirect_uri 域名与后台配置不一致 错误。
+     *
+     * @param redirectPath H5 回调相对路径(如 /login),需以 / 开头
+     * @return 微信授权 URL
+     * @throws IllegalStateException 微信未配置或 H5 地址未配置
+     */
+    public String getH5AuthUrl(String redirectPath) {
+        if (!isConfigured()) {
+            throw new IllegalStateException("微信登录未配置,请设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET");
+        }
+        if (h5BaseUrl == null || h5BaseUrl.isBlank()) {
+            throw new IllegalStateException("WECHAT_H5_BASE_URL 未配置,无法构造微信授权回调地址");
+        }
+        String base = h5BaseUrl.endsWith("/")
+                ? h5BaseUrl.substring(0, h5BaseUrl.length() - 1)
+                : h5BaseUrl;
+        String path = (redirectPath == null || redirectPath.isBlank() || !redirectPath.startsWith("/"))
+                ? "/login"
+                : redirectPath;
+        return getAuthUrl(base + path);
     }
 
     /**

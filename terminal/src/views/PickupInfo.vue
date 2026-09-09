@@ -17,6 +17,7 @@ import { pickupStore, resetPickupFlow, type PickupOrder } from '@/store/pickup'
 import { useMealConfig } from '@/composables/useMealConfig'
 import { useMealTimeSlots } from '@/composables/useMealTimeSlots'
 import { mealTypeLabel, mealTypeTime, toDateKey } from '@/utils'
+import { serverDate } from '@/utils/serverTime'
 import { getCachedAvatar } from '@/utils/imageCache'
 import { Pause, Play } from 'lucide-vue-next'
 import BrandingHeader from '@/components/BrandingHeader.vue'
@@ -226,7 +227,7 @@ const switchEmployee = async (cardNo: string) => {
     // 拉取今日待取餐订单(先拉订单,成功后再更新 employee,避免中间态错配)
     const listResp = await api.get(`/order/employee/${newEmp.id}`)
     const list: any[] = listResp.data?.code === 200 ? (listResp.data.data ?? []) : []
-    const today = toDateKey(new Date())
+    const today = toDateKey(serverDate())
     // 关键:只保留当前时段餐次的订单,绝对避免"午餐时段核销早餐订单"的错配
     const pending = list
       .filter((o) => o.date === today && o.status === 1 && Number(o.mealType) === curMealType)

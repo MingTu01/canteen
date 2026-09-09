@@ -59,7 +59,7 @@ ALLOWED_DOWNLOAD_HOSTS = frozenset({
 SETUP_NAME_RE = re.compile(r'CanteenTerminal-Setup-([\d.]+)\.exe', re.IGNORECASE)
 
 # 当前终端版本兜底常量(与仓库根 VERSIONS.json 的 terminal.version 保持一致,以文件为准)
-CURRENT_VERSION = '1.0.28'
+CURRENT_VERSION = '1.0.46'
 
 USER_AGENT = 'CanteenTerminal-Updater/1.0'
 

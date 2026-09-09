@@ -181,6 +181,7 @@ onBeforeUnmount(() => {
             <User :size="18" class="input-field__icon" />
             <input
               v-model="usernameInput"
+              v-osk
               type="text"
               class="input-field__input"
               placeholder="管理员账号"
@@ -194,6 +195,7 @@ onBeforeUnmount(() => {
             <Lock :size="18" class="input-field__icon" />
             <input
               v-model="passwordInput"
+              v-osk
               :type="passwordVisible ? 'text' : 'password'"
               class="input-field__input input-field__input--password"
               placeholder="密码"
