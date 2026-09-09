@@ -944,17 +944,36 @@ main() {
         fi
     fi
 
-    # 前端可达性检查
+    # 前端可达性检查(带等待重试)
+# 背景:强行 recreate 后 nginx 容器虽显示 Started,但端口绑定/nginx 就绪需要 1~3s;
+#       早期实现用单次 curl 探测,极易在容器刚启动时就返回 000 → 误判失败触发回滚,
+#       本函数与 wait_backend_healthy 对齐:轮询最多 timeout 秒,仍不通才判失败。
+# 参数: $1 = 端口, $2 = 服务名, $3 = 最大等待秒数
+# 返回: 0 = 正常, 1 = 超时
+wait_frontend_ready() {
+    local port="$1" name="$2" max_wait="${3:-60}"
+    local waited=0
+    info "等待前端 ${name} (port ${port}) 就绪,最多 ${max_wait}s..."
+    while [ "$waited" -lt "$max_wait" ]; do
+        code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${port}/" 2>/dev/null || echo "000")
+        if [ "$code" = "200" ]; then
+            info "前端 ${name} (port ${port}): 正常 (耗时 ${waited}s)"
+            return 0
+        fi
+        sleep 3
+        waited=$((waited + 3))
+        printf "."
+    done
+    echo ""
+    error "${name} (port ${port}): 等待超时, 最近状态 HTTP ${code}(前端不可用)"
+    return 1
+}
+
     if [ "$health_ok" = true ]; then
         for svc in "admin-web:18080" "h5:18081"; do
             name="${svc%%:*}"
             port="${svc##*:}"
-            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null || echo "000")
-            if [ "$code" = "200" ]; then
-                info "${name} (port ${port}): 正常"
-            else
-                # 前端失败也触发回退(可能是构建产物为空导致 nginx 403)
-                error "${name} (port ${port}): HTTP ${code}(前端不可用)"
+            if ! wait_frontend_ready "$port" "$name" 60; then
                 health_ok=false
             fi
         done
