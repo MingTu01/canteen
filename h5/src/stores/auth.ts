@@ -16,6 +16,61 @@ import type { Employee } from '@/api/types'
 
 const EMPLOYEE_STORAGE_KEY = 'canteen_h5_employee'
 const LOGGED_IN_STORAGE_KEY = 'canteen_h5_logged_in'
+const OPENID_STORAGE_KEY = 'canteen_h5_openid'
+/** sessionStorage 标记:本次会话已主动退出,不再自动微信授权(避免退出后被弹回原账号) */
+const AUTO_AUTH_SUPPRESS_KEY = 'canteen_h5_auto_auth_suppressed'
+
+/** 从 localStorage 读取 openid(微信用户标识,用于自动登录和手机号登录自动换绑) */
+const readOpenid = (): string | null => {
+  try {
+    return localStorage.getItem(OPENID_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** 持久化 openid 到 localStorage */
+const persistOpenid = (openid: string | null) => {
+  try {
+    if (openid) {
+      localStorage.setItem(OPENID_STORAGE_KEY, openid)
+    } else {
+      localStorage.removeItem(OPENID_STORAGE_KEY)
+    }
+  } catch {
+    /* 忽略 quota 异常 */
+  }
+}
+
+/** 读取当前微信 openid(供登录页传参实现自动换绑) */
+const getOpenid = (): string | null => readOpenid()
+
+/** 本次会话是否主动退出过(是则登录页不再自动微信授权) */
+const isAutoAuthSuppressed = (): boolean => {
+  try {
+    return sessionStorage.getItem(AUTO_AUTH_SUPPRESS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** 设置主动退出标记(登出时调用) */
+const suppressAutoAuth = (): void => {
+  try {
+    sessionStorage.setItem(AUTO_AUTH_SUPPRESS_KEY, '1')
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 清除主动退出标记(登录成功时调用,恢复自动授权能力) */
+const clearAutoAuthSuppressed = (): void => {
+  try {
+    sessionStorage.removeItem(AUTO_AUTH_SUPPRESS_KEY)
+  } catch {
+    /* 忽略 */
+  }
+}
 
 // ============ SSE 员工维度长连接(全局,不随页面切换断开) ============
 // 模块级变量(不放入 store 响应式系统,避免 EventSource 被 Vue 代理)
@@ -100,13 +155,15 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // ============ actions ============
-  /** 手机号登录 */
-  const phoneLogin = async (phone: string, password: string): Promise<Employee> => {
-    const res = await authApi.phoneLogin(phone, password)
+  /** 手机号登录。openid 可选:微信内传当前 openid,后端自动绑定/换绑到该账号 */
+  const phoneLogin = async (phone: string, password: string, openid?: string): Promise<Employee> => {
+    const res = await authApi.phoneLogin(phone, password, openid)
+    persistOpenid(openid || res.employee?.wxOpenid || readOpenid())
     employee.value = res.employee
     isLoggedIn.value = true
     persistEmployee(res.employee)
     persistLoggedIn(true)
+    clearAutoAuthSuppressed()
     startSseOnLogin()
     return res.employee
   }
@@ -128,11 +185,13 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const wechatLogin = async (code: string): Promise<Employee> => {
     const res = await authApi.wechatLogin(code)
+    if (res.openid) persistOpenid(res.openid)
     if (res.status === 'login' && res.employee) {
       employee.value = res.employee
       isLoggedIn.value = true
       persistEmployee(res.employee)
       persistLoggedIn(true)
+      clearAutoAuthSuppressed()
       startSseOnLogin()
       return res.employee
     }
@@ -148,10 +207,13 @@ export const useAuthStore = defineStore('auth', () => {
   /** 微信绑定:通过手机号+密码验证身份,绑定 openid 后自动登录 */
   const wechatBind = async (bindToken: string, phone: string, password: string): Promise<Employee> => {
     const res = await authApi.wechatBind(bindToken, phone, password)
+    // openid 已在 need_bind 阶段缓存;若返回中带 openid 则再补一次
+    if (res.employee?.wxOpenid) persistOpenid(res.employee.wxOpenid)
     employee.value = res.employee
     isLoggedIn.value = true
     persistEmployee(res.employee)
     persistLoggedIn(true)
+    clearAutoAuthSuppressed()
     startSseOnLogin()
     return res.employee
   }
@@ -165,6 +227,9 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {
       /* 即使后端调用失败,也继续清前端状态 */
     }
+    // 标记本次已主动退出:当前标签页内不再自动微信授权,避免退出后又被弹回原账号
+    // (用户可点「微信登录」手动重新登录,或改用手机号登录新账号自动换绑)
+    suppressAutoAuth()
     employee.value = null
     isLoggedIn.value = false
     persistEmployee(null)
@@ -310,6 +375,9 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     refreshEmployee,
     setEmployee,
+    // 微信 openid / 自动登录辅助
+    getOpenid,
+    isAutoAuthSuppressed,
     // SSE
     startSseOnLogin,
     stopEmployeeSse,

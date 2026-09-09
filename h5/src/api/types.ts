@@ -40,6 +40,8 @@ export interface Employee {
   status?: number
   /** 是否需要强制修改密码(1=首次登录使用默认密码,需强制改密) */
   mustChangePassword?: number
+  /** 已绑定的微信 openid(某些接口返回,非敏感凭据,可用于前端缓存) */
+  wxOpenid?: string
   createdAt?: string
   updatedAt?: string
 }

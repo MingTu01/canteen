@@ -2,7 +2,6 @@ package com.example.canteen.security;
 
 import com.example.canteen.entity.Admin;
 import com.example.canteen.entity.Employee;
-import com.example.canteen.exception.BusinessException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.JwtParser;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,11 +35,6 @@ public class JwtTokenProvider {
     @Value("${jwt.terminal-expiration:2592000000}")
     private Long terminalExpiration;
 
-    /** 员工 token 绝对过期上限(90 天,毫秒)。
-     *  员工 token 为 30 天 + 滑动续期,若无上限则活跃用户永不失效,token 泄露后风险无限放大;
-     *  自首次签发(origIat)起最多 90 天,超限后 renewToken 抛 BusinessException,由 Filter 转 401 强制重新登录。 */
-    private static final long EMPLOYEE_ABSOLUTE_CAP_MS = 90L * 24 * 60 * 60 * 1000;
-
     public JwtTokenProvider(SecretKey jwtSecretKey, JwtParser jwtParser) {
         this.secretKey = jwtSecretKey;
         this.jwtParser = jwtParser;
@@ -73,6 +67,8 @@ public class JwtTokenProvider {
         claims.put("departmentId", employee.getDepartmentId());
         claims.put("balance", employee.getBalance());
         claims.put("role", 0);
+        // 会话代数:退出/换号重绑时+1,Filter 校验 sg 与当前值一致才放行,实现跨端同步注销
+        claims.put("sg", employee.getSessionGeneration() == null ? 1L : employee.getSessionGeneration());
         // 首次签发时间(毫秒),滑动续期时据此计算 90 天绝对过期上限
         claims.put("origIat", System.currentTimeMillis());
 
@@ -157,8 +153,7 @@ public class JwtTokenProvider {
      * 新 token 的过期时间根据 role 重新计算(admin 24h / employee 30d / terminal 30d)。
      * 用于 JwtAuthenticationFilter 中自动续期,避免活跃用户被登出。
      *
-     * 员工(role=0)有 90 天绝对过期上限:新 exp = min(now + 30天, origIat + 90天),
-     * 若已超上限则抛 BusinessException(由 Filter 转 401 强制重新登录)。
+     * 员工(role=0)为无限滑动续期:只要账号未退出/换绑则永远不失效,满足微信内长期免登需求。
      * 终端(role=3)不设绝对上限:绑定制凭证,可随时解绑/重绑,离线超期仅需人工重新绑定,不涉及账号安全。
      */
     public String renewToken(Map<String, Object> oldClaims) {
@@ -175,16 +170,10 @@ public class JwtTokenProvider {
         claims.remove("exp");
         claims.remove("iat");
         claims.remove("jti");
-        // 员工 token:受 90 天绝对上限约束,防滑动续期导致永不失效
+        // 员工 token:保留 origIat 记录首次签发时间，但不做绝对过期上限校验，实现永不自动失效
         if (role != null && role == 0) {
             long origIat = readOrigIatMs(oldClaims);
-            long absoluteCapMs = origIat + EMPLOYEE_ABSOLUTE_CAP_MS;
-            if (absoluteCapMs <= now) {
-                // 已超绝对上限,拒绝续期;Filter 会将其转为 401 触发 H5 重新登录
-                throw new BusinessException("登录已过期,请重新登录");
-            }
-            expMs = Math.min(expMs, absoluteCapMs);
-            // 回写 origIat(旧 token 无该 claim 时按 iat 补写),保证续期链路上限基准不变
+            // 回写 origIat(旧 token 无该 claim 时按 iat 补写)，格式对齐无需删除改结构
             claims.put("origIat", origIat);
         }
         String subject = oldClaims.get("sub") == null ? "renewed" : oldClaims.get("sub").toString();

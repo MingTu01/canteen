@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -156,11 +157,11 @@ public class WechatAuthService {
             // openid 未绑定,生成临时绑定令牌
             String bindToken = UUID.randomUUID().toString().replace("-", "");
             bindTokenCache.put(bindToken, new BindEntry(openid, System.currentTimeMillis()));
-            return WechatLoginResult.needBind(bindToken);
+            return WechatLoginResult.needBind(bindToken, openid);
         }
 
         String token = jwtTokenProvider.generateEmployeeToken(employee);
-        return WechatLoginResult.success(token, employee);
+        return WechatLoginResult.success(token, employee, openid);
     }
 
     /**
@@ -212,6 +213,53 @@ public class WechatAuthService {
         log.info("员工 {}({}) 绑定微信 openid 成功", employee.getName(), maskPhone(employee.getPhone()));
         String token = jwtTokenProvider.generateEmployeeToken(employee);
         return EmployeeAuthService.LoginResult.success(token, employee);
+    }
+
+    /**
+     * 换号重绑:当前微信已绑定到员工 A,用户填新手机号+密码将绑定迁到员工 B。
+     * 流程:验证 B 手机号+密码 → 解除 A 绑定(清 openid + 会话代数+1,使 A 其他端立即失效)
+     * → 绑定 openid 到 B → 返回 B 的登录 token。
+     * 「登录即解绑重绑」策略:无需旧账号再确认,换号即自动迁移。
+     */
+    @Transactional
+    public EmployeeAuthService.LoginResult rebindByPhoneAndPassword(Long currentEmployeeId, String phone, String password) {
+        String lockKey = "wxrebind:" + phone;
+        rateLimiter.checkLocked(lockKey);
+
+        Employee current = employeeMapper.selectById(currentEmployeeId);
+        if (current == null) {
+            return EmployeeAuthService.LoginResult.fail("账号不存在");
+        }
+        String openid = current.getWxOpenid();
+        if (openid == null || openid.isBlank()) {
+            return EmployeeAuthService.LoginResult.fail("当前账号未绑定微信,无需更换绑定");
+        }
+
+        // 验证新账号手机号+密码
+        Employee target = employeeMapper.selectByPhone(phone);
+        if (target == null || target.getPassword() == null
+                || !passwordEncoder.matches(password == null ? "" : password, target.getPassword())) {
+            rateLimiter.recordFail(lockKey);
+            return EmployeeAuthService.LoginResult.fail("手机号或密码错误");
+        }
+        if (current.getId().equals(target.getId())) {
+            return EmployeeAuthService.LoginResult.fail("该手机号即当前绑定账号,无需更换");
+        }
+
+        // 解绑旧账号 A:清 wxOpenid + 会话代数+1(A 其他端 token 立即失效)
+        employeeMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Employee>()
+                .eq(Employee::getId, current.getId())
+                .set(Employee::getWxOpenid, null)
+                .setSql("session_generation = session_generation + 1"));
+        // 绑定 openid 到新账号 B
+        employeeMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Employee>()
+                .eq(Employee::getId, target.getId())
+                .set(Employee::getWxOpenid, openid));
+
+        rateLimiter.recordSuccess(lockKey);
+        target.setWxOpenid(openid);
+        String token = jwtTokenProvider.generateEmployeeToken(target);
+        return EmployeeAuthService.LoginResult.success(token, target);
     }
 
     /**
@@ -278,28 +326,30 @@ public class WechatAuthService {
         private final String token;
         private final Employee employee;
         private final String bindToken;
+        private final String openid;
         private final String errorMessage;
 
         private WechatLoginResult(boolean success, boolean needBind, String token,
-                                  Employee employee, String bindToken, String errorMessage) {
+                                  Employee employee, String bindToken, String openid, String errorMessage) {
             this.success = success;
             this.needBind = needBind;
             this.token = token;
             this.employee = employee;
             this.bindToken = bindToken;
+            this.openid = openid;
             this.errorMessage = errorMessage;
         }
 
-        public static WechatLoginResult success(String token, Employee employee) {
-            return new WechatLoginResult(true, false, token, employee, null, null);
+        public static WechatLoginResult success(String token, Employee employee, String openid) {
+            return new WechatLoginResult(true, false, token, employee, null, openid, null);
         }
 
-        public static WechatLoginResult needBind(String bindToken) {
-            return new WechatLoginResult(false, true, null, null, bindToken, null);
+        public static WechatLoginResult needBind(String bindToken, String openid) {
+            return new WechatLoginResult(false, true, null, null, bindToken, openid, null);
         }
 
         public static WechatLoginResult fail(String errorMessage) {
-            return new WechatLoginResult(false, false, null, null, null, errorMessage);
+            return new WechatLoginResult(false, false, null, null, null, null, errorMessage);
         }
 
         public boolean isSuccess() { return success; }
@@ -307,6 +357,7 @@ public class WechatAuthService {
         public String getToken() { return token; }
         public Employee getEmployee() { return employee; }
         public String getBindToken() { return bindToken; }
+        public String getOpenid() { return openid; }
         public String getErrorMessage() { return errorMessage; }
     }
 }

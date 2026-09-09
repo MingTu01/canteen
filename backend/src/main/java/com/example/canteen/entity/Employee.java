@@ -30,8 +30,10 @@ public class Employee {
     private Integer isDeleted;
     /** 密码最后更新时间:用于 JWT 失效校验(iat < passwordUpdatedAt 则旧 token 失效) */
     private LocalDateTime passwordUpdatedAt;
-    /** 是否需要强制修改密码(首次登录使用默认密码时为 true,改密后置 false) */
+    /** 是否为需要强制修改密码(首次登录使用默认密码时为 true,改密后置 false) */
     private Integer mustChangePassword;
+    /** 会话代数:退出/换号重绑时+1,使该员工其他端旧 token 立即失效(跨端同步注销) */
+    private Long sessionGeneration;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

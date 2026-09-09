@@ -46,8 +46,18 @@ export function useWechat() {
     }
   }
 
+  /** 读取缓存的微信 openid(手机号登录时传给后端实现自动绑定/换绑) */
+  const getCachedOpenid = (): string | null => {
+    try {
+      return localStorage.getItem('canteen_h5_openid')
+    } catch {
+      return null
+    }
+  }
+
   return {
     isWechat,
     wechatLogin,
+    getCachedOpenid,
   }
 }

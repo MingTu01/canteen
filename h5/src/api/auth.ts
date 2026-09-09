@@ -6,9 +6,9 @@ import type { Employee, EmployeeLoginResult, EmployeeQrcode, PayCode } from './t
  * 后端:AuthController(注销) + EmployeeController(登录/改密/二维码)
  */
 
-/** 手机号登录(H5/小程序):手机号 + 密码 → 员工 token */
-export function phoneLogin(phone: string, password: string): Promise<EmployeeLoginResult> {
-  return post<EmployeeLoginResult>('/employee/phone-login', { phone, password })
+/** 手机号登录(H5/小程序):手机号 + 密码 → 员工 token。openid 可选,微信内传当前 openid 实现自动绑定/换绑 */
+export function phoneLogin(phone: string, password: string, openid?: string): Promise<EmployeeLoginResult> {
+  return post<EmployeeLoginResult>('/employee/phone-login', { phone, password, openid })
 }
 
 /**
@@ -24,9 +24,11 @@ export function logout(): Promise<{ loggedOut: boolean }> {
   return post<{ loggedOut: boolean }>('/auth/logout')
 }
 
-/** 修改密码:校验原密码,新密码至少 8 位 */
-export function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-  return put<void>('/employee/change-password', { oldPassword, newPassword })
+/** 修改密码:新密码至少 8 位。首次登录(mustChangePassword)改密可不传原密码,后端据此跳过校验 */
+export function changePassword(newPassword: string, oldPassword?: string): Promise<void> {
+  const body: Record<string, string> = { newPassword }
+  if (oldPassword) body.oldPassword = oldPassword
+  return put<void>('/employee/change-password', body)
 }
 
 /** 获取当前登录员工的身份二维码内容(供取餐终端扫码) */
@@ -83,6 +85,8 @@ export interface WechatLoginResult {
   employee?: Employee
   /** status=need_bind 时返回,用于后续绑定接口 */
   bindToken?: string
+  /** 当前微信 openid(login / need_bind 均返回),供前端缓存用于手机号登录自动换绑 */
+  openid?: string
 }
 
 /** 获取微信网页授权 URL(后端拼接完整回调地址) */
@@ -100,4 +104,9 @@ export function wechatLogin(code: string): Promise<WechatLoginResult> {
 /** 微信绑定:通过手机号+密码验证身份,绑定 openid 后自动登录 */
 export function wechatBind(bindToken: string, phone: string, password: string): Promise<EmployeeLoginResult> {
   return post<EmployeeLoginResult>('/employee/wechat/bind', { bindToken, phone, password })
+}
+
+/** 更换微信绑定:将当前微信 openid 从当前账号迁移到新手机号账号(填新账号手机号+密码) */
+export function wechatRebind(phone: string, password: string): Promise<EmployeeLoginResult> {
+  return post<EmployeeLoginResult>('/employee/wechat/rebind', { phone, password })
 }

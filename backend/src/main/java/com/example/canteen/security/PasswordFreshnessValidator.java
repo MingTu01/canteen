@@ -32,9 +32,10 @@ public class PasswordFreshnessValidator {
      * @param userId   用户 ID(claims.id)
      * @param role     角色(0=员工,1/2/4/5/6=管理员,3=终端)
      * @param iatEpoch token 签发时间(秒级 epoch)
+     * @param sgClaim 会话代数(claims.sg,仅员工有;旧 token 无该 claim 时为 null)
      * @return 失败原因(null 表示通过)
      */
-    public String checkPasswordFreshness(Long userId, Integer role, Long iatEpoch) {
+    public String checkPasswordFreshness(Long userId, Integer role, Long iatEpoch, Long sgClaim) {
         if (userId == null || iatEpoch == null || role == null) {
             return null;
         }
@@ -54,6 +55,13 @@ public class PasswordFreshnessValidator {
             }
             if (emp.getStatus() != null && emp.getStatus() != 1) {
                 return "账号已失效";
+            }
+            // 会话代数校验:退出/换号重绑后代数+1,旧 token(sg 不匹配)立即失效,实现跨端同步注销。
+            // 旧 token 无 sg claim 时视为 1;仅当当前值变为 >1(发生过退出)时才拒绝,避免上线即全员强制重登。
+            long currentSg = emp.getSessionGeneration() == null ? 1L : emp.getSessionGeneration();
+            long tokenSg = sgClaim == null ? 1L : sgClaim;
+            if (tokenSg != currentSg) {
+                return "登录已在其他设备注销,请重新登录";
             }
             passwordUpdatedAt = emp.getPasswordUpdatedAt();
         } else if (role == 1 || role == 2

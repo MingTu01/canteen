@@ -5,16 +5,23 @@ import { useAuthStore } from '@/stores/auth'
 import * as authApi from '@/api/auth'
 
 /**
- * 强制修改密码组件(全局挂载)。
- * 当 authStore.needChangePassword 为 true 时弹出不可关闭的密码修改弹层。
- * 首次登录使用默认密码 12345678 的员工必须修改密码后才能使用系统。
+ * 首次登录「建议修改密码」弹窗(全局挂载)。
+ * 当 authStore.needChangePassword 为 true 时弹出,但不再强制:
+ * - 建议弹窗:可「暂不修改」关闭(本会话内不再弹)/「去修改密码」进入改密表单
+ * - 改密表单:仅新密码+确认密码(免原密码,身份已通过登录验证)
+ * 真正改密成功后才能清除 mustChangePassword 标志。
  */
 const authStore = useAuthStore()
 
+/** 弹窗是否显示 */
 const show = ref(false)
+/** 弹窗模式:suggest=建议卡片;change=输入新密码 */
+const mode = ref<'suggest' | 'change'>('suggest')
+/** 本会话内已「暂不修改」,避免反复弹出 */
+const dismissed = ref(false)
+
 const submitting = ref(false)
 const form = ref({
-  oldPassword: '',
   newPassword: '',
   confirmPassword: '',
 })
@@ -27,8 +34,11 @@ const onSubmit = async () => {
   }
   submitting.value = true
   try {
-    await authApi.changePassword(form.value.oldPassword, form.value.newPassword)
+    // 首次登录改密免原密码:不传 oldPassword,后端按 mustChangePassword=1 跳过校验
+    await authApi.changePassword(form.value.newPassword)
     showSuccessToast('密码修改成功')
+    dismissed.value = false
+    show.value = false
     // 刷新员工信息(后端会清除 mustChangePassword 标志)
     await authStore.refreshEmployee()
   } catch {
@@ -38,24 +48,38 @@ const onSubmit = async () => {
   }
 }
 
-// 监听 needChangePassword 状态,自动弹窗
+/** 去修改密码 */
+const goChange = (): void => {
+  mode.value = 'change'
+  form.value = { newPassword: '', confirmPassword: '' }
+}
+
+/** 暂不修改:关闭弹窗,本会话内不再自动弹出 */
+const onCancel = (): void => {
+  dismissed.value = true
+  show.value = false
+}
+
 watch(
   () => authStore.needChangePassword,
   (val) => {
-    show.value = val
     if (val) {
-      form.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+      // 仅在本次会话未「暂不修改」时自动弹出
+      if (!dismissed.value) {
+        mode.value = 'suggest'
+        show.value = true
+      }
+    } else {
+      show.value = false
     }
   },
   { immediate: true },
 )
 
 const validate = (): string | null => {
-  if (!form.value.oldPassword) return '请输入当前密码'
   if (!form.value.newPassword) return '请输入新密码'
   if (form.value.newPassword.length < 8) return '新密码至少 8 位'
   if (form.value.newPassword !== form.value.confirmPassword) return '两次输入的密码不一致'
-  if (form.value.newPassword === form.value.oldPassword) return '新密码不能与当前密码相同'
   return null
 }
 </script>
@@ -63,28 +87,33 @@ const validate = (): string | null => {
 <template>
   <van-popup
     v-model:show="show"
-    position="bottom"
+    position="center"
     round
     :close-on-click-overlay="false"
     :close-on-popstate="false"
-    :style="{ maxHeight: '85%' }"
   >
-    <div class="force-pwd">
-      <div class="force-pwd__icon">
+    <!-- 建议卡片 -->
+    <div v-if="mode === 'suggest'" class="sugg">
+      <div class="sugg__icon">
         <van-icon name="warning-o" size="48" color="#ff9800" />
       </div>
-      <div class="force-pwd__title">首次登录请修改密码</div>
-      <div class="force-pwd__desc">
-        您的账号正在使用默认密码,为了账号安全请设置新密码后继续使用。
+      <div class="sugg__title">建议修改密码</div>
+      <div class="sugg__desc">
+        您的账号正在使用初始密码,建议设置专属新密码以保障账号安全。可稍后在「我的」中继续修改。
       </div>
+      <div class="sugg__footer">
+        <div class="sugg__footer-inner">
+          <van-button plain round @click="onCancel">暂不修改</van-button>
+          <van-button type="primary" round @click="goChange">去修改密码</van-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 改密表单(免原密码) -->
+    <div v-else class="pwd">
+      <div class="pwd__title">设置新密码</div>
+      <div class="pwd__desc">新密码至少 8 位,设置后用于手机号等账号登录。</div>
       <van-cell-group inset>
-        <van-field
-          v-model="form.oldPassword"
-          type="password"
-          label="当前密码"
-          placeholder="请输入当前密码(默认 12345678)"
-          :maxlength="32"
-        />
         <van-field
           v-model="form.newPassword"
           type="password"
@@ -100,7 +129,7 @@ const validate = (): string | null => {
           :maxlength="32"
         />
       </van-cell-group>
-      <div class="force-pwd__footer">
+      <div class="pwd__footer">
         <van-button
           block
           round
@@ -118,33 +147,65 @@ const validate = (): string | null => {
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
-.force-pwd {
-  padding: 24px 0 calc(env(safe-area-inset-bottom) + 16px);
+/* 建议卡片 */
+.sugg {
+  width: 300px;
+  padding: 24px 20px 20px;
+  text-align: center;
 
   &__icon {
-    text-align: center;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
 
   &__title {
-    text-align: center;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
     color: $text-primary;
     margin-bottom: 8px;
   }
 
   &__desc {
-    text-align: center;
     font-size: 13px;
     color: $text-secondary;
-    padding: 0 24px;
-    margin-bottom: 20px;
+    line-height: 1.6;
+  }
+
+  &__footer {
+    margin-top: 20px;
+
+    &-inner {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+
+      .van-button {
+        flex: 1;
+      }
+    }
+  }
+}
+
+/* 改密表单 */
+.pwd {
+  width: 300px;
+  padding: 24px 0 calc(env(safe-area-inset-bottom) + 16px);
+
+  &__title {
+    padding: 0 20px;
+    font-size: 17px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__desc {
+    padding: 8px 20px 16px;
+    font-size: 13px;
+    color: $text-secondary;
     line-height: 1.5;
   }
 
   &__footer {
-    padding: 20px 16px 0;
+    margin: 20px 16px 0;
   }
 }
 </style>

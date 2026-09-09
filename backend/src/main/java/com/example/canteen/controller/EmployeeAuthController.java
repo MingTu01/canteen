@@ -94,7 +94,7 @@ public class EmployeeAuthController {
     /**
      * 手机号登录(H5/小程序):手机号 + 密码 → 员工 token。
      * phone 已建全局唯一索引,后端按手机号自动定位员工所属门店,前端无需选食堂。
-     * 请求体:{ phone, password }
+     * 请求体:{ phone, password, openid? } → openid 为当前微信 openid,存在时自动绑定/换绑(微信内免手动换绑)。
      * 返回:{ token, employee }
      */
     @PostMapping("/phone-login")
@@ -103,6 +103,7 @@ public class EmployeeAuthController {
                                                         HttpServletResponse httpResponse) {
         String phone = req.get("phone") == null ? null : String.valueOf(req.get("phone")).trim();
         String password = req.get("password") == null ? null : String.valueOf(req.get("password"));
+        String openid = req.get("openid") == null ? null : String.valueOf(req.get("openid")).trim();
         if (phone == null || phone.isBlank() || password == null || password.isBlank()) {
             return ApiResponse.error(400, "手机号和密码不能为空");
         }
@@ -110,7 +111,9 @@ public class EmployeeAuthController {
         String lockKey = "phone:" + phone;
         rateLimiter.checkLocked(lockKey);
 
-        EmployeeAuthService.LoginResult result = authService.phoneLogin(phone, password);
+        EmployeeAuthService.LoginResult result = (openid != null && !openid.isBlank())
+                ? authService.phoneLoginWithOpenid(phone, password, openid)
+                : authService.phoneLogin(phone, password);
         if (!result.isSuccess()) {
             rateLimiter.recordFail(lockKey);
             return ApiResponse.error(401, result.getErrorMessage());
@@ -299,6 +302,7 @@ public class EmployeeAuthController {
             authCookieUtil.setEmployeeCookie(httpResponse, result.getToken(), httpRequest);
             data.put("status", "login");
             data.put("token", result.getToken());
+            data.put("openid", result.getOpenid());
             data.put("employee", EmployeeVO.from(result.getEmployee()));
             return ApiResponse.success(data);
         }
@@ -306,6 +310,7 @@ public class EmployeeAuthController {
         if (result.isNeedBind()) {
             data.put("status", "need_bind");
             data.put("bindToken", result.getBindToken());
+            data.put("openid", result.getOpenid());
             return ApiResponse.success(data);
         }
 
@@ -337,6 +342,44 @@ public class EmployeeAuthController {
         rateLimiter.checkLocked(lockKey);
 
         EmployeeAuthService.LoginResult result = wechatAuthService.bindByPhoneAndPassword(bindToken, phone, password);
+        if (!result.isSuccess()) {
+            rateLimiter.recordFail(lockKey);
+            return ApiResponse.error(401, result.getErrorMessage());
+        }
+        rateLimiter.recordSuccess(lockKey);
+
+        authCookieUtil.setEmployeeCookie(httpResponse, result.getToken(), httpRequest);
+        Map<String, Object> data = new HashMap<>();
+        data.put("token", result.getToken());
+        data.put("employee", EmployeeVO.from(result.getEmployee()));
+        return ApiResponse.success(data);
+    }
+
+    /**
+     * 更换微信绑定:将当前微信 openid 从当前登录员工解绑并绑定到新手机号对应的员工。
+     * 请求体:{ phone, password }(新账号手机号+密码)
+     * 返回:{ token, employee } → 直接登录新账号。
+     * 安全:新账号密码验证通过后才可换绑;旧账号解绑后会话代数递增 → 旧账号其他端 token 立即失效。
+     */
+    @PostMapping("/wechat/rebind")
+    public ApiResponse<Map<String, Object>> wechatRebind(@RequestBody Map<String, String> req,
+                                                           HttpServletRequest httpRequest,
+                                                           HttpServletResponse httpResponse) {
+        String phone = req.get("phone") == null ? null : String.valueOf(req.get("phone")).trim();
+        String password = req.get("password") == null ? null : String.valueOf(req.get("password"));
+        if (phone == null || phone.isBlank() || password == null || password.isBlank()) {
+            return ApiResponse.error(400, "手机号和密码不能为空");
+        }
+
+        Long currentEmployeeId = SecurityContext.currentEmployeeId();
+        if (currentEmployeeId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+
+        String lockKey = "wxrebind:" + phone;
+        rateLimiter.checkLocked(lockKey);
+
+        EmployeeAuthService.LoginResult result = wechatAuthService.rebindByPhoneAndPassword(currentEmployeeId, phone, password);
         if (!result.isSuccess()) {
             rateLimiter.recordFail(lockKey);
             return ApiResponse.error(401, result.getErrorMessage());

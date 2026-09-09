@@ -1,9 +1,11 @@
 {
-  "version": "0.0.60",
+  "version": "0.0.62",
   "buildTime": "2026-09-09",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
-    "V0.0.60 修复微信免密登录:公众号网页授权回调地址改用配置的 WECHAT_H5_BASE_URL 构造(代替请求Host拼接),规避反向代理下 redirect_uri 域名与后台「网页授权域名」不一致导致的错误码10003;未配置 WECHAT_H5_BASE_URL 时降级为按请求 Host/X-Forwarded 拼接(开发环境兼容)",
+    "V0.0.62 微信openid自动换绑+永不失效+H5自动登录:①移除员工token 90天绝对过期上限,改为无限滑动续期,只要账号未退出/换绑则永不自动失效;②POST /api/employee/phone-login接受可选openid,微信内手机号登录自动绑定/换绑(last-login-wins:openid原绑定A则清A.openid+会话代数+1踢掉A各端,再写入当前账号B),无需手动换绑操作;③微信登录接口(/api/employee/wechat/login)返回openid供前端缓存,配合H5登录页微信内自动静默授权(打开页面即自动登录、任意端/任意设备免登录)+手机号登录自动换绑+主动退出后本次会话不再自动授权;已在V0.0.61的会话代数(session_generation)+sg claim校验基础上实现,后端/wechat/rebind保留作安全阀",
+    "V0.0.61 微信openid会话代数+跨端同步注销+换号重绑+首登建议改密:①employee表新增session_generation会话代数,员工token写入sg claim,PasswordFreshnessValidator校验sg与当前值一致(旧token无sg视为1,未发生退出不受影响避免全员重登),退出登录(POST /api/auth/logout)递增代数+黑名单,使该员工其他端token立即失效——实现"退出一个端其他端同步退出",微信openid永久身份+静默授权实现任意端自动登录;②新增POST /api/employee/wechat/rebind换号重绑(填新手机号+密码,验证通过后将openid从旧账号迁移到新账号,旧账号清openid+会话代数+1,返回新账号token登录);③首次登录改密免原密码:mustChangePassword=1时changePassword跳过原密码校验,配合H5建议改密弹窗",
+    "V0.0.60 修复微信免密登录:公众号网页授权回调地址改用配置的 WECHAT_H5_BASE_URL 构造(代替请求Host拼接),规避反向代理下 redirect_uri 域名与后台「网页授权域名」不一致导致的错误码10003;未配置 WECHAT_H5_BASE_URL 时降级为按请求 Host/X-Forwarded 拼接(开发环境兼容);并修复微信换取openid失败(微信报错返回text/plain,原Map.class反序列化抛no suitable HttpMessageConverter,改为取文本经Jackson解析)",
     "V0.0.59 终端卡号匹配增加补零反向兼容:findEmployeeByCardNo 匹配链扩展为 6 级(精确→去前导零→仅数字→补零到10/8位→后10位→后8位),兼容不同型号读卡器输出卡号位数不一致的场景(读卡器短卡号 vs 数据库历史补零格式)",
     "V0.0.58 接管公众号菜单与自动回复(启用服务器配置后公众号后台自动回复/自定义菜单失效,只能API管理):①新增syncDefaultMenu下发底部菜单(单个「在线订餐」view按钮→H5首页,重复调用即覆盖,用户端约5分钟刷新);②新增POST /api/wechat/menu/sync管理端点(仅管理员)重新下发菜单;③任意用户消息统一回复欢迎语+订餐指引(点击底部菜单【在线订餐】开始点餐);④wechat_setup.py新增下发菜单步骤(第5步)",
     "V0.0.57 公告推送带图+订阅引导改至首次登录:①公告/活动推送支持配图:带图时优先客服图文卡片(封面图+标题+摘要+链接),48h窗口外回退订阅消息纯文字(微信一次性订阅模板仅支持content字段,平台限制无法带图);②配图URL构造:http(s)外链直接用,/uploads/本地存储经ImageSignService签名后拼接H5公网域名(部署同域反代微信可拉取);③订阅引导改为H5首次登录改密成功后居中弹窗(仅同意/拒绝,见H5 V0.0.48);④无图公告与订单推送维持订阅消息优先+43101回退客服文本",

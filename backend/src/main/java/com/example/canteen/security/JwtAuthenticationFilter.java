@@ -102,11 +102,12 @@ public class JwtAuthenticationFilter implements Filter {
                 return;
             }
 
-            // 3. 密码修改后旧 token 失效校验
+            // 3. 密码修改后旧 token 失效 + 会话代数(跨端注销)校验
             Integer role = toInt(claims.get("role"));
             Long userId = toLong(claims.get("id"));
             Long iatEpoch = toIatEpoch(claims.get("iat"));
-            String invalidReason = passwordFreshnessValidator.checkPasswordFreshness(userId, role, iatEpoch);
+            Long sgClaim = toLong(claims.get("sg"));
+            String invalidReason = passwordFreshnessValidator.checkPasswordFreshness(userId, role, iatEpoch, sgClaim);
             if (invalidReason != null) {
                 unauthorizedResponseWriter.write(httpResponse, httpRequest,
                         HttpServletResponse.SC_UNAUTHORIZED, invalidReason, true);

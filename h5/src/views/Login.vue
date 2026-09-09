@@ -16,7 +16,10 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const brandingStore = useBrandingStore()
-const { isWechat, wechatLogin } = useWechat()
+const { isWechat, wechatLogin, getCachedOpenid } = useWechat()
+
+/** 是否已尝试自动微信登录(避免重入/重复跳转) */
+let autoWechatAttempted = false
 
 /** 是否显示密码 */
 const showPhonePassword = ref(false)
@@ -85,7 +88,9 @@ const onPhoneSubmit = async (): Promise<void> => {
 
   loading.value = true
   try {
-    const emp = await authStore.phoneLogin(phoneForm.phone, phoneForm.password)
+    // 微信内传入当前 openid:成功登录后自动绑定/换绑到该账号,免手动换绑
+    const openid = getCachedOpenid() || undefined
+    const emp = await authStore.phoneLogin(phoneForm.phone, phoneForm.password, openid)
     showSuccessToast('登录成功')
     // 拉取门店品牌信息(秒开)
     if (emp.storeId) {
@@ -183,6 +188,13 @@ onMounted(() => {
   const code = route.query.code
   if (typeof code === 'string' && code.length > 0) {
     handleWechatCallback(code)
+    return
+  }
+  // 微信内自动静默登录:打开页面即尝试用 openid 登录,无需点击。
+  // 排除条件:非微信 / 本次会话已主动退出(避免退出后被弹回原账号) / 已尝试过。
+  if (isWechat && !autoWechatAttempted && !authStore.isAutoAuthSuppressed()) {
+    autoWechatAttempted = true
+    wechatLogin()
   }
 })
 </script>
@@ -258,6 +270,9 @@ onMounted(() => {
         <van-button plain block icon="wechat" color="#07c160" @click="onWechatLogin">
           微信登录
         </van-button>
+        <p class="login-page__wechat-hint">
+          微信登录后,任意设备打开即自动登录;任一设备退出,各端同步退出。如需切换账号,请在微信内用手机号登录新账号,将自动完成账号绑定切换。
+        </p>
       </div>
     </div>
 
@@ -392,6 +407,14 @@ onMounted(() => {
       margin: 8px 0 16px;
       color: $text-secondary;
       border-color: $border-color;
+    }
+
+    &-hint {
+      margin: 12px 0 0;
+      font-size: 12px;
+      line-height: 1.6;
+      color: $text-placeholder;
+      text-align: center;
     }
   }
 

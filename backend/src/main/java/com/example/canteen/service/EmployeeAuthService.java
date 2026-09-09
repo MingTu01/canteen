@@ -1,6 +1,7 @@
 package com.example.canteen.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.canteen.entity.Employee;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.mapper.EmployeeMapper;
@@ -10,6 +11,7 @@ import com.example.canteen.security.PasswordValidator;
 import com.example.canteen.security.SecurityContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -66,6 +68,49 @@ public class EmployeeAuthService {
     }
 
     /**
+     * 手机号 + 密码登录,并在微信环境下自动绑定/换绑 openid(H5 微信内使用)。
+     *
+     * last-login-wins 原则:传递的 openid 为当前微信用户标识,登录成功后该 openid 即归属本账号。
+     * 若 openid 原绑定在其他账号(如用户改用手机号登录另一账号 B),自动执行换绑:
+     *   - 旧绑定人 A 清空 wxOpenid,并 session_generation+1 → A 各端旧 token 立即失效;
+     *   - 将 openid 写入本账号 B,后续微信授权直接登录 B。
+     * 全程无需用户额外手动换绑操作。
+     *
+     * @param openid 当前微信 openid;非微信环境可传 null,此时等价于 phoneLogin
+     */
+    @Transactional
+    public LoginResult phoneLoginWithOpenid(String phone, String password, String openid) {
+        Employee employee = employeeMapper.selectByPhone(phone);
+        LoginResult authResult = authenticate(employee, password, "手机号或密码错误");
+        if (!authResult.isSuccess()) {
+            return authResult;
+        }
+        if (openid == null || openid.isBlank()) {
+            return authResult;
+        }
+        // 自动绑定/换绑:仅当 openid 与当前账号不一致时处理
+        Employee target = authResult.getEmployee();
+        if (openid.equals(target.getWxOpenid())) {
+            return authResult;
+        }
+        // 查 openid 当前归属账号 A,若另有其人则解绑并踢掉其各端会话
+        Employee oldOwner = employeeMapper.selectByWxOpenid(openid);
+        if (oldOwner != null && !oldOwner.getId().equals(target.getId())) {
+            employeeMapper.update(null, new LambdaUpdateWrapper<Employee>()
+                    .eq(Employee::getId, oldOwner.getId())
+                    .set(Employee::getWxOpenid, null)
+                    .setSql("session_generation = session_generation + 1"));
+        }
+        // 将 openid 写入当前登录账号
+        employeeMapper.update(null, new LambdaUpdateWrapper<Employee>()
+                .eq(Employee::getId, target.getId())
+                .set(Employee::getWxOpenid, openid));
+        target.setWxOpenid(openid);
+        // openid 变化后重新签发 token(保证 sg 等 claim 与最新一致)
+        return LoginResult.success(jwtTokenProvider.generateEmployeeToken(target), target);
+    }
+
+    /**
      * 通用认证流程:校验密码 → 生成 token。login/phoneLogin 共用,消除重复。
      */
     private LoginResult authenticate(Employee employee, String password, String failMessage) {
@@ -98,8 +143,10 @@ public class EmployeeAuthService {
         if (employee == null) {
             throw new BusinessException("员工不存在");
         }
-        // 已设置过密码:必须校验原密码
-        if (employee.getPassword() != null && !employee.getPassword().isBlank()) {
+        // 首登(mustChangePassword=1)改密免原密码:身份已通过登录验证(如微信 openid / 手机号),
+        // 无需再知原密码;已设置密码且非首登时才必须校验原密码,防越权改密。
+        boolean isFirstChange = employee.getMustChangePassword() != null && employee.getMustChangePassword() == 1;
+        if (!isFirstChange && employee.getPassword() != null && !employee.getPassword().isBlank()) {
             if (oldPassword == null || !passwordEncoder.matches(oldPassword, employee.getPassword())) {
                 rateLimiter.recordFail(rateLimitKey);
                 throw new BusinessException("原密码错误");
