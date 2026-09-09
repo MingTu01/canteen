@@ -138,8 +138,11 @@ const handleWechatCallback = async (code: string): Promise<void> => {
       showBindPopup.value = true
       // 清除 URL 中的 code 参数
       router.replace('/login')
+    } else {
+      // 其他错误由拦截器 toast 提示;同时清掉失效的 code,
+      // 避免刷新/回弹后反复用同一个(已使用/过期)code 重试导致闪烁
+      router.replace('/login')
     }
-    // 其他错误由拦截器 toast 提示
   } finally {
     wechatLoading.value = false
   }
@@ -191,9 +194,17 @@ onMounted(() => {
     return
   }
   // 微信内自动静默登录:打开页面即尝试用 openid 登录,无需点击。
-  // 排除条件:非微信 / 本次会话已主动退出(避免退出后被弹回原账号) / 已尝试过。
-  if (isWechat && !autoWechatAttempted && !authStore.isAutoAuthSuppressed()) {
+  // 排除条件:非微信 / 本次会话已主动退出(避免退出后被弹回原账号) /
+  //          本会话已自动尝试过(标记存于 sessionStorage,跨组件重挂载保持,
+  //          防止 401→回到登录页→再次跳授权 的死循环闪烁)。
+  if (
+    isWechat &&
+    !autoWechatAttempted &&
+    !authStore.isAutoAuthSuppressed() &&
+    !authStore.isWechatAutoAttempted()
+  ) {
     autoWechatAttempted = true
+    authStore.markWechatAutoAttempted()
     wechatLogin()
   }
 })

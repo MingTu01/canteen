@@ -19,6 +19,8 @@ const LOGGED_IN_STORAGE_KEY = 'canteen_h5_logged_in'
 const OPENID_STORAGE_KEY = 'canteen_h5_openid'
 /** sessionStorage 标记:本次会话已主动退出,不再自动微信授权(避免退出后被弹回原账号) */
 const AUTO_AUTH_SUPPRESS_KEY = 'canteen_h5_auto_auth_suppressed'
+/** sessionStorage 标记:本会话已自动触发过微信静默授权(未登录),防止重挂载后反复跳转形成授权闪烁循环 */
+const AUTO_WX_ATTEMPTED_KEY = 'canteen_h5_auto_wx_attempted'
 
 /** 从 localStorage 读取 openid(微信用户标识,用于自动登录和手机号登录自动换绑) */
 const readOpenid = (): string | null => {
@@ -63,10 +65,29 @@ const suppressAutoAuth = (): void => {
   }
 }
 
-/** 清除主动退出标记(登录成功时调用,恢复自动授权能力) */
+/** 清除主动退出标记 + 自动授权尝试标记(登录成功时调用,恢复后续自动授权能力) */
 const clearAutoAuthSuppressed = (): void => {
   try {
     sessionStorage.removeItem(AUTO_AUTH_SUPPRESS_KEY)
+    sessionStorage.removeItem(AUTO_WX_ATTEMPTED_KEY)
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 本会话是否已自动触发过微信静默授权(未登录)。是则不再自动跳转,避免授权闪烁循环 */
+const isWechatAutoAttempted = (): boolean => {
+  try {
+    return sessionStorage.getItem(AUTO_WX_ATTEMPTED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** 标记本会话已自动触发过微信静默授权 */
+const markWechatAutoAttempted = (): void => {
+  try {
+    sessionStorage.setItem(AUTO_WX_ATTEMPTED_KEY, '1')
   } catch {
     /* 忽略 */
   }
@@ -378,6 +399,8 @@ export const useAuthStore = defineStore('auth', () => {
     // 微信 openid / 自动登录辅助
     getOpenid,
     isAutoAuthSuppressed,
+    isWechatAutoAttempted,
+    markWechatAutoAttempted,
     // SSE
     startSseOnLogin,
     stopEmployeeSse,
