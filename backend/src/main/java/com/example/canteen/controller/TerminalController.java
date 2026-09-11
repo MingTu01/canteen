@@ -6,6 +6,7 @@ import com.example.canteen.dto.EmployeeVO;
 import com.example.canteen.entity.Admin;
 import com.example.canteen.entity.Department;
 import com.example.canteen.entity.Employee;
+import com.example.canteen.entity.Order;
 import com.example.canteen.entity.Store;
 import com.example.canteen.exception.BusinessException;
 import com.example.canteen.exception.SecurityException;
@@ -21,6 +22,7 @@ import com.example.canteen.service.EmployeeService;
 import com.example.canteen.service.PayCodeService;
 import com.example.canteen.entity.DiningTimeSlot;
 import com.example.canteen.service.DiningTimeSlotService;
+import com.example.canteen.service.OrderService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -54,6 +56,7 @@ public class TerminalController {
     private final LoginRateLimiter rateLimiter;
     private final PayCodeService payCodeService;
     private final DiningTimeSlotService diningTimeSlotService;
+    private final OrderService orderService;
 
     public TerminalController(AdminMapper adminMapper, StoreMapper storeMapper,
                               EmployeeMapper employeeMapper, DepartmentMapper departmentMapper,
@@ -61,7 +64,8 @@ public class TerminalController {
                               JwtTokenProvider jwtTokenProvider, PasswordEncoder passwordEncoder,
                               JwtAuthenticationFilter jwtFilter,
                               PayCodeService payCodeService,
-                              DiningTimeSlotService diningTimeSlotService) {
+                              DiningTimeSlotService diningTimeSlotService,
+                              OrderService orderService) {
         this.adminMapper = adminMapper;
         this.storeMapper = storeMapper;
         this.employeeMapper = employeeMapper;
@@ -72,6 +76,7 @@ public class TerminalController {
         this.rateLimiter = jwtFilter.getRateLimiter();
         this.payCodeService = payCodeService;
         this.diningTimeSlotService = diningTimeSlotService;
+        this.orderService = orderService;
     }
 
     /**
@@ -410,6 +415,35 @@ public class TerminalController {
             throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
         }
         return ApiResponse.success(diningTimeSlotService.getTimeSlotsByStore(storeId));
+    }
+
+    /**
+     * 终端取餐:识别身份后一次性完成「查订单 + 核销」。
+     *
+     * 为什么不拆成「先查订单、再单独核销」两次调用:
+     * 终端展示菜品依赖那次查询的结果,而核销请求发出前隔着约 1.2 秒的验证动画,
+     * 期间网络抖动或后端不可写会让核销静默失败——菜品照常显示、订单却仍是待取餐,
+     * 界面完全无感知。而核销窗口(就餐时段内)一旦错过,定时任务会把订单标记为
+     * 「未就餐」,再也补不回来。合并成一个事务后:
+     * 拿到响应即已核销,失败则菜品不显示、当场提示,不存在中间态。
+     *
+     * 请求体:{ employeeId }(终端已完成身份识别)
+     * 成功返回:已核销的订单(含菜品明细与员工展示字段)
+     */
+    @PostMapping("/pickup")
+    public ApiResponse<Order> pickup(@RequestBody Map<String, Object> body) {
+        Integer role = SecurityContext.currentRole();
+        if (role == null || role != 3) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "仅终端设备可取餐核销");
+        }
+        if (SecurityContext.currentStoreId() == null) {
+            throw new SecurityException(SecurityException.FORBIDDEN, "终端未绑定食堂");
+        }
+        Long employeeId = longVal(body.get("employeeId"));
+        if (employeeId == null) {
+            throw new BusinessException("员工 ID 不能为空");
+        }
+        return ApiResponse.success(orderService.pickupForEmployee(employeeId));
     }
 
     private static String strVal(Object o) {

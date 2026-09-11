@@ -9,7 +9,7 @@
  * header slot 默认显示当前日期文字,可被父组件覆盖(如嵌入 DatePicker)。
  */
 import { computed } from 'vue'
-import { shortDate, relativeLabel } from '@/utils'
+import { shortDate, relativeLabel, weekdayLabel } from '@/utils'
 import { MEAL_COLORS } from '@/composables/useMealConfig'
 
 const props = withDefaults(defineProps<{
@@ -67,6 +67,8 @@ const MEAL_ORDER = [1, 2, 3]
       >
         <div class="date-sidebar__date-wrap">
           <span class="date-sidebar__date">{{ shortDate(d) }}</span>
+          <!-- 星期(周一/周二…):日期下方固定显示,便于快速识别当天是周几 -->
+          <span class="date-sidebar__weekday">{{ weekdayLabel(d) }}</span>
           <!-- 相对标签(今天/明天):固定占位,无标签时用空内容保持高度一致,避免列表跳动 -->
           <span class="date-sidebar__rel">{{ relativeLabel(d) }}</span>
         </div>
@@ -123,8 +125,8 @@ const MEAL_ORDER = [1, 2, 3]
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  /* 固定高度:为相对标签(今天/明天)预留位置,避免有/无标签时列表跳动 */
-  min-height: 72px;
+  /* 固定高度:为星期行与相对标签(今天/明天)预留位置,避免有/无标签时列表跳动 */
+  min-height: 82px;
   padding: 12px 12px;
   border: none;
   border-top: 1px solid var(--doubao-border);
@@ -152,6 +154,17 @@ const MEAL_ORDER = [1, 2, 3]
 .date-sidebar__item--active .date-sidebar__date {
   color: var(--doubao-primary-foreground);
   font-weight: 700;
+}
+/* 星期(周一/周二…):日期下方独立成行,字重弱于日期便于区分主次 */
+.date-sidebar__weekday {
+  font-size: var(--fs-xs);
+  color: var(--doubao-muted-foreground);
+  font-weight: 400;
+  line-height: 1;
+}
+.date-sidebar__item--active .date-sidebar__weekday {
+  color: var(--doubao-primary-foreground);
+  opacity: 0.85;
 }
 /* 相对标签:始终占位(无内容也保持高度),避免列表跳动 */
 .date-sidebar__rel {

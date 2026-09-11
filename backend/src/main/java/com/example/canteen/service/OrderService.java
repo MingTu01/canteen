@@ -450,6 +450,94 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
     }
 
+    /**
+     * 终端取餐:定位员工「当前就餐时段」的待取餐订单,在同一事务内原子核销并返回详情。
+     *
+     * 为什么必须是原子操作,而不是「终端先查订单、稍后再单独发一次核销」:
+     * 菜品能否展示依赖查询结果,而核销请求发出前隔着约 1.2 秒的验证动画。
+     * 这段时间内若网络抖动或后端不可写,核销会静默失败——菜品照常显示、
+     * 订单却停留在 status=1(待取餐),界面完全无感知。
+     * 更严重的是核销窗口极短:一旦就餐时段结束,OrderStatusScheduler 会把
+     * 未核销订单标记为 status=4(未就餐),此后再也无法补核销。
+     * 合并为一个事务后:方法正常返回即已核销,抛异常则终端不会展示菜品,
+     * 架构上不存在「显示了菜品但没核销」的中间态。
+     *
+     * @param employeeId 员工 ID(终端已完成身份识别)
+     * @return 已核销的订单(含菜品明细与员工展示字段,终端可直接渲染)
+     */
+    @Transactional
+    public Order pickupForEmployee(Long employeeId) {
+        Employee employee = employeeMapper.selectById(employeeId);
+        if (employee == null) {
+            throw new BusinessException("卡号不存在");
+        }
+        // 终端 token 的 storeId 已锁定,校验员工归属本店
+        SecurityContext.checkStoreAccess(employee.getStoreId());
+
+        Long storeId = employee.getStoreId();
+        LocalDate today = LocalDate.now(ZONE_SHANGHAI);
+        LocalTime now = LocalTime.now(ZONE_SHANGHAI);
+
+        // 1. 必须在就餐时段内,同时确定当前餐次
+        //    餐次由服务端判定,避免「午餐时段核销早餐订单」的错配
+        Integer mealType = diningTimeSlotService.getCurrentMealType(storeId, now);
+        if (mealType == null) {
+            throw new BusinessException("未到用餐时间,请在就餐时段内取餐");
+        }
+
+        // 2. 在该员工今日该餐次下找待取餐订单;
+        //    顺带记录这一餐是否下过单,用于区分「没订这一餐」和「这一餐已取过」
+        List<Order> orders = getOrdersByEmployee(employeeId);
+        Order target = null;
+        boolean orderExists = false;
+        if (orders != null) {
+            for (Order o : orders) {
+                if (!today.equals(o.getDate()) || !mealType.equals(o.getMealType())) {
+                    continue;
+                }
+                orderExists = true;
+                if (o.getStatus() != null && o.getStatus() == OrderStatus.PENDING.getCode()) {
+                    target = o;
+                    break;
+                }
+            }
+        }
+        if (target == null) {
+            // 「已取餐」多见于上一次核销成功但响应丢失(网络瞬断)的情况,
+            // 比笼统提示「未订餐」更贴近事实,也避免操作员反复刷卡
+            String prefix = employee.getName() + mealTypeName(mealType);
+            throw new BusinessException(orderExists ? prefix + "已取餐" : prefix + "未订餐");
+        }
+
+        // 3. 原子核销:仅 status=1 可完成,防并发重复取餐
+        int rows = orderMapper.update(null, new UpdateWrapper<Order>()
+                .eq("id", target.getId())
+                .eq("status", OrderStatus.PENDING.getCode())
+                .set("status", OrderStatus.COMPLETED.getCode()));
+        if (rows == 0) {
+            throw new BusinessException("订单状态已变更");
+        }
+        target.setStatus(OrderStatus.COMPLETED.getCode());
+
+        // 4. 填充展示字段,终端拿到即可直接渲染
+        //    (菜品明细 items 已由 getOrdersByEmployee 批量填充,无需二次查询)
+        target.setEmployeeName(employee.getName());
+        target.setCardNo(employee.getCardNo());
+        if (employee.getDepartmentId() != null) {
+            Department dept = departmentMapper.selectById(employee.getDepartmentId());
+            if (dept != null) {
+                target.setDepartmentName(dept.getName());
+            }
+        }
+        return target;
+    }
+
+    /** 餐次中文名(未匹配返回空串,避免提示文案里出现 null) */
+    private static String mealTypeName(Integer mealType) {
+        MealType m = MealType.fromCode(mealType);
+        return m == null ? "" : m.getChineseName();
+    }
+
     @Transactional
     public void cancelOrder(Long orderId) {
         Order order = orderMapper.selectById(orderId);
