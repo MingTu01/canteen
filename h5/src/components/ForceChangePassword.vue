@@ -7,18 +7,39 @@ import * as authApi from '@/api/auth'
 /**
  * 首次登录「建议修改密码」弹窗(全局挂载)。
  * 当 authStore.needChangePassword 为 true 时弹出,但不再强制:
- * - 建议弹窗:可「暂不修改」关闭(本会话内不再弹)/「去修改密码」进入改密表单
+ * - 仅「账号首次登录」提示一次:提示状态按键账号 id 持久化到 localStorage,
+ *   跨会话、跨设备都只提示一次;「暂不修改」/刷新页面都不会再次弹出。
+ * - 建议弹窗:可「暂不修改」关闭 /「去修改密码」进入改密表单
  * - 改密表单:仅新密码+确认密码(免原密码,身份已通过登录验证)
  * 真正改密成功后才能清除 mustChangePassword 标志。
  */
 const authStore = useAuthStore()
 
+/** localStorage 前缀:记录某账号已提示过「建议修改密码」(按键账号 id,跨会话/跨设备只提示一次) */
+const SUGGEST_KEY_PREFIX = 'canteen_h5_pwd_suggested_'
+
+/** 该账号是否已提示过 */
+const wasSuggested = (id: number): boolean => {
+  try {
+    return localStorage.getItem(SUGGEST_KEY_PREFIX + id) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** 标记该账号已提示过(此后不再弹出,直到账号不满足 needChangePassword) */
+const markSuggested = (id: number): void => {
+  try {
+    localStorage.setItem(SUGGEST_KEY_PREFIX + id, '1')
+  } catch {
+    /* 忽略 quota 异常 */
+  }
+}
+
 /** 弹窗是否显示 */
 const show = ref(false)
 /** 弹窗模式:suggest=建议卡片;change=输入新密码 */
 const mode = ref<'suggest' | 'change'>('suggest')
-/** 本会话内已「暂不修改」,避免反复弹出 */
-const dismissed = ref(false)
 
 const submitting = ref(false)
 const form = ref({
@@ -37,7 +58,6 @@ const onSubmit = async () => {
     // 首次登录改密免原密码:不传 oldPassword,后端按 mustChangePassword=1 跳过校验
     await authApi.changePassword(form.value.newPassword)
     showSuccessToast('密码修改成功')
-    dismissed.value = false
     show.value = false
     // 刷新员工信息(后端会清除 mustChangePassword 标志)
     await authStore.refreshEmployee()
@@ -54,18 +74,20 @@ const goChange = (): void => {
   form.value = { newPassword: '', confirmPassword: '' }
 }
 
-/** 暂不修改:关闭弹窗,本会话内不再自动弹出 */
+/** 暂不修改:关闭弹窗(已通过 markSuggested 持久化,后续不再提示) */
 const onCancel = (): void => {
-  dismissed.value = true
   show.value = false
 }
 
 watch(
   () => authStore.needChangePassword,
   (val) => {
-    if (val) {
-      // 仅在本次会话未「暂不修改」时自动弹出
-      if (!dismissed.value) {
+    const emp = authStore.employee
+    if (val && emp?.id != null) {
+      // 仅「账号首次登录」提示一次:该账号已提示过(持久化到 localStorage,
+      // 跨会话/跨设备生效)则不再弹出,即使尚未改密。
+      if (!wasSuggested(emp.id)) {
+        markSuggested(emp.id)
         mode.value = 'suggest'
         show.value = true
       }
