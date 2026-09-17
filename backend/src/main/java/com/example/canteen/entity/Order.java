@@ -30,15 +30,15 @@ public class Order {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    /** 非数据库字段:员工姓名(列表展示用,由 service 层填充) */
-    @TableField(exist = false)
+    /** 员工姓名快照(下单时固化,删/禁/换卡不影响历史订单展示) */
+    @TableField("employee_name")
     private String employeeName;
 
-    /** 非数据库字段:员工卡号(列表展示用,由 controller 层填充) */
-    @TableField(exist = false)
+    /** 员工卡号快照(下单时固化,删/禁/换卡不影响历史订单展示) */
+    @TableField("employee_card_no")
     private String cardNo;
 
-    /** 非数据库字段:员工部门名称(列表展示用,由 controller 层填充) */
+    /** 非数据库字段:员工部门名称(列表展示用,由 service 层填充) */
     @TableField(exist = false)
     private String departmentName;
 

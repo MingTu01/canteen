@@ -74,7 +74,7 @@ const fetchEmployees = async () => {
     return
   }
   try {
-    const raw = await employeeApi.list({ storeId: sid })
+    const raw = await employeeApi.list({ storeId: sid, size: 100000 })
     employees.value = normalizeList<Employee>(raw)
   } catch {
     /* 拦截器提示 */

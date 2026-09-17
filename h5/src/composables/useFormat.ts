@@ -63,17 +63,17 @@ export function formatMealTypeShort(type: number | null | undefined): string {
   }
 }
 
-/** 格式化订单状态:1→待取餐 2→已完成 3→已取消 4→未就餐 */
+/** 格式化订单状态:1→待用餐 2→已用餐 3→已取消 4→未用餐 */
 export function formatOrderStatus(status: number | null | undefined): string {
   switch (status) {
     case 1:
-      return '待取餐'
+      return '待用餐'
     case 2:
-      return '已完成'
+      return '已用餐'
     case 3:
       return '已取消'
     case 4:
-      return '未就餐'
+      return '未用餐'
     default:
       return '未知'
   }

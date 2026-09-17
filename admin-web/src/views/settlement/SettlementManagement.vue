@@ -437,7 +437,7 @@ watch(
             <h3 class="text-base font-semibold text-text">订单状态对比</h3>
           </div>
           <ElTable :data="settlement ? [settlement] : []" style="width: 100%">
-            <ElTableColumn label="已完成订单" align="center">
+            <ElTableColumn label="已用餐订单" align="center">
               <template #default="{ row }">
                 <span class="inline-flex items-center gap-1.5 tabular-nums font-semibold text-success">
                   <CheckCircle2 class="h-4 w-4" />

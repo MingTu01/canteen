@@ -212,7 +212,7 @@ export interface Order {
   date: string
   mealType: number
   totalAmount: number
-  /** 1=待取餐 2=已完成 3=已取消 */
+  /** 1=待用餐 2=已用餐 3=已取消 4=未用餐 */
   status: number
   /** 关联查询字段:员工姓名 */
   employeeName?: string
@@ -411,9 +411,9 @@ export const MealType = {
 export type MealTypeValue = (typeof MealType)[keyof typeof MealType]
 
 export const OrderStatus = {
-  /** 待取餐 */
+  /** 待用餐 */
   Pending: 1,
-  /** 已完成 */
+  /** 已用餐 */
   Completed: 2,
   /** 已取消 */
   Cancelled: 3,

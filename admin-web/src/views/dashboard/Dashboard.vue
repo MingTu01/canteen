@@ -253,14 +253,14 @@ const quickActions = [
           color="success"
         />
         <StatCard
-          title="已完成订单"
+          title="已用餐订单"
           :value="stats.completedOrders"
           :icon="CheckCircle2"
           color="accent"
           :trend="`完成率 ${stats.completionRate}%`"
         />
         <StatCard
-          title="待取餐"
+          title="待用餐"
           :value="stats.pendingOrders"
           :icon="Clock"
           color="warning"

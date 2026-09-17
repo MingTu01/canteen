@@ -314,9 +314,9 @@ const itemSubtotal = (item: OrderItem) =>
 const handleComplete = async (row: OrderRow) => {
   if (!row.id) return
   try {
-    await ElMessageBox.confirm('确认将该订单标记为已完成？', '完成确认', {
+    await ElMessageBox.confirm('确认将该订单标记为已用餐？', '用餐确认', {
       type: 'warning',
-      confirmButtonText: '确认完成',
+      confirmButtonText: '确认用餐',
       cancelButtonText: '取消',
     })
   } catch {
@@ -324,7 +324,7 @@ const handleComplete = async (row: OrderRow) => {
   }
   try {
     await orderApi.complete(row.id)
-    ElMessage.success('订单已完成')
+    ElMessage.success('订单已用餐')
     drawerVisible.value = false
     fetchOrders()
   } catch {

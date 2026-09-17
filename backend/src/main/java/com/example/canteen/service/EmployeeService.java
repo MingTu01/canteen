@@ -409,7 +409,7 @@ public class EmployeeService {
             record.setBalanceBefore(balanceBefore);
             record.setBalanceAfter(balanceAfter);
             record.setOperator(operatorName);
-            record.setRemark("余额充值");
+            record.setRemark("批量充值");
             rechargeRecordMapper.insert(record);
             successCount++;
             totalAmount = totalAmount.add(amount);

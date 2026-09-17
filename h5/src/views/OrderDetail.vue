@@ -35,8 +35,8 @@ const items = computed<OrderItem[]>(() => detail.value?.items ?? [])
 /** 步骤条当前激活索引 */
 const stepActive = computed<number>(() => {
   const s = order.value?.status
-  if (s === 1) return 1 // 待取餐:停在第2步
-  if (s === 2) return 3 // 已完成:全部完成
+  if (s === 1) return 1 // 待用餐:停在第2步
+  if (s === 2) return 3 // 已用餐:全部完成
   return 0
 })
 
@@ -133,8 +133,8 @@ const statusText = computed<string>(() => formatOrderStatus(order.value?.status)
             active-color="#0065fd"
           >
             <van-step>下单</van-step>
-            <van-step>待取餐</van-step>
-            <van-step>已完成</van-step>
+            <van-step>待用餐</van-step>
+            <van-step>已用餐</van-step>
           </van-steps>
           <div v-else class="order-detail__cancelled">
             <van-icon name="close" size="24" color="#969799" />

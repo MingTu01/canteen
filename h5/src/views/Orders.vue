@@ -55,10 +55,10 @@ const canRefresh = ref(false)
 
 const statusTabs = [
   { value: 0, label: '全部' },
-  { value: 1, label: '待取餐' },
-  { value: 2, label: '已完成' },
+  { value: 1, label: '待用餐' },
+  { value: 2, label: '已用餐' },
   { value: 3, label: '已取消' },
-  { value: 4, label: '未就餐' },
+  { value: 4, label: '未用餐' },
 ]
 
 /** 按状态筛选后的订单 */

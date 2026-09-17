@@ -350,6 +350,9 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         order.setServiceFee(serviceFee);
         order.setStatus(OrderStatus.PENDING.getCode());
         order.setOrderSource(orderSourceCode);
+        // 固化员工姓名/卡号快照:历史订单不受后续删/禁/换卡影响
+        order.setEmployeeName(employee.getName());
+        order.setCardNo(employee.getCardNo());
         orderMapper.insert(order);
 
         for (OrderItemDTO itemDTO : dto.getItems()) {
@@ -408,16 +411,12 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
         // B12 订单归属校验
         SecurityContext.checkStoreAccess(order.getStoreId());
-        // 填充员工姓名/卡号/部门供前端详情展示(与列表接口保持一致,否则详情弹窗显示 —)
+        // 填充部门名称供前端详情展示(员工姓名/卡号取自订单快照列,不随删/禁/换卡变化)
         Employee emp = employeeMapper.selectById(order.getEmployeeId());
-        if (emp != null) {
-            order.setEmployeeName(emp.getName());
-            order.setCardNo(emp.getCardNo());
-            if (emp.getDepartmentId() != null) {
-                Department dept = departmentMapper.selectById(emp.getDepartmentId());
-                if (dept != null) {
-                    order.setDepartmentName(dept.getName());
-                }
+        if (emp != null && emp.getDepartmentId() != null) {
+            Department dept = departmentMapper.selectById(emp.getDepartmentId());
+            if (dept != null) {
+                order.setDepartmentName(dept.getName());
             }
         }
         List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
@@ -436,6 +435,11 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
         // B12 订单归属校验
         SecurityContext.checkStoreAccess(order.getStoreId());
+        // 禁用员工(status=0)不可确认取餐
+        Employee employee = employeeMapper.selectById(order.getEmployeeId());
+        if (employee == null || employee.getStatus() == null || employee.getStatus() != 1) {
+            throw new BusinessException("员工已禁用,无法取餐");
+        }
         // 就餐时段校验:只能在配置的 [startTime, endTime] 内核销当日订单
         checkPickupTimeWindow(order);
         // P0-4 原子状态更新:仅 status=1 可完成,防并发重复操作
@@ -470,6 +474,10 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         Employee employee = employeeMapper.selectById(employeeId);
         if (employee == null) {
             throw new BusinessException("卡号不存在");
+        }
+        // 禁用员工(status=0)不可取餐(含已订但未取的订单)
+        if (employee.getStatus() == null || employee.getStatus() != 1) {
+            throw new BusinessException("员工已禁用,无法取餐");
         }
         // 终端 token 的 storeId 已锁定,校验员工归属本店
         SecurityContext.checkStoreAccess(employee.getStoreId());
@@ -521,8 +529,7 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
 
         // 4. 填充展示字段,终端拿到即可直接渲染
         //    (菜品明细 items 已由 getOrdersByEmployee 批量填充,无需二次查询)
-        target.setEmployeeName(employee.getName());
-        target.setCardNo(employee.getCardNo());
+        //    (员工姓名/卡号取自订单快照列,不随删/禁/换卡变化)
         if (employee.getDepartmentId() != null) {
             Department dept = departmentMapper.selectById(employee.getDepartmentId());
             if (dept != null) {
@@ -558,6 +565,10 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         Employee employee = employeeMapper.selectById(order.getEmployeeId());
         if (employee == null) {
             throw new BusinessException("员工账户已失效,无法取消订单,请联系管理员处理");
+        }
+        // 禁用员工(status=0)不可取消已订订单
+        if (employee.getStatus() == null || employee.getStatus() != 1) {
+            throw new BusinessException("员工已禁用,无法取消订单");
         }
 
         // P0-4 原子状态更新:仅 status=1 可取消,防并发重复退款

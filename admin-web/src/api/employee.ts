@@ -25,7 +25,7 @@ export interface EmployeeImportResult {
 /** 余额预警名单查询参数 */
 export interface LowBalanceQuery {
   storeId: number
-  /** 阈值(默认 20) */
+  /** 阈值(默认 200) */
   threshold?: number
   page?: number
   size?: number
@@ -73,7 +73,7 @@ export const employeeApi = {
   lowBalanceList: (params: LowBalanceQuery) =>
     api.get<PageResult<Employee>>('/employee/low-balance', { params }).then((r) => r.data),
   /** 余额预警统计 */
-  lowBalanceStats: (storeId: number, threshold = 20) =>
+  lowBalanceStats: (storeId: number, threshold = 200) =>
     api.get<LowBalanceStats>('/employee/low-balance/stats', {
       params: { storeId, threshold },
     }).then((r) => r.data),

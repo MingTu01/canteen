@@ -1,10 +1,10 @@
 /** 集中状态映射字典 */
 
 export const ORDER_STATUS = {
-  1: { label: '待取餐', type: 'warning' },
-  2: { label: '已完成', type: 'success' },
+  1: { label: '待用餐', type: 'warning' },
+  2: { label: '已用餐', type: 'success' },
   3: { label: '已取消', type: 'info' },
-  4: { label: '未就餐', type: 'danger' },
+  4: { label: '未用餐', type: 'danger' },
 } as const
 
 export const MEAL_TYPE = {

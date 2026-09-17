@@ -191,10 +191,12 @@ const rechargeVisible = ref(false)
 const rechargeLoading = ref(false)
 const rechargeEmployee = ref<Employee | null>(null)
 const rechargeAmount = ref<number>(DEFAULT_RECHARGE_AMOUNT)
+const rechargeRemark = ref('')
 
 const openRecharge = (row: Employee) => {
   rechargeEmployee.value = row
   rechargeAmount.value = DEFAULT_RECHARGE_AMOUNT
+  rechargeRemark.value = ''
   rechargeVisible.value = true
 }
 
@@ -209,6 +211,7 @@ const confirmRecharge = async () => {
     await rechargeApi.create({
       employeeId: rechargeEmployee.value.id,
       amount: rechargeAmount.value,
+      remark: rechargeRemark.value?.trim() || undefined,
       storeId: rechargeEmployee.value.storeId,
       operator: authStore.admin?.name || authStore.admin?.username || 'admin',
     })
@@ -440,7 +443,7 @@ const openEmployeeOrders = async (row: Employee) => {
 // ===== 余额预警 =====
 const lowBalanceVisible = ref(false)
 const lowBalanceLoading = ref(false)
-const lowBalanceThreshold = ref(20)
+const lowBalanceThreshold = ref(200)
 const lowBalanceStats = ref<LowBalanceStats | null>(null)
 const lowBalanceList = ref<Employee[]>([])
 const lowBalancePage = ref(1)
@@ -1043,6 +1046,16 @@ const photoStats = computed(() => {
               :step="50"
               class="w-full"
               placeholder="请输入充值金额"
+            />
+          </ElFormItem>
+          <ElFormItem label="备注">
+            <ElInput
+              v-model="rechargeRemark"
+              type="textarea"
+              :rows="3"
+              maxlength="100"
+              show-word-limit
+              placeholder="选填,如:现金充值、月度补贴等"
             />
           </ElFormItem>
         </ElForm>

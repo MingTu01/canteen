@@ -100,15 +100,20 @@ const fmtTime = (t?: string | null) => {
   return t.replace('T', ' ').slice(0, 16)
 }
 
-// ===== 默认上下架时间:上架=当前,下架=一个月后 =====
-const defaultPublishAt = (): string => {
-  const d = new Date()
-  return d.toISOString().slice(0, 19)
+// ===== 默认上下架时间:上架=此刻,下架=下月1号0点 =====
+/** 格式化本地时间为 YYYY-MM-DDTHH:mm:ss(日期选择器 value-format) */
+const toLocalDT = (d: Date): string => {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
+const defaultPublishAt = (): string => toLocalDT(new Date())
+/** 下架默认即「一个月后的0点」= 下月 1 号 00:00 */
 const defaultExpireAt = (): string => {
   const d = new Date()
+  d.setDate(1)
   d.setMonth(d.getMonth() + 1)
-  return d.toISOString().slice(0, 19)
+  d.setHours(0, 0, 0, 0)
+  return toLocalDT(d)
 }
 
 const form = ref<Notification>({
@@ -211,14 +216,58 @@ const handleDelete = async (row: Notification) => {
 
 // ===== 上架/下架 =====
 const toggleStatusLoading = ref<number | null>(null)
+
+// 上架前重新选择上下线时间的弹窗(仅上架走此流程)
+const publishDialogVisible = ref(false)
+const publishSaving = ref(false)
+const publishTarget = ref<Notification | null>(null)
+const publishForm = ref({ publishAt: defaultPublishAt(), expireAt: defaultExpireAt() })
+
+const openPublishDialog = (row: Notification) => {
+  publishTarget.value = row
+  publishForm.value = { publishAt: defaultPublishAt(), expireAt: defaultExpireAt() }
+  publishDialogVisible.value = true
+}
+
+const confirmPublish = async () => {
+  const t = publishTarget.value
+  if (!t?.id) return
+  if (publishForm.value.publishAt && publishForm.value.expireAt
+      && new Date(publishForm.value.publishAt) >= new Date(publishForm.value.expireAt)) {
+    ElMessage.warning('下架时间必须晚于上架时间')
+    return
+  }
+  publishSaving.value = true
+  try {
+    await notificationApi.update(t.id, {
+      ...t,
+      status: 1,
+      publishAt: publishForm.value.publishAt || null,
+      expireAt: publishForm.value.expireAt || null,
+    })
+    ElMessage.success('上架成功')
+    publishDialogVisible.value = false
+    fetchList()
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    publishSaving.value = false
+  }
+}
+
 const handleToggleStatus = async (row: Notification) => {
   if (!row.id) return
   const newStatus = row.status === 1 ? 0 : 1
-  const action = newStatus === 1 ? '上架' : '下架'
+  if (newStatus === 1) {
+    // 上架:在确认弹窗中重新选择上线/下线时间(默认此刻 / 下月1号0点)
+    openPublishDialog(row)
+    return
+  }
+  // 下架:保持简单确认
   try {
-    await ElMessageBox.confirm(`确定要${action}通知「${row.title}」吗？`, `${action}确认`, {
+    await ElMessageBox.confirm(`确定要下架通知「${row.title}」吗？`, '下架确认', {
       type: 'warning',
-      confirmButtonText: `确认${action}`,
+      confirmButtonText: '确认下架',
       cancelButtonText: '取消',
     })
   } catch {
@@ -226,8 +275,8 @@ const handleToggleStatus = async (row: Notification) => {
   }
   toggleStatusLoading.value = row.id
   try {
-    await notificationApi.toggleStatus(row.id, newStatus)
-    ElMessage.success(`${action}成功`)
+    await notificationApi.toggleStatus(row.id, 0)
+    ElMessage.success('下架成功')
     fetchList()
   } catch {
     /* 拦截器提示 */
@@ -442,6 +491,48 @@ onMounted(fetchList)
           <div class="flex justify-end gap-3">
             <ElButton @click="dialogVisible = false">取消</ElButton>
             <ElButton type="primary" :loading="saving" @click="handleSave">保存</ElButton>
+          </div>
+        </template>
+      </ElDialog>
+
+      <!-- 上架前重选上下线时间确认弹窗 -->
+      <ElDialog
+        v-model="publishDialogVisible"
+        title="上架通知"
+        width="460px"
+        :close-on-click-modal="false"
+        append-to-body
+        destroy-on-close
+      >
+        <div v-if="publishTarget" class="mb-4 rounded-lg bg-bg-secondary px-4 py-3 text-sm">
+          通知：<span class="font-medium text-text">{{ publishTarget.title }}</span>
+        </div>
+        <ElForm :model="publishForm" label-width="90px" label-position="right">
+          <ElFormItem label="上线时间">
+            <ElDatePicker
+              v-model="publishForm.publishAt"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              placeholder="留空表示立即上架"
+              style="width: 100%"
+              clearable
+            />
+          </ElFormItem>
+          <ElFormItem label="下架时间">
+            <ElDatePicker
+              v-model="publishForm.expireAt"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              placeholder="留空表示不下架"
+              style="width: 100%"
+              clearable
+            />
+          </ElFormItem>
+        </ElForm>
+        <template #footer>
+          <div class="flex justify-end gap-3">
+            <ElButton @click="publishDialogVisible = false">取消</ElButton>
+            <ElButton type="primary" :loading="publishSaving" @click="confirmPublish">确认上架</ElButton>
           </div>
         </template>
       </ElDialog>
