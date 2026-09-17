@@ -145,9 +145,14 @@ public class OrderController {
         }
         p.getRecords().forEach(o -> {
             Employee emp = empMap.get(o.getEmployeeId());
-            o.setEmployeeName(emp != null ? emp.getName() : null);
-            o.setCardNo(emp != null ? emp.getCardNo() : null);
-            if (emp != null && emp.getDepartmentId() != null) {
+            // 快照优先:删除/禁用/换卡不回退;实时查仅补链快照为空的存量历史订单
+            if (o.getEmployeeName() == null && emp != null) {
+                o.setEmployeeName(emp.getName());
+            }
+            if (o.getCardNo() == null && emp != null) {
+                o.setCardNo(emp.getCardNo());
+            }
+            if (o.getDepartmentName() == null && emp != null && emp.getDepartmentId() != null) {
                 o.setDepartmentName(deptNameMap.get(emp.getDepartmentId()));
             }
             o.setItems(itemMap.getOrDefault(o.getId(), List.of()));

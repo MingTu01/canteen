@@ -38,8 +38,8 @@ public class Order {
     @TableField("employee_card_no")
     private String cardNo;
 
-    /** 非数据库字段:员工部门名称(列表展示用,由 service 层填充) */
-    @TableField(exist = false)
+    /** 部门名称快照(下单时固化,删/禁/换卡不影响历史订单展示) */
+    @TableField("department_name")
     private String departmentName;
 
     /** 非数据库字段:订单菜品列表(终端订单查询页展示用,由 service 层批量填充) */

@@ -353,6 +353,13 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         // 固化员工姓名/卡号快照:历史订单不受后续删/禁/换卡影响
         order.setEmployeeName(employee.getName());
         order.setCardNo(employee.getCardNo());
+        // 固化部门名称快照:员工删除后部门展示不受影响
+        if (employee.getDepartmentId() != null) {
+            Department dept = departmentMapper.selectById(employee.getDepartmentId());
+            if (dept != null) {
+                order.setDepartmentName(dept.getName());
+            }
+        }
         orderMapper.insert(order);
 
         for (OrderItemDTO itemDTO : dto.getItems()) {
@@ -411,12 +418,14 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
         // B12 订单归属校验
         SecurityContext.checkStoreAccess(order.getStoreId());
-        // 填充部门名称供前端详情展示(员工姓名/卡号取自订单快照列,不随删/禁/换卡变化)
-        Employee emp = employeeMapper.selectById(order.getEmployeeId());
-        if (emp != null && emp.getDepartmentId() != null) {
-            Department dept = departmentMapper.selectById(emp.getDepartmentId());
-            if (dept != null) {
-                order.setDepartmentName(dept.getName());
+        // 部门名称快照优先;快照为空(存量历史订单)时实时回退,删除/禁用/换卡不影响展示
+        if (order.getDepartmentName() == null) {
+            Employee emp = employeeMapper.selectById(order.getEmployeeId());
+            if (emp != null && emp.getDepartmentId() != null) {
+                Department dept = departmentMapper.selectById(emp.getDepartmentId());
+                if (dept != null) {
+                    order.setDepartmentName(dept.getName());
+                }
             }
         }
         List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
