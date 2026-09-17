@@ -95,23 +95,14 @@ public class OrderController {
         if (endDate != null) {
             wrapper.le(Order::getDate, endDate);
         }
-        // 关键字搜索:orderNo OR 员工姓名 OR 员工卡号
+        // 关键字搜索:订单号 OR 员工姓名 OR 员工卡号。
+        // 搜索的是订单,直接用订单快照列(employee_name/employee_card_no)匹配,
+        // 而非实时查 employee 表,避免删除/禁用员工后被 is_deleted 过滤导致搜不到历史订单。
         if (keyword != null && !keyword.isBlank()) {
-            List<Long> matchedEmpIds = employeeMapper.selectList(
-                    new LambdaQueryWrapper<Employee>()
-                            .eq(Employee::getStoreId, storeId)
-                            .and(w -> w.like(Employee::getName, keyword)
-                                    .or().like(Employee::getCardNo, keyword))
-                            .select(Employee::getId)
-            ).stream().map(Employee::getId).collect(Collectors.toList());
-            if (matchedEmpIds.isEmpty()) {
-                // 没有匹配的员工,仅按 orderNo 搜索
-                wrapper.like(Order::getOrderNo, keyword);
-            } else {
-                // orderNo OR employeeId IN (matchedEmpIds)
-                wrapper.and(w -> w.like(Order::getOrderNo, keyword)
-                        .or().in(Order::getEmployeeId, matchedEmpIds));
-            }
+            String kw = keyword.trim();
+            wrapper.and(w -> w.like(Order::getOrderNo, kw)
+                    .or().like(Order::getEmployeeName, kw)
+                    .or().like(Order::getCardNo, kw));
         }
         IPage<Order> p = orderMapper.selectPage(new Page<>(page, size), wrapper);
 
