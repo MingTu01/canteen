@@ -154,6 +154,11 @@ public class OrderController {
         result.put("total", p.getTotal());
         result.put("page", page);
         result.put("size", size);
+        // 各订单状态条数(基于当前筛选条件,忽略分页),供订单列表底部展示
+        List<Map<String, Object>> statusCounts = orderMapper.countByStatus(
+                storeId, status, mealType, orderSource, startDate, endDate,
+                keyword == null || keyword.isBlank() ? null : keyword.trim());
+        result.put("statusCounts", statusCounts);
         return ApiResponse.success(result);
     }
 

@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface OrderMapper extends BaseMapper<Order> {
@@ -26,4 +27,16 @@ public interface OrderMapper extends BaseMapper<Order> {
     int countByStoreDateMeal(@Param("storeId") Long storeId,
                              @Param("date") LocalDate date,
                              @Param("mealType") Integer mealType);
+
+    /**
+     * 按状态分组统计订单数量(基于与列表一致的筛选条件,忽略分页)。
+     * 用于订单列表底部展示各状态条数(如 待用餐X条/已用餐X条)。
+     */
+    List<Map<String, Object>> countByStatus(@Param("storeId") Long storeId,
+                                            @Param("status") Integer status,
+                                            @Param("mealType") Integer mealType,
+                                            @Param("orderSource") Integer orderSource,
+                                            @Param("startDate") LocalDate startDate,
+                                            @Param("endDate") LocalDate endDate,
+                                            @Param("keyword") String keyword);
 }

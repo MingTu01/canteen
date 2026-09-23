@@ -36,6 +36,8 @@ type OrderRow = Order & { employeeName?: string; cardNo?: string; departmentName
 
 const orders = ref<OrderRow[]>([])
 const total = ref(0)
+/** 各订单状态条数(基于当前筛选条件,0 值不展示),如 {1:5, 2:3} 表示待用餐5条/已用餐3条 */
+const statusCounts = ref<Partial<Record<number, number>>>({})
 const page = ref(1)
 const size = ref(20)
 const loading = ref(false)
@@ -108,12 +110,26 @@ const formatCheckoutTime = (row: { status?: number; updatedAt?: string }) => {
   return row.updatedAt.replace('T', ' ').substring(0, 19)
 }
 
+/** 当前日期(东八区本地,以 YYYY-MM-DD 返回) */
+const todayStr = () => {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+/** 今天的日期区间:订单列表默认仅显示今日订单,其他日期通过筛选才展示 */
+const todayRange = (): string[] => {
+  const t = todayStr()
+  return [t, t]
+}
+
 const filters = reactive({
   status: undefined as number | undefined,
   mealType: undefined as number | undefined,
   /** 订单来源:1=未订餐用餐(快捷筛选按钮切换),undefined=全部 */
   orderSource: undefined as number | undefined,
-  dateRange: [] as string[],
+  dateRange: todayRange(),
   keyword: '',
 })
 
@@ -153,6 +169,7 @@ const fetchOrders = async () => {
   if (noStoreSelected.value) {
     orders.value = []
     total.value = 0
+    statusCounts.value = {}
     return
   }
   loading.value = true
@@ -161,6 +178,17 @@ const fetchOrders = async () => {
     const data = res as unknown as PageResult<OrderRow> | OrderRow[]
     orders.value = Array.isArray(data) ? data : data.records ?? []
     total.value = Array.isArray(data) ? data.length : data.total ?? orders.value.length
+    // 解析状态条数(仅保留 >0 的状态,0 值不展示)
+    const raw = !Array.isArray(data) ? (data as any)?.statusCounts : undefined
+    const counts: Partial<Record<number, number>> = {}
+    if (Array.isArray(raw)) {
+      for (const r of raw) {
+        const st = Number(r?.status)
+        const cnt = Number(r?.cnt)
+        if (st > 0 && cnt > 0) counts[st as number] = cnt
+      }
+    }
+    statusCounts.value = counts
   } catch {
     /* 错误已由拦截器统一提示 */
   } finally {
@@ -177,7 +205,7 @@ const handleReset = () => {
   filters.status = undefined
   filters.mealType = undefined
   filters.orderSource = undefined
-  filters.dateRange = []
+  filters.dateRange = todayRange()
   filters.keyword = ''
   page.value = 1
   fetchOrders()
@@ -562,7 +590,24 @@ watch(() => authStore.storeId, () => {
         </ElTable>
 
         <div class="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
-          <span class="text-xs text-text-muted">共 {{ total }} 条</span>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-xs text-text-muted">共 {{ total }} 条</span>
+            <!-- 各订单状态条数:存在才显示,为 0 不显示 -->
+            <template v-for="(cfg, code) in ORDER_STATUS" :key="code">
+              <span
+                v-if="statusCounts[Number(code)]"
+                class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+                :class="{
+                  'bg-amber-50 text-amber-600': Number(code) === 1,
+                  'bg-emerald-50 text-emerald-600': Number(code) === 2,
+                  'bg-neutral-100 text-text-muted': Number(code) === 3,
+                  'bg-rose-50 text-rose-600': Number(code) === 4,
+                }"
+              >
+                {{ cfg.label }}{{ statusCounts[Number(code)] }}条
+              </span>
+            </template>
+          </div>
           <ElPagination
             v-model:current-page="page"
             v-model:page-size="size"
@@ -680,12 +725,18 @@ watch(() => authStore.storeId, () => {
   margin-left: 6px;
 }
 
-/* 表格上方横向滚动条(与表格底部滚动条双向同步) */
+/* 表格上方横向滚动条(与表格底部滚动条双向同步)
+   默认隐藏,鼠标指向这条区域时才显示(与底部滚动条一致的悬停展示体验) */
 .table-top-scrollbar {
   overflow-x: auto;
   overflow-y: hidden;
   height: 12px;
   border-bottom: 1px solid var(--el-border-color-lighter);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.table-top-scrollbar:hover {
+  opacity: 1;
 }
 .table-top-scrollbar::-webkit-scrollbar {
   height: 8px;

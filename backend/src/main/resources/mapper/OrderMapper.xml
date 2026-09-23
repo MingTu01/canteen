@@ -26,4 +26,31 @@
         WHERE store_id = #{storeId} AND date = #{date} AND meal_type = #{mealType}
           AND status IN (1, 2)
     </select>
+
+    <!-- 按状态分组统计订单数量:筛选条件与列表一致,忽略分页 -->
+    <select id="countByStatus" resultType="java.util.Map">
+        SELECT status AS status, COUNT(*) AS cnt FROM `order`
+        WHERE store_id = #{storeId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="mealType != null">
+            AND meal_type = #{mealType}
+        </if>
+        <if test="orderSource != null">
+            AND order_source = #{orderSource}
+        </if>
+        <if test="startDate != null">
+            AND date &gt;= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND date &lt;= #{endDate}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (order_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR employee_name LIKE CONCAT('%', #{keyword}, '%')
+                 OR card_no LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        GROUP BY status
+    </select>
 </mapper>

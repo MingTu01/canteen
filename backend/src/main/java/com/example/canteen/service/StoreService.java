@@ -123,6 +123,7 @@ public class StoreService {
         LocalDateTime now = LocalDateTime.now();
         if (store.getCreatedAt() == null) store.setCreatedAt(now);
         store.setUpdatedAt(now);
+        stripBrandingUrlParams(store);
         storeMapper.insert(store);
         return store;
     }
@@ -130,8 +131,28 @@ public class StoreService {
     public Store updateStore(Store store) {
         // 显式更新 updatedAt,作为 ETag 源(branding 接口 ETag 基于 updatedAt 计算)
         store.setUpdatedAt(LocalDateTime.now());
+        stripBrandingUrlParams(store);
         storeMapper.updateById(store);
         return store;
+    }
+
+    /**
+     * 品牌图 URL 只存纯 /uploads/ 相对路径,去掉 ?sig=..&exp=.. 签名参数。
+     * 为何必须剥掉:上传返回的是带签名的完整 URL,若原样入库,JacksonConfig 会因
+     * URL 已含 sig= 而跳过重新签名,签名过期(默认 7 天)后图片访问即 403 无法显示。
+     * 只存纯路径后,每次序列化时统一实时签名,不会过期。
+     */
+    private void stripBrandingUrlParams(Store store) {
+        store.setImageUrl(stripUrlParams(store.getImageUrl()));
+        store.setLogoUrl(stripUrlParams(store.getLogoUrl()));
+        store.setTerminalBackgroundUrl(stripUrlParams(store.getTerminalBackgroundUrl()));
+        store.setH5BannerUrl(stripUrlParams(store.getH5BannerUrl()));
+    }
+
+    private String stripUrlParams(String url) {
+        if (url == null) return null;
+        int q = url.indexOf('?');
+        return q >= 0 ? url.substring(0, q) : url;
     }
 
     /**
