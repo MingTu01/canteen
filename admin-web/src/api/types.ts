@@ -178,6 +178,8 @@ export interface OrderSummaryItem {
   dishName: string
   price: number | string
   quantity: number
+  /** 已食用(已核销)份数,实时反映取餐进度 */
+  consumed: number
   orderCount: number
 }
 
@@ -187,6 +189,7 @@ export interface OrderSummary {
   mealType?: number | null
   items: OrderSummaryItem[]
   totalQuantity: number
+  totalConsumed: number
   totalOrders: number
   dishCount: number
 }

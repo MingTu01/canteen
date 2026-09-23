@@ -28,6 +28,7 @@
             oi.dish_name    AS dish_name,
             oi.price        AS price,
             SUM(oi.quantity) AS quantity,
+            SUM(CASE WHEN o.status = 2 THEN oi.quantity ELSE 0 END) AS consumed_quantity,
             COUNT(DISTINCT oi.order_id) AS order_count
         FROM order_item oi
         INNER JOIN `order` o ON oi.order_id = o.id

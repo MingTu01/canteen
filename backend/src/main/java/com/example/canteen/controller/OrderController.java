@@ -276,12 +276,17 @@ public class OrderController {
             m.put("dishName", String.valueOf(row.get("dish_name")));
             m.put("price", row.get("price"));
             m.put("quantity", toInt(row.get("quantity")));
+            m.put("consumed", toInt(row.get("consumed_quantity")));
             m.put("orderCount", toInt(row.get("order_count")));
             return m;
         }).collect(Collectors.toList());
 
         int totalQuantity = items.stream()
                 .mapToInt(m -> (int) m.get("quantity"))
+                .sum();
+        // 已食用份数:仅统计已用餐(status=2,已核销)的菜品数量,实时反映取餐进度
+        int totalConsumed = items.stream()
+                .mapToInt(m -> (int) m.get("consumed"))
                 .sum();
         // 去重订单数:sum(orderCount) 会重复计算多菜品订单,改用独立 COUNT(DISTINCT) 查询
         Integer distinctOrders = orderItemMapper.countDistinctOrders(storeId, date, mealType);
@@ -292,6 +297,7 @@ public class OrderController {
         result.put("mealType", mealType);
         result.put("items", items);
         result.put("totalQuantity", totalQuantity);
+        result.put("totalConsumed", totalConsumed);
         result.put("totalOrders", totalOrders);
         result.put("dishCount", items.size());
         return ApiResponse.success(result);

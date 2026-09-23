@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   ElButton,
   ElDatePicker,
   ElDialog,
   ElOption,
   ElSelect,
-  ElTable,
-  ElTableColumn,
   ElTag,
   ElMessage,
 } from 'element-plus'
@@ -26,7 +24,7 @@ import PageContainer from '@/components/PageContainer.vue'
 import StatCard from '@/components/StatCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { orderApi, storeApi } from '@/api'
-import type { OrderSummary, OrderSummaryItem, Store } from '@/api/types'
+import type { OrderSummaryItem, Store } from '@/api/types'
 import { MEAL_TYPE } from '@/constants/dict'
 import { todayStr } from '@/utils/date'
 import { formatMoney } from '@/utils/money'
@@ -50,18 +48,26 @@ const mealLabel = (m?: number | null) =>
   m != null ? (MEAL_TYPE as Record<number, { label: string }>)[m]?.label ?? '全部' : '全部'
 
 /* ===== 数据 ===== */
-const summary = ref<OrderSummary | null>(null)
 const loading = ref(false)
 const exporting = ref(false)
 
-const items = computed<OrderSummaryItem[]>(() => summary.value?.items ?? [])
-const totalQuantity = computed(() => summary.value?.totalQuantity ?? 0)
-const totalOrders = computed(() => summary.value?.totalOrders ?? 0)
-const dishCount = computed(() => summary.value?.dishCount ?? 0)
+/** 按餐次分组(早/中/晚)的汇总数据,含已食用份数 */
+const groups = ref<MealGroup[]>([])
+const allItems = computed(() => groups.value.flatMap((g) => g.items))
+const totalQuantity = computed(() =>
+  groups.value.reduce((s, g) => s + g.totalQuantity, 0)
+)
+const totalConsumed = computed(() =>
+  groups.value.reduce((s, g) => s + g.totalConsumed, 0)
+)
+const totalOrders = computed(() =>
+  allItems.value.reduce((s, it) => s + (it.orderCount ?? 0), 0)
+)
+const dishCount = computed(() => allItems.value.length)
 
 /** 总金额:Σ price × quantity */
 const totalAmount = computed(() =>
-  items.value
+  allItems.value
     .reduce((sum, it) => sum + Number(it.price ?? 0) * (it.quantity ?? 0), 0)
     .toFixed(2)
 )
@@ -74,22 +80,22 @@ const subtotal = (it: OrderSummaryItem) =>
 const formatPrice = formatMoney
 
 /* ===== 查询 ===== */
-const fetchSummary = async () => {
+let pollTimer: ReturnType<typeof setInterval> | undefined
+
+/** 拉取当前筛选下按餐次分组的汇总(含已食用),写入 groups */
+const refresh = async () => {
   if (!filters.date) {
     ElMessage.warning('请选择日期')
     return
   }
   const sidVal = sid.value
   if (!sidVal) {
-    summary.value = null
+    groups.value = []
     return
   }
   loading.value = true
   try {
-    summary.value = await orderApi.summary(sidVal, filters.date, filters.mealType)
-    if (items.value.length === 0) {
-      // 无数据时不报错,仅展示空态
-    }
+    groups.value = await collectMealGroups()
   } catch {
     /* 错误已由拦截器统一提示 */
   } finally {
@@ -98,18 +104,32 @@ const fetchSummary = async () => {
 }
 
 const handleSearch = () => {
-  fetchSummary()
+  refresh()
 }
 
 const handleReset = () => {
   filters.date = todayStr()
   filters.mealType = undefined
-  fetchSummary()
+  refresh()
+}
+
+/** 页面可见时定时刷新,保证"已食用"数量实时更新 */
+const startPolling = () => {
+  stopPolling()
+  pollTimer = setInterval(() => {
+    if (!document.hidden) refresh()
+  }, 15000)
+}
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = undefined
+  }
 }
 
 /* ===== 导出 Excel ===== */
 const handleExport = () => {
-  if (items.value.length === 0) {
+  if (allItems.value.length === 0) {
     ElMessage.warning('当前没有可导出的订餐汇总数据')
     return
   }
@@ -131,7 +151,7 @@ const handleExport = () => {
     ]
 
     // 明细行
-    const detailRows = items.value.map((it, idx) => ({
+    const detailRows = allItems.value.map((it, idx) => ({
       '序号': idx + 1,
       '菜品名称': it.dishName,
       '单价(元)': formatPrice(it.price),
@@ -164,7 +184,7 @@ const handleExport = () => {
     const dateStr = filters.date.replace(/-/g, '')
     const mealStr = filters.mealType != null ? `_${mealText}` : ''
     XLSX.writeFile(wb, `订餐汇总_${dateStr}${mealStr}.xlsx`)
-    ElMessage.success(`已导出 ${items.value.length} 条汇总记录`)
+    ElMessage.success(`已导出 ${allItems.value.length} 条汇总记录`)
   } catch (e) {
     ElMessage.error('导出失败,请重试')
   } finally {
@@ -176,7 +196,7 @@ const handleExport = () => {
 watch(
   () => filters.date,
   () => {
-    fetchSummary()
+    refresh()
   }
 )
 
@@ -252,6 +272,7 @@ interface MealGroup {
   mealColor: string
   items: OrderSummaryItem[]
   totalQuantity: number
+  totalConsumed: number
 }
 
 /** 收集要绘制的餐别分组:
@@ -277,6 +298,7 @@ const collectMealGroups = async (): Promise<MealGroup[]> => {
         mealColor: colorMap[mt] ?? '#1a73fe',
         items: data.items,
         totalQuantity: data.totalQuantity,
+        totalConsumed: data.totalConsumed ?? 0,
       },
     ]
   }
@@ -291,6 +313,7 @@ const collectMealGroups = async (): Promise<MealGroup[]> => {
         mealColor: colorMap[mt] ?? '#1a73fe',
         items: data.items,
         totalQuantity: data.totalQuantity,
+        totalConsumed: data.totalConsumed ?? 0,
       } as MealGroup
     })
   )
@@ -513,8 +536,13 @@ const downloadImage = () => {
 }
 
 onMounted(() => {
-  fetchSummary()
+  refresh()
   fetchStoreName()
+  startPolling()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
 })
 </script>
 
@@ -525,11 +553,11 @@ onMounted(() => {
       description="按日期与餐次汇总各菜品订购数量,截止订餐后导出 Excel 交厨师备料。"
     >
       <template #actions>
-        <ElButton :icon="RefreshCw" :loading="loading" @click="fetchSummary">刷新</ElButton>
+        <ElButton :icon="RefreshCw" :loading="loading" @click="refresh">刷新</ElButton>
         <ElButton
           :icon="ImageDown"
           :loading="imageGenerating"
-          :disabled="items.length === 0"
+          :disabled="allItems.length === 0"
           @click="generateImage"
         >
           导出图片
@@ -538,7 +566,7 @@ onMounted(() => {
           type="primary"
           :icon="Download"
           :loading="exporting"
-          :disabled="items.length === 0"
+          :disabled="allItems.length === 0"
           @click="handleExport"
         >
           导出 Excel
@@ -634,58 +662,71 @@ onMounted(() => {
           </div>
         </div>
 
-        <ElTable
-          :data="items"
-          style="width: 100%"
-          row-key="dishId"
-          stripe
-          empty-text="该日期暂无订餐数据"
-        >
-          <ElTableColumn label="序号" width="70" align="center" type="index" />
-          <ElTableColumn label="菜品名称" min-width="220" prop="dishName">
-            <template #default="{ row }">
-              <div class="flex items-center gap-2">
-                <ChefHat class="h-4 w-4 shrink-0 text-primary" />
-                <span class="font-medium text-text">{{ row.dishName }}</span>
-              </div>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="单价(元)" width="120" align="right">
-            <template #default="{ row }">
-              <span class="tabular-nums text-text-secondary">¥ {{ formatPrice(row.price) }}</span>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="订购份数" width="120" align="right">
-            <template #default="{ row }">
-              <span class="tabular-nums font-semibold text-primary">{{ row.quantity }}</span>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="订单数" width="110" align="right">
-            <template #default="{ row }">
-              <span class="tabular-nums text-text-secondary">{{ row.orderCount }}</span>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="小计金额(元)" width="140" align="right">
-            <template #default="{ row }">
-              <span class="tabular-nums font-medium text-text">¥ {{ subtotal(row as OrderSummaryItem) }}</span>
-            </template>
-          </ElTableColumn>
-          <template #append>
+        <div v-loading="loading" class="py-1">
+          <template v-if="groups.length > 0">
             <div
-              v-if="items.length > 0"
-              class="flex justify-end border-t border-border bg-bg-secondary px-5 py-3 text-sm"
+              v-for="(g, gi) in groups"
+              :key="g.mealType"
+              :class="gi > 0 ? 'border-t border-border' : ''"
             >
-              <div class="flex gap-8 tabular-nums">
-                <span class="text-text-muted">
-                  合计份数:<span class="font-semibold text-primary">{{ totalQuantity }}</span>
-                </span>
-                <span class="text-text-muted">
-                  合计金额:<span class="font-semibold text-primary">¥ {{ totalAmount }}</span>
-                </span>
+              <!-- 餐次标题:餐名 + 共/已食用 -->
+              <div class="flex items-center justify-between px-4 py-3">
+                <div class="flex items-center gap-3">
+                  <span
+                    class="h-5 w-1.5 rounded-full"
+                    :style="{ backgroundColor: g.mealColor }"
+                  />
+                  <span class="text-base font-bold text-text">{{ g.mealLabel }}</span>
+                </div>
+                <div class="flex items-center gap-6 text-sm tabular-nums">
+                  <span class="text-text-secondary">
+                    共<span class="ml-1 font-bold text-text">{{ g.totalQuantity }}</span>份
+                  </span>
+                  <span class="text-text-secondary">
+                    已食用
+                    <span class="ml-1 font-bold text-emerald-500">{{ g.totalConsumed }}</span
+                    >份
+                  </span>
+                </div>
+              </div>
+
+              <!-- 菜品明细:菜品 + 订购份数 -->
+              <div>
+                <div
+                  v-for="(it, ri) in g.items"
+                  :key="it.dishId ?? ri"
+                  :class="ri > 0 ? 'border-t border-border' : ''"
+                  class="flex items-center justify-between px-4 py-3"
+                >
+                  <div class="flex items-center gap-2">
+                    <ChefHat class="h-4 w-4 shrink-0 text-primary" />
+                    <span class="font-medium text-text">{{ it.dishName }}</span>
+                  </div>
+                  <span class="text-sm tabular-nums text-text-secondary">{{ it.quantity }} 份</span>
+                </div>
               </div>
             </div>
           </template>
-        </ElTable>
+
+          <!-- 空状态 -->
+          <div v-else class="py-14 text-center text-sm text-text-muted">
+            该日期暂无订餐数据
+          </div>
+
+          <!-- 底部合计 -->
+          <div
+            v-if="groups.length > 0"
+            class="flex items-center justify-end gap-6 border-t border-border bg-bg-secondary px-4 py-3 text-sm tabular-nums"
+          >
+            <span class="text-text-secondary">
+              合计<span class="ml-1 font-bold text-primary">{{ totalQuantity }}</span>份
+            </span>
+            <span class="text-text-secondary">
+              已食用
+              <span class="ml-1 font-bold text-emerald-500">{{ totalConsumed }}</span>份
+            </span>
+          </div>
+        </div>
       </div>
     </PageContainer>
 
