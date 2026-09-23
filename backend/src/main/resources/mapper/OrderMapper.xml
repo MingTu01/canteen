@@ -13,18 +13,20 @@
         SELECT * FROM `order` WHERE store_id = #{storeId} AND date = #{date} ORDER BY created_at DESC
     </select>
 
+    <!-- 防重复下单:查员工某日某餐次是否已有生效订单(待用餐/已用餐/未就餐)。
+         含未就餐(4):员工错过餐次被自动标记未就餐后视为已下单,不允许再补订当天同餐次 -->
     <select id="selectByEmployeeDateMeal" resultType="com.example.canteen.entity.Order">
         SELECT * FROM `order`
         WHERE employee_id = #{employeeId} AND date = #{date} AND meal_type = #{mealType}
-          AND status IN (1, 2)
+          AND status IN (1, 2, 4)
         LIMIT 1
     </select>
 
-    <!-- 统计门店某日某餐次已下单(未取消)订单数 -->
+    <!-- 统计门店某日某餐次已下单(未取消)订单数,含未就餐(4):未就餐也是已下单份额,改/清空菜单提示订单数不应漏算 -->
     <select id="countByStoreDateMeal" resultType="int">
         SELECT COUNT(*) FROM `order`
         WHERE store_id = #{storeId} AND date = #{date} AND meal_type = #{mealType}
-          AND status IN (1, 2)
+          AND status IN (1, 2, 4)
     </select>
 
     <!-- 按状态分组统计订单数量:筛选条件与列表一致,忽略分页 -->

@@ -64,7 +64,7 @@ const totalRemaining = computed(() =>
   groups.value.reduce((s, g) => s + g.totalRemaining, 0)
 )
 const totalOrders = computed(() =>
-  allItems.value.reduce((s, it) => s + (it.orderCount ?? 0), 0)
+  groups.value.reduce((s, g) => s + g.totalOrders, 0)
 )
 const dishCount = computed(() => allItems.value.length)
 
@@ -277,6 +277,8 @@ interface MealGroup {
   totalQuantity: number
   totalConsumed: number
   totalRemaining: number
+  /** 去重订单数(后端按餐次 COUNT(DISTINCT)) */
+  totalOrders: number
 }
 
 /** 收集要绘制的餐别分组:
@@ -304,6 +306,7 @@ const collectMealGroups = async (): Promise<MealGroup[]> => {
         totalQuantity: data.totalQuantity,
         totalConsumed: data.totalConsumed ?? 0,
         totalRemaining: data.totalRemaining ?? 0,
+        totalOrders: data.totalOrders ?? 0,
       },
     ]
   }
@@ -320,6 +323,7 @@ const collectMealGroups = async (): Promise<MealGroup[]> => {
         totalQuantity: data.totalQuantity,
         totalConsumed: data.totalConsumed ?? 0,
         totalRemaining: data.totalRemaining ?? 0,
+        totalOrders: data.totalOrders ?? 0,
       } as MealGroup
     })
   )

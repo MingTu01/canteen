@@ -15,7 +15,7 @@ import {
   ElMessage,
   ElMessageBox,
 } from 'element-plus'
-import { Eye, CheckCircle2, XCircle, Download, Coins } from 'lucide-vue-next'
+import { Eye, Download, Coins } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -513,75 +513,58 @@ watch(() => authStore.storeId, () => {
           aria-label="订单列表"
           @row-click="(row: any) => openDetail(row._order as OrderRow)"
         >
-          <ElTableColumn prop="orderNo" label="订单号" min-width="160" />
-          <ElTableColumn prop="date" label="日期" width="120" />
-          <ElTableColumn label="姓名" min-width="100">
+          <ElTableColumn prop="orderNo" label="订单号" min-width="150" />
+          <ElTableColumn prop="date" label="日期" width="110" />
+          <ElTableColumn label="姓名" min-width="90">
             <template #default="{ row }">{{ row.employeeName }}</template>
           </ElTableColumn>
-          <ElTableColumn label="部门" min-width="110">
+          <ElTableColumn label="部门" min-width="100">
             <template #default="{ row }">{{ row.departmentName }}</template>
           </ElTableColumn>
-          <ElTableColumn label="会员号" min-width="130">
+          <ElTableColumn label="会员号" min-width="110">
             <template #default="{ row }">{{ row.cardNo }}</template>
           </ElTableColumn>
-          <ElTableColumn label="餐次" width="80" align="center">
+          <ElTableColumn label="餐次" width="70" align="center">
             <template #default="{ row }">{{ mealLabel(row.mealType) }}</template>
           </ElTableColumn>
-          <ElTableColumn prop="dishName" label="菜名" min-width="140" />
-          <ElTableColumn label="单价" width="90" align="right">
+          <!-- 菜名预留更宽空间,避免不同菜品名称相互遮挡 -->
+          <ElTableColumn prop="dishName" label="菜名" min-width="200" />
+          <ElTableColumn label="单价" width="80" align="right">
             <template #default="{ row }">¥{{ row.price }}</template>
           </ElTableColumn>
-          <ElTableColumn label="数量" width="70" align="center">
+          <ElTableColumn label="数量" width="60" align="center">
             <template #default="{ row }">{{ row.quantity }}</template>
           </ElTableColumn>
-          <ElTableColumn label="合计价格" width="110" align="right">
+          <ElTableColumn label="合计价格" width="100" align="right">
             <template #default="{ row }">
               <span class="font-medium tabular-nums text-text">¥{{ (Number(row.price) * Number(row.quantity)).toFixed(2) }}</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="订单总额" width="100" align="right">
+          <ElTableColumn label="订单总额" width="95" align="right">
             <template #default="{ row }">
               <span v-if="row.isFirstRow" class="font-medium tabular-nums text-text">¥{{ row.totalAmount }}</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="结帐时间" width="170" align="center">
+          <ElTableColumn label="结帐时间" width="160" align="center">
             <template #default="{ row }">
               <span class="text-xs tabular-nums">{{ formatCheckoutTime(row) }}</span>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="订单状态" width="100" align="center">
+          <ElTableColumn label="订单状态" width="90" align="center">
             <template #default="{ row }">
               <StatusTag :value="row.status" :map="ORDER_STATUS" />
             </template>
           </ElTableColumn>
-          <ElTableColumn label="订单来源" width="110" align="center">
+          <ElTableColumn label="订单来源" width="100" align="center">
             <template #default="{ row }">
               <StatusTag :value="row.orderSource ?? 0" :map="ORDER_SOURCE" />
             </template>
           </ElTableColumn>
-          <ElTableColumn label="操作" width="260" fixed="right" :show-overflow-tooltip="false">
+          <!-- 操作列放回卡片内随表格滚动(不再 fixed 悬浮右侧),仅保留查看详情;
+               完成/取消操作移至订单详情抽屉内统一处理,避免悬浮遮挡与顶部滚动条 -->
+          <ElTableColumn label="操作" width="90" align="center" :show-overflow-tooltip="false">
             <template #default="{ row }">
-              <template v-if="row.isFirstRow">
-                <ElButton size="small" :icon="Eye" @click.stop="openDetail(row._order as OrderRow)">详情</ElButton>
-                <ElButton
-                  v-if="row.status === 1"
-                  size="small"
-                  type="success"
-                  :icon="CheckCircle2"
-                  @click.stop="handleComplete(row._order as OrderRow)"
-                >
-                  完成
-                </ElButton>
-                <ElButton
-                  v-if="row.status === 1"
-                  size="small"
-                  type="danger"
-                  :icon="XCircle"
-                  @click.stop="handleCancel(row._order as OrderRow)"
-                >
-                  取消
-                </ElButton>
-              </template>
+              <ElButton v-if="row.isFirstRow" size="small" :icon="Eye" @click.stop="openDetail(row._order as OrderRow)">详情</ElButton>
             </template>
           </ElTableColumn>
           <template #empty>
