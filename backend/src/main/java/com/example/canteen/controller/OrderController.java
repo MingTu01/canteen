@@ -282,6 +282,7 @@ public class OrderController {
             m.put("price", row.get("price"));
             m.put("quantity", toInt(row.get("quantity")));
             m.put("consumed", toInt(row.get("consumed_quantity")));
+            m.put("remaining", toInt(row.get("remaining_quantity")));
             m.put("orderCount", toInt(row.get("order_count")));
             return m;
         }).collect(Collectors.toList());
@@ -293,6 +294,10 @@ public class OrderController {
         int totalConsumed = items.stream()
                 .mapToInt(m -> (int) m.get("consumed"))
                 .sum();
+        // 剩余份数:待用餐(1)+未就餐(4),即已做/已备但尚未食用(含过期未核销)的菜
+        int totalRemaining = items.stream()
+                .mapToInt(m -> (int) m.get("remaining"))
+                .sum();
         // 去重订单数:sum(orderCount) 会重复计算多菜品订单,改用独立 COUNT(DISTINCT) 查询
         Integer distinctOrders = orderItemMapper.countDistinctOrders(storeId, date, mealType);
         int totalOrders = distinctOrders != null ? distinctOrders : 0;
@@ -303,6 +308,7 @@ public class OrderController {
         result.put("items", items);
         result.put("totalQuantity", totalQuantity);
         result.put("totalConsumed", totalConsumed);
+        result.put("totalRemaining", totalRemaining);
         result.put("totalOrders", totalOrders);
         result.put("dishCount", items.size());
         return ApiResponse.success(result);

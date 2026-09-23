@@ -21,7 +21,10 @@
         ORDER BY oi.order_id, oi.id
     </select>
 
-    <!-- 订餐汇总:JOIN order 表获取门店/日期/餐次/状态,按菜品分组求和 -->
+    <!-- 订餐汇总:JOIN order 表获取门店/日期/餐次/状态,按菜品分组求和。
+         统计口径:取消(status=3)的订单不统计(菜未做);已用餐(2)+未就餐(4)均为已做/已备的菜,
+         未就餐只是没人吃但食堂已出菜,份额不能消失,故一并计入总份数与剩余。
+         consumed(已食用)=status2;remaining(剩余)=status1+4;已食用+剩余=总份数 -->
     <select id="selectDishOrderSummary" resultType="java.util.Map">
         SELECT
             oi.dish_id      AS dish_id,
@@ -29,12 +32,13 @@
             oi.price        AS price,
             SUM(oi.quantity) AS quantity,
             SUM(CASE WHEN o.status = 2 THEN oi.quantity ELSE 0 END) AS consumed_quantity,
+            SUM(CASE WHEN o.status IN (1, 4) THEN oi.quantity ELSE 0 END) AS remaining_quantity,
             COUNT(DISTINCT oi.order_id) AS order_count
         FROM order_item oi
         INNER JOIN `order` o ON oi.order_id = o.id
         WHERE o.store_id = #{storeId}
           AND o.date = #{date}
-          AND o.status IN (1, 2)
+          AND o.status IN (1, 2, 4)
           <if test="mealType != null">
             AND o.meal_type = #{mealType}
           </if>
@@ -42,13 +46,13 @@
         ORDER BY quantity DESC
     </select>
 
-    <!-- 去重订单数:同筛选条件下的实际订单数(避免多菜品订单被重复计数) -->
+    <!-- 去重订单数:同筛选条件下的实际订单数(避免多菜品订单被重复计数)。口径与汇总一致,含未就餐、排除取消 -->
     <select id="countDistinctOrders" resultType="java.lang.Integer">
         SELECT COUNT(DISTINCT o.id)
         FROM `order` o
         WHERE o.store_id = #{storeId}
           AND o.date = #{date}
-          AND o.status IN (1, 2)
+          AND o.status IN (1, 2, 4)
           <if test="mealType != null">
             AND o.meal_type = #{mealType}
           </if>

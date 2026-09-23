@@ -180,6 +180,8 @@ export interface OrderSummaryItem {
   quantity: number
   /** 已食用(已核销)份数,实时反映取餐进度 */
   consumed: number
+  /** 剩余份数(status=待用餐+未就餐) */
+  remaining: number
   orderCount: number
 }
 
@@ -190,6 +192,7 @@ export interface OrderSummary {
   items: OrderSummaryItem[]
   totalQuantity: number
   totalConsumed: number
+  totalRemaining: number
   totalOrders: number
   dishCount: number
 }

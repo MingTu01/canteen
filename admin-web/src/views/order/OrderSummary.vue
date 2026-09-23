@@ -60,6 +60,9 @@ const totalQuantity = computed(() =>
 const totalConsumed = computed(() =>
   groups.value.reduce((s, g) => s + g.totalConsumed, 0)
 )
+const totalRemaining = computed(() =>
+  groups.value.reduce((s, g) => s + g.totalRemaining, 0)
+)
 const totalOrders = computed(() =>
   allItems.value.reduce((s, it) => s + (it.orderCount ?? 0), 0)
 )
@@ -273,6 +276,7 @@ interface MealGroup {
   items: OrderSummaryItem[]
   totalQuantity: number
   totalConsumed: number
+  totalRemaining: number
 }
 
 /** 收集要绘制的餐别分组:
@@ -299,6 +303,7 @@ const collectMealGroups = async (): Promise<MealGroup[]> => {
         items: data.items,
         totalQuantity: data.totalQuantity,
         totalConsumed: data.totalConsumed ?? 0,
+        totalRemaining: data.totalRemaining ?? 0,
       },
     ]
   }
@@ -314,6 +319,7 @@ const collectMealGroups = async (): Promise<MealGroup[]> => {
         items: data.items,
         totalQuantity: data.totalQuantity,
         totalConsumed: data.totalConsumed ?? 0,
+        totalRemaining: data.totalRemaining ?? 0,
       } as MealGroup
     })
   )
@@ -335,6 +341,8 @@ const generateImage = async () => {
     }
 
     const grandTotal = groups.reduce((s, g) => s + g.totalQuantity, 0)
+    const grandConsumed = groups.reduce((s, g) => s + g.totalConsumed, 0)
+    const grandRemaining = groups.reduce((s, g) => s + g.totalRemaining, 0)
     const grandDishCount = groups.reduce((s, g) => s + g.items.length, 0)
 
     const W = 720
@@ -443,7 +451,11 @@ const generateImage = async () => {
       ctx.textAlign = 'right'
       ctx.fillStyle = g.mealColor
       ctx.font = 'bold 15px "PingFang SC", "Microsoft YaHei", sans-serif'
-      ctx.fillText(`共 ${g.totalQuantity} 份`, W - padding, y + groupHeaderH / 2)
+      ctx.fillText(
+        `共 ${g.totalQuantity} 份  已食 ${g.totalConsumed}  剩 ${g.totalRemaining}`,
+        W - padding,
+        y + groupHeaderH / 2
+      )
       ctx.textAlign = 'left'
       ctx.textBaseline = 'top'
       y += groupHeaderH
@@ -504,7 +516,11 @@ const generateImage = async () => {
     ctx.fillStyle = '#0f172a'
     ctx.font = 'bold 16px "PingFang SC", "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'left'
-    ctx.fillText(`合计:${grandTotal} 份`, padding, y)
+    ctx.fillText(
+      `合计:${grandTotal} 份  已食用:${grandConsumed} 份  剩余:${grandRemaining} 份`,
+      padding,
+      y
+    )
     ctx.textAlign = 'right'
     ctx.fillStyle = '#64748b'
     ctx.font = '13px "PingFang SC", "Microsoft YaHei", sans-serif'
@@ -687,6 +703,11 @@ onBeforeUnmount(() => {
                     <span class="ml-1 font-bold text-emerald-500">{{ g.totalConsumed }}</span
                     >份
                   </span>
+                  <span class="text-text-secondary">
+                    剩余
+                    <span class="ml-1 font-bold text-amber-500">{{ g.totalRemaining }}</span
+                    >份
+                  </span>
                 </div>
               </div>
 
@@ -724,6 +745,10 @@ onBeforeUnmount(() => {
             <span class="text-text-secondary">
               已食用
               <span class="ml-1 font-bold text-emerald-500">{{ totalConsumed }}</span>份
+            </span>
+            <span class="text-text-secondary">
+              剩余
+              <span class="ml-1 font-bold text-amber-500">{{ totalRemaining }}</span>份
             </span>
           </div>
         </div>
