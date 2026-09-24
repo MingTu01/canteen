@@ -1,8 +1,9 @@
 {
-  "version": "0.0.74",
-  "buildTime": "2026-09-23",
+  "version": "0.0.75",
+  "buildTime": "2026-09-24",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.75 删除订餐配置死键:移除从未生效的 max_order_quantity(单次最大订餐数)与 allow_cross_day_order(允许跨日订餐)两个配置项——前后端此前仅解析从不校验,实际限购由菜品级'单次限购'承担;StoreConfigController/VersionController 白名单与默认值、schema-h2 种子数据同步清理,历史迁移 V7 不动(已执行)",
     "V0.0.74 修复CI后端构建失败:MenuService.createMenu 快照固化代码把 dishes 变量声明在 if 块内、却在块外 dishes.stream() 引用,导致编译报错 cannot find symbol: variable dishes,V0.0.72/V0.0.73 两次 GitHub CI 后端构建均因此失败;已改为在方法级先声明 dishById 映射、if 块内构建,编译通过",
     "V0.0.73 未订餐用餐改按菜单快照价计费:下单计价不再区分订餐/未订餐用餐,统一按(门店+日期+餐次+菜品)查menu_item快照价(菜单发布即固化价格),现场加餐同样按菜单价收费,菜品管理改价不再影响未订餐用餐;仅该门店该餐次未发布菜单(无快照)时才回退菜品实时价",
     "V0.0.72 已发布菜单价格/辣度快照固化:①menu_item新增price/spice_level快照列(Flyway V32+存量回填),菜单创建/复制时从菜品固化价格与辣度,菜品管理后续改价/改辣度不影响已存菜单与历史订单;②菜单查询返回快照价与快照辣度(覆盖dish副本),下单计价按(门店+日期+餐次+菜品)查menu_item快照价,新订旧菜单的菜按旧价,未订餐用餐或无快照回退实时价;③菜单管理三餐区块与添加菜品弹窗显示菜品辣度(辣椒图标,不辣不显示)",

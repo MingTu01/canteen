@@ -550,8 +550,6 @@ INSERT INTO sys_config (config_key, config_value, description) VALUES
 ('order_advance_days', '7', '可提前预订天数'),
 ('order_deadline_time', '15:00', '次日订餐截止时间(前一天 HH:mm,过后不可订次日)'),
 ('cancel_deadline_time', '15:00', '次日取消截止时间(前一天 HH:mm,过后不可取消次日)'),
-('max_order_quantity', '10', '单次最大订餐数量'),
-('allow_cross_day_order', 'true', '是否允许跨日订餐'),
 -- 支付与余额
 ('balance_min_warning', '50.00', '余额最低预警值'),
 ('allow_negative_balance', 'false', '是否允许负余额消费'),

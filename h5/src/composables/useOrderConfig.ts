@@ -5,8 +5,6 @@ export interface OrderConfig {
   order_advance_days: number
   order_deadline_time: string  // "15:00"
   cancel_deadline_time: string // "15:00"
-  max_order_quantity: number
-  allow_cross_day_order: boolean
   /** 未订餐用餐手续费开关/金额(按餐别) */
   unsolicited_fee_enabled: boolean
   unsolicited_fee_breakfast: number
@@ -18,8 +16,6 @@ const config = ref<OrderConfig>({
   order_advance_days: 7,
   order_deadline_time: '15:00',
   cancel_deadline_time: '15:00',
-  max_order_quantity: 10,
-  allow_cross_day_order: true,
   unsolicited_fee_enabled: false,
   unsolicited_fee_breakfast: 0,
   unsolicited_fee_lunch: 0,
@@ -60,11 +56,6 @@ export function useOrderConfig() {
             : 7,
           order_deadline_time: d.order_deadline_time || '15:00',
           cancel_deadline_time: d.cancel_deadline_time || '15:00',
-          // 0=不限制单次最大订餐数
-          max_order_quantity: d.max_order_quantity != null && d.max_order_quantity !== ''
-            ? (parseInt(d.max_order_quantity) || 0)
-            : 10,
-          allow_cross_day_order: d.allow_cross_day_order === 'true',
           // 未订餐用餐手续费("true"/"false" 转 boolean,金额转 number)
           unsolicited_fee_enabled: d.unsolicited_fee_enabled === 'true' || d.unsolicited_fee_enabled === true,
           unsolicited_fee_breakfast: parseFeeValue(d.unsolicited_fee_breakfast),

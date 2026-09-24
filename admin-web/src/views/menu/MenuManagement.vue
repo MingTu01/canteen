@@ -19,7 +19,6 @@ import {
   ElInput,
   ElMessage,
   ElMessageBox,
-  ElSwitch,
   ElInputNumber,
   ElTimePicker,
   ElTag,
@@ -562,8 +561,6 @@ const orderForm = ref({
   order_advance_days: 7,
   order_deadline_time: '15:00',
   cancel_deadline_time: '15:00',
-  max_order_quantity: 10,
-  allow_cross_day_order: true,
 })
 
 const fetchOrderConfig = async () => {
@@ -572,7 +569,6 @@ const fetchOrderConfig = async () => {
   try {
     const cfg = await systemApi.getOrderConfig(sidVal)
     const advanceDays = Number(cfg.order_advance_days)
-    const maxQty = Number(cfg.max_order_quantity)
     orderForm.value = {
       // 0=不限制; null/undefined/NaN 回退默认 7
       order_advance_days: cfg.order_advance_days != null && cfg.order_advance_days !== '' && !isNaN(advanceDays)
@@ -580,11 +576,6 @@ const fetchOrderConfig = async () => {
         : 7,
       order_deadline_time: cfg.order_deadline_time || '15:00',
       cancel_deadline_time: cfg.cancel_deadline_time || '15:00',
-      // 0=不限制; null/undefined/NaN 回退默认 10
-      max_order_quantity: cfg.max_order_quantity != null && cfg.max_order_quantity !== '' && !isNaN(maxQty)
-        ? maxQty
-        : 10,
-      allow_cross_day_order: cfg.allow_cross_day_order === true || cfg.allow_cross_day_order === 'true',
     }
   } catch {
     /* 拦截器提示 */
@@ -611,8 +602,6 @@ const saveOrderConfig = async () => {
       { key: 'order_advance_days', value: String(orderForm.value.order_advance_days) },
       { key: 'order_deadline_time', value: orderForm.value.order_deadline_time },
       { key: 'cancel_deadline_time', value: orderForm.value.cancel_deadline_time },
-      { key: 'max_order_quantity', value: String(orderForm.value.max_order_quantity) },
-      { key: 'allow_cross_day_order', value: String(orderForm.value.allow_cross_day_order) },
     ])
     ElMessage.success('订餐配置已保存')
     orderConfigVisible.value = false
@@ -1117,14 +1106,6 @@ onMounted(() => {
             />
             <span class="ml-3 text-xs text-text-muted">前一天此时间后不可取消次日</span>
           </ElFormItem>
-          <ElFormItem label="单次最大订餐数">
-            <ElInputNumber v-model="orderForm.max_order_quantity" :min="0" :max="100" />
-            <span class="ml-3 text-xs text-text-muted">0=不限制</span>
-          </ElFormItem>
-          <ElFormItem label="允许跨日订餐">
-            <ElSwitch v-model="orderForm.allow_cross_day_order" />
-            <span class="ml-3 text-xs text-text-muted">关闭后仅可订当日菜品</span>
-          </ElFormItem>
         </ElForm>
         <div class="mb-4 rounded-lg bg-bg-secondary px-4 py-3 text-xs text-text-muted">
           <div class="font-medium text-text">规则说明</div>
@@ -1132,7 +1113,7 @@ onMounted(() => {
             <li>次日订单须在前一天截止时间之前下单/取消,过后不允许。</li>
             <li>当天订单和历史订单不受此限制。</li>
             <li>可提前预订天数设为 0 表示不限制(只要发布了菜单即可订)。</li>
-            <li>单次最大订餐数设为 0 表示不限制。</li>
+            <li>单份菜品的数量上限由菜品管理中的「单次限购」控制。</li>
           </ul>
         </div>
         <template #footer>

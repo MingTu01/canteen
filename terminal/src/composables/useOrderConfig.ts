@@ -12,16 +12,12 @@ export interface OrderConfig {
   order_advance_days: number
   order_deadline_time: string
   cancel_deadline_time: string
-  max_order_quantity: number
-  allow_cross_day_order: boolean
 }
 
 const config = ref<OrderConfig>({
   order_advance_days: 7,
   order_deadline_time: '15:00',
   cancel_deadline_time: '15:00',
-  max_order_quantity: 10,
-  allow_cross_day_order: true,
 })
 let loaded = false
 let loadedStoreId: number | null = null
@@ -50,11 +46,6 @@ export function useOrderConfig() {
             : 7,
           order_deadline_time: d.order_deadline_time || '15:00',
           cancel_deadline_time: d.cancel_deadline_time || '15:00',
-          // 0=不限制单次最大订餐数
-          max_order_quantity: d.max_order_quantity != null && d.max_order_quantity !== ''
-            ? (parseInt(d.max_order_quantity) || 0)
-            : 10,
-          allow_cross_day_order: d.allow_cross_day_order === 'true',
         }
         loaded = true
         loadedStoreId = storeId ?? null

@@ -6,8 +6,6 @@ export interface OrderConfig {
   order_advance_days: string | number
   order_deadline_time: string
   cancel_deadline_time: string
-  max_order_quantity: string | number
-  allow_cross_day_order: string | boolean
   /** 未订餐用餐手续费开关/金额(按餐别) */
   unsolicited_fee_enabled: string | boolean
   unsolicited_fee_breakfast: string | number

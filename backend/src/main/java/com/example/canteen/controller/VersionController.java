@@ -229,7 +229,6 @@ public class VersionController {
         // 订餐配置 key(含未订餐用餐手续费,H5 未订餐用餐页读取)
         String[] orderKeys = {
             "order_advance_days", "order_deadline_time", "cancel_deadline_time",
-            "max_order_quantity", "allow_cross_day_order",
             "unsolicited_fee_enabled", "unsolicited_fee_breakfast",
             "unsolicited_fee_lunch", "unsolicited_fee_dinner"
         };
@@ -264,8 +263,6 @@ public class VersionController {
                     value = switch (key) {
                         case "order_advance_days" -> "7";
                         case "order_deadline_time", "cancel_deadline_time" -> "15:00";
-                        case "max_order_quantity" -> "10";
-                        case "allow_cross_day_order" -> "true";
                         case "unsolicited_fee_enabled" -> "false";
                         case "unsolicited_fee_breakfast", "unsolicited_fee_lunch", "unsolicited_fee_dinner" -> "0";
                         default -> "";
@@ -278,8 +275,6 @@ public class VersionController {
             result.put("order_advance_days", "7");
             result.put("order_deadline_time", "15:00");
             result.put("cancel_deadline_time", "15:00");
-            result.put("max_order_quantity", "10");
-            result.put("allow_cross_day_order", "true");
             result.put("unsolicited_fee_enabled", "false");
             result.put("unsolicited_fee_breakfast", "0");
             result.put("unsolicited_fee_lunch", "0");
