@@ -448,9 +448,13 @@ const fetchMenuDatesForRange = async (start: string, end: string): Promise<void>
   const storeId = authStore.storeId
   if (!storeId) return
   // 收集窗口覆盖的月份集合(yyyy-m)
+  // 注意:必须从开始日期所在月的 1 号逐月推进,否则用"同一天 +1 月"推进时,
+  // 窗口结束日早于下月同一天会把下月整个跳过(如今天9/24、窗口到今天+14=10/8,
+  // 从9/24推进跳到10/24已超出窗口,10月被漏掉 → 10/1-4 菜单不显示)
   const monthSet = new Set<string>()
   const cursor = new Date(`${start}T00:00:00`)
   const endDate = new Date(`${end}T00:00:00`)
+  cursor.setDate(1)
   while (cursor <= endDate) {
     monthSet.add(`${cursor.getFullYear()}-${cursor.getMonth() + 1}`)
     cursor.setMonth(cursor.getMonth() + 1)
