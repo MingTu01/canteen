@@ -253,6 +253,7 @@ public class MenuService {
             inheritedPublished = existing.getPublished();
             deleteMenuInternal(existing.getId());
         }
+        Map<Long, Dish> dishById = new HashMap<>();
         if (dishIds != null && !dishIds.isEmpty()) {
             List<Dish> dishes = dishMapper.selectBatchIds(dishIds);
             if (dishes.size() != dishIds.size()) {
@@ -263,6 +264,7 @@ public class MenuService {
                     throw new BusinessException("菜品不属于本门店");
                 }
             }
+            dishById = dishes.stream().collect(Collectors.toMap(Dish::getId, d -> d));
         }
         // 继承原发布状态;新建菜单默认未发布(草稿),需手动发布后点菜端才可见
         if (menu.getPublished() == null) {
@@ -273,8 +275,6 @@ public class MenuService {
         int sortOrder = 0;
         // 固化价格/辣度快照:菜单保存时取菜品当前价/辣度写入 menu_item,
         // 之后菜品管理改价/改辣度不影响已存菜单与历史订单(新订旧菜单也用旧价)
-        Map<Long, Dish> dishById = dishes.stream()
-                .collect(Collectors.toMap(Dish::getId, d -> d));
         for (Long dishId : dishIds) {
             MenuItem item = new MenuItem();
             item.setMenuId(menu.getId());
