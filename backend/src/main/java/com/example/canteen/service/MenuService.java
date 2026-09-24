@@ -167,14 +167,7 @@ public class MenuService {
         }
 
         List<Long> dishIds = allItems.stream().map(MenuItem::getDishId).distinct().collect(Collectors.toList());
-        Map<Long, Dish> dishMapTemp = new HashMap<>();
-        if (!dishIds.isEmpty()) {
-            List<Dish> dishes = dishMapper.selectBatchIds(dishIds);
-            if (dishes != null) {
-                dishMapTemp = dishes.stream().collect(Collectors.toMap(Dish::getId, d -> d));
-            }
-        }
-        final Map<Long, Dish> dishMap = dishMapTemp;
+        final Map<Long, Dish> dishMap = buildDishMap(dishIds);
 
         Map<Long, List<MenuItem>> itemsByMenu = allItems.stream()
                 .collect(Collectors.groupingBy(MenuItem::getMenuId));
@@ -185,12 +178,38 @@ public class MenuService {
             dto.setMenu(menu);
             List<MenuItem> items = itemsByMenu.getOrDefault(menu.getId(), new ArrayList<>());
             List<MenuWithItemsDTO.ItemView> itemViews = items.stream()
-                    .map(it -> new MenuWithItemsDTO.ItemView(it, dishMap.get(it.getDishId())))
+                    .map(it -> {
+                        Dish d = dishMap.get(it.getDishId());
+                        // 快照优先:菜单保存时已固化价格/辣度,菜品管理后续改价/改辣度不影响已存菜单展示
+                        if (d != null && it.getPrice() != null) {
+                            Dish copy = new Dish();
+                            org.springframework.beans.BeanUtils.copyProperties(d, copy);
+                            copy.setPrice(it.getPrice());
+                            if (it.getSpiceLevel() != null) {
+                                copy.setSpiceLevel(it.getSpiceLevel());
+                            }
+                            d = copy;
+                        }
+                        return new MenuWithItemsDTO.ItemView(it, d);
+                    })
                     .collect(Collectors.toList());
             dto.setItems(itemViews);
             result.add(dto);
         }
         return result;
+    }
+
+    /** 批量查菜品并构建 dishId -> Dish 映射(空入参返回空 Map) */
+    private Map<Long, Dish> buildDishMap(List<Long> dishIds) {
+        Map<Long, Dish> map = new HashMap<>();
+        if (dishIds == null || dishIds.isEmpty()) return map;
+        List<Dish> dishes = dishMapper.selectBatchIds(dishIds);
+        if (dishes != null) {
+            for (Dish d : dishes) {
+                map.put(d.getId(), d);
+            }
+        }
+        return map;
     }
 
     public List<Map<String, Object>> getMenuDatesByMonth(Long storeId, int year, int month) {
@@ -252,10 +271,19 @@ public class MenuService {
         menuMapper.insert(menu);
 
         int sortOrder = 0;
+        // 固化价格/辣度快照:菜单保存时取菜品当前价/辣度写入 menu_item,
+        // 之后菜品管理改价/改辣度不影响已存菜单与历史订单(新订旧菜单也用旧价)
+        Map<Long, Dish> dishById = dishes.stream()
+                .collect(Collectors.toMap(Dish::getId, d -> d));
         for (Long dishId : dishIds) {
             MenuItem item = new MenuItem();
             item.setMenuId(menu.getId());
             item.setDishId(dishId);
+            Dish d = dishById.get(dishId);
+            if (d != null) {
+                item.setPrice(d.getPrice());
+                item.setSpiceLevel(d.getSpiceLevel());
+            }
             item.setSortOrder(sortOrder++);
             menuItemMapper.insert(item);
         }
@@ -410,11 +438,19 @@ public class MenuService {
             menuMapper.insert(newMenu);
 
             List<MenuItem> items = itemsByMenu.getOrDefault(src.getId(), Collections.emptyList());
+            // 复制=新菜单:按当前菜品价格/辣度重新固化快照(新菜单用新价格)
+            Map<Long, Dish> copyDishMap = buildDishMap(
+                    items.stream().map(MenuItem::getDishId).distinct().collect(Collectors.toList()));
             int sortOrder = 0;
             for (MenuItem it : items) {
                 MenuItem ni = new MenuItem();
                 ni.setMenuId(newMenu.getId());
                 ni.setDishId(it.getDishId());
+                Dish d = copyDishMap.get(it.getDishId());
+                if (d != null) {
+                    ni.setPrice(d.getPrice());
+                    ni.setSpiceLevel(d.getSpiceLevel());
+                }
                 ni.setSortOrder(sortOrder++);
                 menuItemMapper.insert(ni);
             }

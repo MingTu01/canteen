@@ -12,4 +12,13 @@
         </foreach>
         ORDER BY menu_id, sort_order
     </select>
+
+    <!-- 菜单价格快照:按 (门店,日期,餐次,菜品) 查 menu_item 固化价;查不到(未订餐用餐/无菜单)返回 null -->
+    <select id="selectSnapshotPriceByStoreDateMealDish" resultType="java.math.BigDecimal">
+        SELECT mi.price FROM menu_item mi
+        INNER JOIN menu m ON mi.menu_id = m.id
+        WHERE m.store_id = #{storeId} AND m.date = #{date} AND m.meal_type = #{mealType}
+          AND mi.dish_id = #{dishId}
+        LIMIT 1
+    </select>
 </mapper>

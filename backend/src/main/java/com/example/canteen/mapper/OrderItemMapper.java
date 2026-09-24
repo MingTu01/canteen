@@ -18,12 +18,14 @@ public interface OrderItemMapper extends BaseMapper<OrderItem> {
 
     /**
      * 订餐汇总:按门店+日期+餐次(可选)统计各菜品订购数量,供厨师备料使用。
-     * 仅统计有效订单(status=1 待完成 或 2 已完成),排除已取消(status=3)。
+     * 仅排除已取消(status=3);待用餐(1)+已用餐(2)+未就餐(4)均计入,未就餐是已出菜但没人吃,
+     * 份额不能消失。consumed(已食用)=status2,remaining(剩余)=status1+4,且 consumed+remaining=quantity。
      *
      * @param storeId  门店 ID
      * @param date     订餐日期(必填)
      * @param mealType 餐次 1早 2中 3晚(为 null 则统计全部餐次)
-     * @return 每行:dishId, dishName, price, quantity(订购总数), orderCount(订单数)
+     * @return 每行:dishId, dishName, price, quantity(订购总数), consumed(已食用),
+     *         remaining(剩余), orderCount(菜品维度的订单数)
      */
     List<Map<String, Object>> selectDishOrderSummary(@Param("storeId") Long storeId,
                                                      @Param("date") LocalDate date,

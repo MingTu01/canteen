@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import Layout from '@/components/Layout.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import ChiliIcon from '@/components/ChiliIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { menuApi, dishApi, systemApi } from '@/api'
 import type { Dish, MenuWithItems } from '@/api'
@@ -795,8 +796,14 @@ onMounted(() => {
                         <div class="truncate text-sm font-medium text-text">
                           {{ it.dish?.name || '未知菜品' }}
                         </div>
-                        <div class="mt-0.5 text-xs tabular-nums text-text-muted">
-                          ¥{{ Number(it.dish?.price ?? 0).toFixed(2) }}
+                        <div class="mt-0.5 flex items-center gap-1.5 text-xs tabular-nums text-text-muted">
+                          <span
+                            v-if="it.dish?.spiceLevel && it.dish.spiceLevel > 0"
+                            class="flex items-center gap-0.5 text-red-500"
+                          >
+                            <ChiliIcon v-for="n in it.dish.spiceLevel" :key="n" :size="12" />
+                          </span>
+                          <span>¥{{ Number(it.dish?.price ?? 0).toFixed(2) }}</span>
                         </div>
                       </div>
                       <ElButton
@@ -1023,6 +1030,12 @@ onMounted(() => {
                   >
                     <div class="flex-1 min-w-0">
                       <span class="text-sm font-medium">{{ d.name }}</span>
+                      <span
+                        v-if="d.spiceLevel && d.spiceLevel > 0"
+                        class="ml-1 inline-flex items-center gap-0.5 align-middle text-red-500"
+                      >
+                        <ChiliIcon v-for="n in d.spiceLevel" :key="n" :size="12" />
+                      </span>
                       <span class="ml-2 text-xs text-gray-500">¥{{ Number(d.price).toFixed(2) }}</span>
                     </div>
                     <ElButton type="primary" size="small" circle :icon="Plus" @click.stop="addDish(d.id!)" />
@@ -1047,6 +1060,12 @@ onMounted(() => {
                   >
                     <div class="flex-1 min-w-0">
                       <span class="text-sm font-medium">{{ d.name }}</span>
+                      <span
+                        v-if="d.spiceLevel && d.spiceLevel > 0"
+                        class="ml-1 inline-flex items-center gap-0.5 align-middle text-red-500"
+                      >
+                        <ChiliIcon v-for="n in d.spiceLevel" :key="n" :size="12" />
+                      </span>
                       <span class="ml-2 text-xs text-gray-500">¥{{ Number(d.price).toFixed(2) }}</span>
                     </div>
                     <ElButton type="danger" size="small" circle :icon="X" @click.stop="removeDish(d.id!)" />

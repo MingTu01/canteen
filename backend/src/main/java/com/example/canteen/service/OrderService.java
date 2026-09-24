@@ -17,6 +17,7 @@ import com.example.canteen.exception.BusinessException;
 import com.example.canteen.mapper.DepartmentMapper;
 import com.example.canteen.mapper.DishMapper;
 import com.example.canteen.mapper.EmployeeMapper;
+import com.example.canteen.mapper.MenuItemMapper;
 import com.example.canteen.mapper.OrderItemMapper;
 import com.example.canteen.mapper.OrderMapper;
 import com.example.canteen.security.SecurityContext;
@@ -45,6 +46,7 @@ public class OrderService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final DishMapper dishMapper;
+    private final MenuItemMapper menuItemMapper;
     private final EmployeeMapper employeeMapper;
     private final DepartmentMapper departmentMapper;
     private final JdbcTemplate jdbcTemplate;
@@ -52,14 +54,15 @@ public class OrderService {
     private final DiningTimeSlotService diningTimeSlotService;
 
     public OrderService(OrderMapper orderMapper, OrderItemMapper orderItemMapper,
-                        DishMapper dishMapper, EmployeeMapper employeeMapper,
-                        DepartmentMapper departmentMapper,
+                        DishMapper dishMapper, MenuItemMapper menuItemMapper,
+                        EmployeeMapper employeeMapper, DepartmentMapper departmentMapper,
                         JdbcTemplate jdbcTemplate,
                         WechatNotifyService wechatNotifyService,
                         DiningTimeSlotService diningTimeSlotService) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.dishMapper = dishMapper;
+        this.menuItemMapper = menuItemMapper;
         this.employeeMapper = employeeMapper;
         this.departmentMapper = departmentMapper;
         this.jdbcTemplate = jdbcTemplate;
@@ -303,6 +306,8 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
 
         BigDecimal totalAmount = BigDecimal.ZERO;
+        // 单价快照:正常订餐优先用菜单固化价(菜品改价不影响已订/已发菜单),未订餐用餐或无快照回退 dish 实时价
+        Map<Long, BigDecimal> unitPriceMap = new HashMap<>();
         for (OrderItemDTO itemDTO : dto.getItems()) {
             Dish dish = dishMap.get(itemDTO.getDishId());
             if (dish == null) {
@@ -323,7 +328,16 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
                 throw new BusinessException("超过单次限购:" + dish.getName());
             }
             // 库存校验已移除(库存功能下线,保留会阻止 stock=0 菜品下单)
-            totalAmount = totalAmount.add(dish.getPrice().multiply(BigDecimal.valueOf(quantity)));
+            BigDecimal unitPrice = dish.getPrice();
+            if (!isUnsolicited) {
+                BigDecimal snapshot = menuItemMapper.selectSnapshotPriceByStoreDateMealDish(
+                        storeId, orderDate, dto.getMealType(), itemDTO.getDishId());
+                if (snapshot != null) {
+                    unitPrice = snapshot;
+                }
+            }
+            unitPriceMap.put(itemDTO.getDishId(), unitPrice);
+            totalAmount = totalAmount.add(unitPrice.multiply(BigDecimal.valueOf(quantity)));
         }
 
         // 未订餐用餐手续费:按餐别读取门店配置,正常订餐为 0
@@ -368,7 +382,8 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
             item.setOrderId(order.getId());
             item.setDishId(dish.getId());
             item.setDishName(dish.getName());
-            item.setPrice(dish.getPrice());
+            // 价格快照:与下单计价一致,新订旧菜单用旧价(菜品改价不影响历史订单)
+            item.setPrice(unitPriceMap.get(itemDTO.getDishId()));
             item.setQuantity(itemDTO.getQuantity());
             orderItemMapper.insert(item);
         }

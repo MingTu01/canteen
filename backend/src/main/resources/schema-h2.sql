@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS menu_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     menu_id BIGINT NOT NULL,
     dish_id BIGINT NOT NULL,
+    price DECIMAL(10,2),
+    spice_level INT,
     sort_order INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_menu_dish UNIQUE (menu_id, dish_id)

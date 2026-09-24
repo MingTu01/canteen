@@ -261,7 +261,9 @@ public class OrderController {
 
     /**
      * 订餐汇总:按门店+日期+餐次(可选)统计各菜品订购数量,供厨师备料导出。
-     * 仅统计有效订单(status=1 待完成 / 2 已完成),排除已取消。
+     * 统计口径:待用餐(1)+已用餐(2)+未就餐(4),排除已取消(3)——取消的菜未做,未就餐的菜已做。
+     * 每行返回 quantity(总份数)/consumed(已食用=2)/remaining(剩余=1+4),三者满足
+     * consumed + remaining = quantity;totalXXX 为各行求和,totalOrders 为去重订单数。
      */
     @GetMapping("/summary/{storeId}")
     public ApiResponse<Map<String, Object>> getOrderSummary(
