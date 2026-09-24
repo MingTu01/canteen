@@ -71,9 +71,9 @@ const FALLBACK_CARD_HELPER: DownloadItem = {
 }
 
 const FALLBACK_TERMINAL: DownloadItem = {
-  name: 'CanteenTerminal-Setup-1.0.18.exe',
-  version: '1.0.18',
-  url: 'https://github.com/MingTu01/canteen/releases/download/1.0.18/CanteenTerminal-Setup-1.0.18.exe',
+  name: 'CanteenTerminal-Setup-2.0.15.exe',
+  version: '2.0.15',
+  url: 'https://github.com/MingTu01/canteen/releases/download/V2.0.15/CanteenTerminal-Setup-2.0.15.exe',
   notes: '食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。',
   publishedAt: '',
   source: 'fallback',
@@ -110,12 +110,13 @@ export function useDownloadCenter() {
         const data = await res.json()
         const ver = data?.terminal?.version
         if (!ver) continue
-        // tag 与 version 一致(从 1.0.18 起统一无 v 前缀)
+        // 2.x 起 GitHub Release tag 统一带 V 前缀(如 V2.0.15);1.x 无前缀(如 1.0.18)
+        const tag = ver.startsWith('2.') ? `V${ver}` : ver
         const fileName = `CanteenTerminal-Setup-${ver}.exe`
         return {
           name: fileName,
           version: ver,
-          url: `https://github.com/${REPO}/releases/download/${ver}/${fileName}`,
+          url: `https://github.com/${REPO}/releases/download/${tag}/${fileName}`,
           publishedAt: '',
           notes: '食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。',
           source: 'raw',
