@@ -1263,9 +1263,6 @@ onMounted(() => {
     align-items: center;
     gap: 1px;
     flex-shrink: 0;
-  }
-
-  &__dish-spice-icon {
     color: #ef4444;
   }
 
