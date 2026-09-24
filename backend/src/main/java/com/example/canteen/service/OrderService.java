@@ -306,7 +306,8 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
         }
 
         BigDecimal totalAmount = BigDecimal.ZERO;
-        // 单价快照:正常订餐优先用菜单固化价(菜品改价不影响已订/已发菜单),未订餐用餐或无快照回退 dish 实时价
+        // 单价快照:订餐与未订餐用餐统一优先用菜单固化价(菜单发布即生成快照,菜品改价不影响已订/已发菜单),
+        // 仅当该门店该餐次未发布菜单(无快照)时才回退 dish 实时价
         Map<Long, BigDecimal> unitPriceMap = new HashMap<>();
         for (OrderItemDTO itemDTO : dto.getItems()) {
             Dish dish = dishMap.get(itemDTO.getDishId());
@@ -328,13 +329,12 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
                 throw new BusinessException("超过单次限购:" + dish.getName());
             }
             // 库存校验已移除(库存功能下线,保留会阻止 stock=0 菜品下单)
+            // 快照价查询不区分订餐/未订餐用餐:菜单发布即固化价格,现场加餐同样按菜单价收费
             BigDecimal unitPrice = dish.getPrice();
-            if (!isUnsolicited) {
-                BigDecimal snapshot = menuItemMapper.selectSnapshotPriceByStoreDateMealDish(
-                        storeId, orderDate, dto.getMealType(), itemDTO.getDishId());
-                if (snapshot != null) {
-                    unitPrice = snapshot;
-                }
+            BigDecimal snapshot = menuItemMapper.selectSnapshotPriceByStoreDateMealDish(
+                    storeId, orderDate, dto.getMealType(), itemDTO.getDishId());
+            if (snapshot != null) {
+                unitPrice = snapshot;
             }
             unitPriceMap.put(itemDTO.getDishId(), unitPrice);
             totalAmount = totalAmount.add(unitPrice.multiply(BigDecimal.valueOf(quantity)));
