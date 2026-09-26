@@ -7,14 +7,14 @@
 | 操作系统 | CentOS 7+/8/9、Ubuntu 18.04+/20.04/22.04/24.04、Debian 10+ |
 | 内存 | ≥ 2GB（推荐 4GB） |
 | 磁盘 | ≥ 10GB（含 Docker 镜像 + 数据） |
-| 端口 | 18080（管理后台）、18081（H5 订餐）、18082（后端 API）、13306/16379（仅 127.0.0.1） |
+| 端口 | 18080（管理后台）、18081（H5 订餐）、18082（后端 API）、13306/16379（MySQL/Redis）；**均仅绑定 127.0.0.1**，外网经反向代理访问 |
 | 软件 | Docker + Docker Compose（由部署脚本自动安装） |
 
-> X86 终端为独立 Windows 安装包，不参与 Docker 部署，详见 `src-python/` 目录。
+> X86 取餐终端为独立 Windows EXE 安装包，不参与 Docker 部署。当前主用 **V3（`x86-v3/`，3.0.6）**，保留 **V2（`x86-v2/`，2.0.15）**；两目录为本地工程（已 gitignore），详见第八章。
 
 ---
 
-## 〇、分支架构说明（v0.7.0+）
+## 〇、分支架构说明
 
 本仓库采用**双分支架构**，将源代码与部署产物分离：
 
@@ -116,13 +116,13 @@ sudo bash /tmp/canteen-install.sh /opt/my-canteen
 
 #### 步骤 1：获取 ZIP 包
 
-开发机构建后生成的 ZIP 包：`canteen-deploy-v0.0.8.zip`（约 47MB），包含全部部署产物。
+开发机生成的 ZIP 包：`canteen-deploy-v0.7.55.zip`（约 47MB，文件名取 `VERSIONS.json` 的 `system.version`，输出到仓库的上一级目录），包含全部部署产物。用 [pack_deploy_zip.py](pack_deploy_zip.py) 从 deploy 分支打包。
 
 #### 步骤 2：上传到服务器
 
 ```bash
 # 用 scp 上传（替换为你的服务器 IP 和用户名）
-scp canteen-deploy-v0.0.8.zip canteen@<服务器IP>:/tmp/
+scp canteen-deploy-v0.7.55.zip canteen@<服务器IP>:/tmp/
 
 # 或用 1Panel 面板上传到 /tmp/ 目录
 ```
@@ -136,7 +136,7 @@ sudo chown -R $(whoami):$(whoami) /opt/canteen
 
 # 解压 ZIP 包到 /opt/canteen
 cd /opt/canteen
-unzip /tmp/canteen-deploy-v0.0.8.zip
+unzip /tmp/canteen-deploy-v0.7.55.zip
 chmod +x *.sh scripts/*.sh
 
 # 用 sudo 运行 deploy.sh
@@ -186,13 +186,19 @@ sudo ./deploy.sh --skip-env
 
 ### 1.4 部署后访问
 
-部署完成后会输出访问地址（IP 根据服务器自动检测）：
+出于安全考虑（P0-1），`docker-compose.yml` 中所有容器端口只绑定 `127.0.0.1`，**只能在服务器本机访问**：
 
-| 服务 | 地址 |
-|------|------|
-| 管理后台 | `http://<服务器IP>:18080` |
-| H5 订餐端 | `http://<服务器IP>:18081` |
-| 后端 API | `http://<服务器IP>:18082` |
+| 服务 | 服务器本机地址 | 容器端口 |
+|------|----------------|----------|
+| 管理后台 | `http://localhost:18080` | 80 |
+| H5 订餐端 | `http://localhost:18081` | 80 |
+| 后端 API | `http://localhost:18082` | 8080 |
+| MySQL | `127.0.0.1:13306` | 3306 |
+| Redis | `127.0.0.1:16379` | 6379 |
+
+**外网访问必须配置反向代理**（1Panel 网站 / Nginx），把域名转发到上述本机端口，例如 `https://canteen.example.com` → `127.0.0.1:18080`（管理后台）、`→ 127.0.0.1:18081`（H5）。不要将 18080/18081/18082 直接暴露到公网。
+
+> `deploy.sh` 部署完成时会打印 `http://<服务器IP>:端口` 形式的提示，那只是探活用的示意地址；实际访问请以反向代理域名或服务器本机 `localhost` 为准。
 
 使用部署时设置的超管账号密码登录管理后台。
 
@@ -310,11 +316,11 @@ canteen
 
 ```
 ╔══════════════════════════════════════════════╗
-║   企业智慧食堂系统 - 管理面板                 ║
+║   企业智慧食堂系统 - 管理面板 V2              ║
 ╠══════════════════════════════════════════════╣
-║  系统版本: v0.7.0    状态: ● 全部运行中       ║
-║  后端: v0.0.16  管理后台: v0.0.16  H5: v0.0.14 ║
-║  终端: v1.0.4  分支: deploy                   ║
+║  系统版本: v0.7.55   状态: ● 全部运行中       ║
+║  后端: v0.0.76  管理后台: v0.0.56  H5: v0.0.58 ║
+║  终端: v3.0.6   分支: deploy                  ║
 ╠══════════════════════════════════════════════╣
 ║                                              ║
 ║  【升级】                                     ║
@@ -340,6 +346,9 @@ canteen
 ║  14) 系统诊断 (OS/CPU/内存/磁盘/Docker/端口)  ║
 ║  15) 清理 Docker 镜像 (释放磁盘空间)          ║
 ║  16) 查看配置信息 (.env 关键配置脱敏展示)     ║
+║  17) 数据库/项目自检自愈 (崩溃自动修复)       ║
+║  18) 后台定时自愈监控 (每 5 分钟)             ║
+║  19) 重置数据库 (清空业务数据,保留超管)       ║
 ║                                              ║
 ║   0) 退出                                     ║
 ╚══════════════════════════════════════════════╝
@@ -848,33 +857,47 @@ sudo systemctl stop canteen
 
 ## 八、X86 终端部署
 
-X86 终端为 Windows 独立安装包，用于食堂现场刷卡订餐。
+X86 终端为 Windows 独立安装包，用于食堂现场刷卡/扫码取餐，不参与 Docker 部署。
+
+**版本代数：**
+
+| 代次 | 目录 | 版本 | 状态 |
+|------|------|------|------|
+| V1 | （原仓库根 `terminal/` + `src-python/`） | 1.0.x | 已淘汰，源码与旧安装包已清理 |
+| V2 | `x86-v2/` | 2.0.15 | 保留，兼容旧终端升级 |
+| V3 | `x86-v3/` | **3.0.6** | 当前主用，新装机一律使用 |
+
+> `x86-v2/`、`x86-v3/` 为本地工程目录（含 `terminal/` 前端 + `src-python/` 桌面壳 + `VERSIONS.json`），因体积大已被 `.gitignore` 忽略，不随仓库分发。
 
 ### 8.1 打包
 
-在 Windows 上运行：
+在 Windows 打包机上进入对应版本目录运行：
 
 ```bash
-cd src-python
+cd x86-v3/src-python
 python build_installer.py
 ```
 
-产物：`output/CanteenTerminal-Setup-1.0.0.exe`
+产物：`x86-v3/src-python/output/CanteenTerminal-Setup-3.0.6.exe`
+
+前置条件：Node.js 18+、Python 3.10 **32 位**（含 PyQt5 / PyQtWebEngine / pyinstaller）、Inno Setup 6+、CH375 驱动位于 `src-python/drivers/`。版本号由 `build_installer.py` 从同目录 `VERSIONS.json` 的 `terminal.version` 自动同步。
 
 ### 8.2 安装与使用
 
 1. 双击安装包，按向导完成安装
 2. 启动后进入全屏无边框模式
-3. 点击右上角 6 次（2 秒内）进入管理模式
+3. 连续点击窗口右上角 6 次（2 秒内）进入管理模式
 4. 输入管理员密码，配置后端地址（`https://canteen.908521.xyz` 或自部署地址）
-5. 绑定食堂：使用店长账号登录绑定本终端到对应食堂
+5. 绑定食堂：使用店长账号 + 食堂安全码绑定本终端到对应食堂
 
-### 8.3 卸载
+### 8.3 发布与卸载
 
-卸载程序会自动关闭运行中的进程并清理：
-- 安装目录（`C:\Program Files\CanteenTerminal`）
-- 应用数据（`%APPDATA%\CanteenTerminal`）
-- 本地缓存（`%LOCALAPPDATA%\CanteenTerminal`）
+- 将 `CanteenTerminal-Setup-<版本>.exe` 上传到 GitHub Releases（资产名固定），管理后台「下载中心」会自动跟随最新版本。
+- 卸载程序会自动关闭运行中的进程并清理：
+  - 安装目录（`C:\Program Files\CanteenTerminal`）
+  - 应用数据（`%APPDATA%\CanteenTerminal`）
+  - 本地缓存（`%LOCALAPPDATA%\CanteenTerminal`）
+- 卸载向导提供可选「移除 CH375 驱动」复选框（默认不勾选，勾选后二次确认）。
 
 ---
 
@@ -888,9 +911,10 @@ enterprise-canteen/
 ├── canteen.sh                 # 服务器管理面板（输入 canteen 打开）
 ├── deploy.sh                  # 部署 CLI 入口
 ├── pack_deploy_zip.py         # 打包 deploy 分支为 zip（离线部署用）
+├── push_via_proxy.py          # 带加速器推送 deploy 分支的辅助脚本
 ├── docker-compose.yml         # Docker 编排配置
-├── VERSIONS.json              # 版本号集中管理
-├── .env / .env.example        # 环境变量
+├── VERSIONS.json              # 版本号集中管理（含各端 changelog）
+├── .env / .env.example        # 环境变量（.env 不入库）
 ├── .github/workflows/
 │   └── deploy.yml            # GitHub Actions CI（自动构建并发布到 deploy 分支）
 ├── scripts/
@@ -899,14 +923,25 @@ enterprise-canteen/
 │   ├── upgrade.sh            # 安全升级（分支感知：deploy免构建/main构建）
 │   ├── update.sh             # 快速更新（无备份，仅 main 分支开发用）
 │   ├── snapshot.sh           # 快照管理（创建/列出/恢复/清理）
-│   ├── backup.sh             # 数据库备份（mysqldump）
+│   ├── backup.sh             # 数据库备份（mysqldump + AES-256）
 │   ├── restore.sh            # 数据库恢复
-│   └── cron_backup.sh        # 定时备份 cron 脚本
+│   ├── cron_backup.sh        # 定时备份 cron 脚本
+│   ├── self_heal.py          # 数据库/项目自检自愈
+│   ├── cron_self_heal.sh     # 定时自愈 cron 脚本（每 5 分钟）
+│   ├── clean-redeploy.sh     # 完全清理后重新部署
+│   ├── init-db-user.sh       # 创建 MySQL 应用专用用户（仅 DML 权限）
+│   ├── wechat_setup.py       # 微信公众号配置辅助
+│   ├── seed-dev.sql          # 开发测试数据
+│   └── gen_admin_tutorial_ppt.py  # 生成管理后台操作教程 PPT
 ├── backend/                   # Spring Boot 后端源码 + Dockerfile.runtime
 ├── admin-web/                 # 管理后台前端（Vue 3）
 ├── h5/                        # H5 订餐端前端（Vue 3）
-├── src-python/               # X86 终端（Python + PyQt5）
-├── deploy/                    # 构建产物输出目录（.gitignore 忽略）
+├── shared/                    # 前后端共用 TS 工具
+├── tools/                     # 调试工具（二维码验签测试页等）
+├── x86-v2/                    # X86 终端 V2（本地工程，.gitignore 忽略）
+├── x86-v3/                    # X86 终端 V3（本地工程，.gitignore 忽略）
+├── docs/                      # 需求 / 审查 / 部署文档
+├── deploy/                    # 构建产物输出目录（.gitignore 忽略，卷映射给容器）
 │   ├── backend/app.jar
 │   ├── admin-web/{html,nginx.conf}
 │   └── h5/{html,nginx.conf}

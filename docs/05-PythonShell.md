@@ -1,8 +1,10 @@
 # 05 · Python Shell 需求文档（src-python）
 
-> 版本：V0.0.3 ｜ 更新日期：2026-08-15
-> 代码路径：[src-python/](file:///d:/文档/enterprise-canteen/enterprise-canteen/src-python)
+> 文档版本：V0.0.4 ｜ 更新日期：2026-09-26 ｜ 对应代码版本：X86 终端 V3 = 3.0.6（V2 = 2.0.15 保留）
+> 代码路径：`x86-v3/src-python`（当前主用）/ `x86-v2/src-python`（V2 保留）— 两个目录为本地工程，未纳入仓库
 > 终端前端：详见 [04-X86终端.md](file:///d:/文档/enterprise-canteen/enterprise-canteen/docs/04-X86终端.md)
+>
+> 历史说明：V1（原仓库根 `src-python/`）已淘汰并清理；下文路径中的 `src-python/` 均指当前主用的 `x86-v3/src-python/`。
 
 ---
 

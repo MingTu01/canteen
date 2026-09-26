@@ -16,8 +16,8 @@
 #   deploy/h5/nginx.conf
 #
 # 说明:
-#   - X86 终端不在 Docker 中部署,改为在 Windows 上打包为独立 EXE 安装包
-#     (详见 src-python/build_installer.py)
+#   - X86 取餐终端不在 Docker 中部署,改为在 Windows 上打包为独立 EXE 安装包
+#     (当前主用 V3:详见 x86-v3/src-python/build_installer.py)
 #
 # 设计要点:
 #   - 使用 Docker 容器构建,宿主机无需安装 JDK/Node.js
@@ -165,7 +165,7 @@ case "$TARGET" in
     *)
         error "未知目标: $TARGET"
         echo "用法: $0 [all|backend|admin-web|h5]"
-        echo "提示:X86 终端打包请在 Windows 上运行 src-python/build_installer.py"
+        echo "提示:X86 取餐终端打包请在 Windows 上运行 x86-v3/src-python/build_installer.py"
         exit 1
         ;;
 esac

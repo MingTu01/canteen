@@ -13,8 +13,8 @@
 #   2. 在 Docker 容器中重新构建产物
 #   3. 重启对应服务(卷映射自动加载新产物)
 #
-# 注意:X86 终端不在 Docker 中部署,需在 Windows 上单独打包
-#       (运行 src-python/build_installer.py)
+# 注意:X86 取餐终端不在 Docker 中部署,需在 Windows 上单独打包
+#       (当前主用 V3:运行 x86-v3/src-python/build_installer.py)
 #==============================================================
 
 set -e

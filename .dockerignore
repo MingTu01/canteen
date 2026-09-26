@@ -6,8 +6,8 @@
 .git
 .github
 backend
-terminal
-src-python
+x86-v2
+x86-v3
 docs
 backup
 deploy

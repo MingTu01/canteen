@@ -6,8 +6,8 @@
 #   2. 业务产物(jar/dist/nginx.conf)通过卷映射挂入容器 → 替换文件 + 重启即可
 #   3. 持久化数据(MySQL/Redis/uploads/backup)全部映射到宿主机
 #   4. 日志轮转 50m × 3,避免 Docker json-file 撑爆磁盘
-#   5. X86 终端不参与 Docker 部署,在 Windows 上打包为独立 EXE 安装包
-#      (详见 src-python/installer.iss 与 src-python/build_installer.py)
+#   5. X86 取餐终端不参与 Docker 部署,在 Windows 上打包为独立 EXE 安装包
+#      (当前主用 V3:x86-v3/src-python/{build_installer.py,installer.iss};V2 保留于 x86-v2/)
 # =============================================================================
 #
 # 目录结构(由 deploy.sh / scripts/build.sh 自动创建):

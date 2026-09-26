@@ -51,14 +51,9 @@ canteen-mysqldump-err.log
 # 构建产物输出目录(由 scripts/build.sh 生成,卷映射到容器)
 deploy/
 
-# Python Shell 运行时数据(IndexedDB/Local Storage/缓存等)
-src-python/data/
-src-python/build/
-src-python/dist/
-
-# Python 终端一键打包工作区与运行库(由 build_installer.py 生成/下载,不提交)
+# X86 终端源码与一键打包工作区(本地维护,含 node_modules/redist/安装包,不提交)
 x86-v2/
-src-python/redist/
+x86-v3/
 
 # Docker
 docker-compose.override.yml
