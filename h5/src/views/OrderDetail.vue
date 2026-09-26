@@ -88,9 +88,9 @@ const onCancel = (): void => {
       try {
         await cancelOrder(orderId)
         showSuccessToast('订单已取消')
-        // 取消后金额退回余额,刷新员工信息以更新余额显示
+        // 取消后订单直接清理删除,金额退回余额;刷新余额后返回订单列表
         await authStore.refreshEmployee()
-        loadDetail()
+        router.back()
       } catch {
         /* 拦截器已提示 */
       }

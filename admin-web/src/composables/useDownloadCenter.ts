@@ -71,9 +71,9 @@ const FALLBACK_CARD_HELPER: DownloadItem = {
 }
 
 const FALLBACK_TERMINAL: DownloadItem = {
-  name: 'CanteenTerminal-Setup-2.0.15.exe',
-  version: '2.0.15',
-  url: 'https://github.com/MingTu01/canteen/releases/download/V2.0.15/CanteenTerminal-Setup-2.0.15.exe',
+  name: 'CanteenTerminal-Setup-3.0.6.exe',
+  version: '3.0.6',
+  url: 'https://github.com/MingTu01/canteen/releases/download/v3.0.6/CanteenTerminal-Setup-3.0.6.exe',
   notes: '食堂刷卡取餐终端(Windows),支持读卡器/摄像头扫码,安装到 X86 一体机。',
   publishedAt: '',
   source: 'fallback',
@@ -110,8 +110,9 @@ export function useDownloadCenter() {
         const data = await res.json()
         const ver = data?.terminal?.version
         if (!ver) continue
-        // 2.x 起 GitHub Release tag 统一带 V 前缀(如 V2.0.15);1.x 无前缀(如 1.0.18)
-        const tag = ver.startsWith('2.') ? `V${ver}` : ver
+        // GitHub Release tag 前缀以发布者为准:2.x 用大写 V(V2.0.15),3.x 当前用 小写 v(v3.0.6)。
+        // 此路径为降级(API 不可用时),拼接可能与实际 tag 不符导致 404,届时可换 API/加速器路径。
+        const tag = ver.startsWith('2.') ? `V${ver}` : ver.startsWith('3.') ? `v${ver}` : ver
         const fileName = `CanteenTerminal-Setup-${ver}.exe`
         return {
           name: fileName,
@@ -210,9 +211,10 @@ export function useDownloadCenter() {
         apiTerminal = found.terminalItem
       }
 
-      // 3. 合并:raw 优先(raw 拿到的终端版本最新),API 补充读卡助手和发布时间
-      // 终端:raw 优先(API 可能因缓存延迟),都没有用备用
-      terminal.value = rawTerminal || apiTerminal || FALLBACK_TERMINAL
+      // 3. 合并:终端 API 优先(browser_download_url 天然带正确 tag,自动跟随最新 Release;
+      //    raw 读 VERSIONS.json 作国内降级),都没有用备用
+      // 终端:API 优先(自动跟随最新发布) → raw(VERSIONS.json,国内可用) → 备用
+      terminal.value = apiTerminal || rawTerminal || FALLBACK_TERMINAL
       // 读卡助手:VERSIONS.json 没有,只能靠 API 或备用
       cardHelper.value = apiCardHelper || FALLBACK_CARD_HELPER
     } catch {

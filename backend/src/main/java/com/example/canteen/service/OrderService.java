@@ -1,6 +1,7 @@
 package com.example.canteen.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.example.canteen.dto.OrderCreateDTO;
 import com.example.canteen.dto.OrderItemDTO;
@@ -595,21 +596,22 @@ private void checkAdvanceOrderDeadline(Long storeId, LocalDate orderDate, String
             throw new BusinessException("员工已禁用,无法取消订单");
         }
 
-        // P0-4 原子状态更新:仅 status=1 可取消,防并发重复退款
-        // 使用 UpdateWrapper+字符串列名,兼容单元测试
-        int rows = orderMapper.update(null, new UpdateWrapper<Order>()
+        // 需求:已取消的订单直接清理,不保留 status=3 历史数据(用户取消后记录不再留存)
+        // P0-4 原子删除:仅 status=1 可删,防并发重复退款
+        int rows = orderMapper.delete(new QueryWrapper<Order>()
                 .eq("id", orderId)
-                .eq("status", OrderStatus.PENDING.getCode())
-                .set("status", OrderStatus.CANCELED.getCode()));
-        order.setStatus(OrderStatus.CANCELED.getCode());
+                .eq("status", OrderStatus.PENDING.getCode()));
         if (rows == 0) {
             throw new BusinessException("订单状态已变更");
         }
+        // 级联删除订单明细(order_item),不留孤儿数据
+        orderItemMapper.delete(new QueryWrapper<OrderItem>()
+                .eq("order_id", orderId));
 
-        // 退款(员工已预检存在,此处失败概率极低;若失败则事务回滚,订单状态恢复为 1)
+        // 退款(员工已预检存在,此处失败概率极低;若失败则事务回滚,订单恢复)
         int refundRows = employeeMapper.addBalance(order.getEmployeeId(), order.getTotalAmount());
         if (refundRows == 0) {
-            // 极端情况:预检通过但退款失败(如并发软删除),事务回滚,订单状态恢复
+            // 极端情况:预检通过但退款失败(如并发软删除),事务回滚,订单恢复
             log.error("退款失败:员工账户异常,orderId={}, employeeId={}, amount={}",
                     orderId, order.getEmployeeId(), order.getTotalAmount());
             throw new BusinessException("退款失败,订单未取消,请联系管理员处理");
