@@ -389,8 +389,14 @@ onMounted(fetchOrders)
 // ElTable 是泛型函数组件,InstanceType 不适用;仅需要 $el 拿 DOM
 const tableRef = ref<{ $el: HTMLElement }>()
 const topScrollbarRef = ref<HTMLElement>()
+/** 表格外层容器(用于测量表格顶部位置) */
+const tableWrapRef = ref<HTMLElement>()
+/** 卡片底部工具栏(分页/统计,用于扣除其占高) */
+const footerRef = ref<HTMLElement>()
 const tableScrollWidth = ref(0)
 const showTopScrollbar = ref(false)
+/** 表格内部滚动区高度上限:卡片占满一屏,订单超出时在表格内部滚动,不撑高整页 */
+const tableMaxHeight = ref<number>()
 
 /** 获取表格内部横向滚动容器(EP 2.x 为 .el-scrollbar__wrap) */
 const getTableWrap = (): HTMLElement | null => {
@@ -414,22 +420,47 @@ const syncFromTable = () => {
   if (wrap && topScrollbarRef.value) topScrollbarRef.value.scrollLeft = wrap.scrollLeft
 }
 
-/** 测量表格内容宽度:超出才显示上方滚动条,并挂载底部滚动监听(仅一次) */
-const setupTopScrollbar = async () => {
+/**
+ * 计算表格内部滚动区高度上限:
+ * 视口高度 - 表格在文档中的顶部位置 - 卡片底部工具栏高度 - 底部留白。
+ * 这样卡片刚好占满一屏,订单超出时只在表格内部出现滚动条,不产生整页滚动。
+ */
+const computeTableHeight = () => {
+  const wrap = tableWrapRef.value
+  const footer = footerRef.value
+  if (!wrap || !footer) return
+  // 文档坐标系下的表格顶部(不受当前页面滚动影响,始终按回到页顶时计算)
+  const docTop = wrap.getBoundingClientRect().top + window.scrollY
+  const BOTTOM_GAP = 24 // 与页面底部内边距对齐,避免出现整页滚动条
+  const h = window.innerHeight - docTop - footer.offsetHeight - BOTTOM_GAP
+  tableMaxHeight.value = Math.max(200, Math.floor(h))
+}
+
+/** 表格布局:先按一屏高度限定表体滚动区,再测量横向宽度并挂载滚动监听 */
+const setupTableLayout = async () => {
+  await nextTick()
+  computeTableHeight()
+  // 高度变化会触发 ElTable 重新布局,等一帧后再测横向宽度
   await nextTick()
   const wrap = getTableWrap()
   const top = topScrollbarRef.value
   if (!wrap || !top) return
   tableScrollWidth.value = wrap.scrollWidth
+  const prevShow = showTopScrollbar.value
   showTopScrollbar.value = wrap.scrollWidth > wrap.clientWidth
+  // 上方滚动条显隐会占用 12px 高度,变化时重算一次表体高度
+  if (prevShow !== showTopScrollbar.value) {
+    await nextTick()
+    computeTableHeight()
+  }
   if (!wrap.dataset.topbarSync) {
     wrap.addEventListener('scroll', syncFromTable)
     wrap.dataset.topbarSync = '1'
   }
 }
 
-watch(orders, () => { setupTopScrollbar() }, { flush: 'post' })
-const onWinResize = () => { setupTopScrollbar() }
+watch(orders, () => { setupTableLayout() }, { flush: 'post' })
+const onWinResize = () => { setupTableLayout() }
 window.addEventListener('resize', onWinResize)
 onUnmounted(() => {
   window.removeEventListener('resize', onWinResize)
@@ -502,10 +533,13 @@ watch(() => authStore.storeId, () => {
         >
           <div :style="{ width: `${tableScrollWidth}px`, height: '1px' }" />
         </div>
+        <!-- 表格外层容器:需 ref 用于测量表格顶部位置,以计算内部滚动区高度 -->
+        <div ref="tableWrapRef">
         <ElTable
           ref="tableRef"
           v-loading="loading"
           :data="flatRows"
+          :max-height="tableMaxHeight"
           style="width: 100%"
           :show-overflow-tooltip="true"
           highlight-current-row
@@ -571,8 +605,12 @@ watch(() => authStore.storeId, () => {
             <EmptyState description="暂无订单数据" />
           </template>
         </ElTable>
+        </div>
 
-        <div class="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
+        <div
+          ref="footerRef"
+          class="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3"
+        >
           <div class="flex flex-wrap items-center gap-3">
             <span class="text-xs text-text-muted">共 {{ total }} 条</span>
             <!-- 各订单状态条数:存在才显示,为 0 不显示 -->
