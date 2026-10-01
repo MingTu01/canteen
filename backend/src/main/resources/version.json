@@ -1,8 +1,9 @@
 {
-  "version": "0.0.76",
-  "buildTime": "2026-09-24",
+  "version": "0.0.77",
+  "buildTime": "2026-10-01",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.77 修复订单搜索报服务器内部错误:countByStatus(订单状态条数统计)的关键字分支误写了 employee 表的 card_no 列,而 order 表卡号快照列名是 employee_card_no(V29 迁移新增),关键字非空时该分支才拼入 SQL,导致 Unknown column 'card_no' 报 500——管理后台订单管理的姓名/会员号/订单号搜索一律失败(不搜索时正常);已改为 employee_card_no,与实体 @TableField 映射一致",
     "V0.0.75 删除订餐配置死键:移除从未生效的 max_order_quantity(单次最大订餐数)与 allow_cross_day_order(允许跨日订餐)两个配置项——前后端此前仅解析从不校验,实际限购由菜品级'单次限购'承担;StoreConfigController/VersionController 白名单与默认值、schema-h2 种子数据同步清理,历史迁移 V7 不动(已执行)",
     "V0.0.74 修复CI后端构建失败:MenuService.createMenu 快照固化代码把 dishes 变量声明在 if 块内、却在块外 dishes.stream() 引用,导致编译报错 cannot find symbol: variable dishes,V0.0.72/V0.0.73 两次 GitHub CI 后端构建均因此失败;已改为在方法级先声明 dishById 映射、if 块内构建,编译通过",
     "V0.0.73 未订餐用餐改按菜单快照价计费:下单计价不再区分订餐/未订餐用餐,统一按(门店+日期+餐次+菜品)查menu_item快照价(菜单发布即固化价格),现场加餐同样按菜单价收费,菜品管理改价不再影响未订餐用餐;仅该门店该餐次未发布菜单(无快照)时才回退菜品实时价",
@@ -17,7 +18,7 @@
     "V0.0.64 员工禁用全链路拦截+批量充值备注/员工名修复:①禁用员工(status=0)在 X86 终端订餐/取餐显示\"卡号不存在\"(卡号查询SQL本就过滤status=1)+终端取餐pickupForEmployee、H5确认取餐completeOrder、取消订单cancelOrder均新增禁用拦截(已订订单不处理,但不可取餐/不可取消),启用后恢复正常;②批量充值(余额预警批量充值)充值记录备注由\"余额充值\"改为\"批量充值\",配合admin-web充值记录页员工列表改为全量加载,批量充值记录正确显示员工姓名与备注",
     "V0.0.63 员工卡号改同店唯一、手机号改全系统唯一+删除食堂彻底清理员工:①修复\"删除旧食堂后新食堂无法复用相同卡号(报卡号已存在)\"——根因是 employee.card_no 为全局 UNIQUE 且删除食堂时员工仅软删除(is_deleted=1)残留;②卡号同一门店内唯一、跨门店可重复(V28迁移移除卡号全局唯一索引,新增 store_id+card_no 复合索引;EmployeeService查重由全局改为同店且仅校验活跃员工),刷卡消费仍可在同店内准确识别员工;③手机号作为H5登录全系统唯一凭证(登录按手机号自动定位门店,无需用户选店),新增 countByPhoneExcludeId 在新增/编辑/批量导入时做活跃员工全局查重;④删除食堂时员工改为物理删除(JdbcTemplate原生DELETE绕过逻辑删除),避免卡号/手机号残留占用,并在V28一次性物理清理已删除食堂的孤儿员工/菜品(is_deleted=1或store_id不存在)",
     "V0.0.62 微信openid自动换绑+永不失效+H5自动登录:①移除员工token 90天绝对过期上限,改为无限滑动续期,只要账号未退出/换绑则永不自动失效;②POST /api/employee/phone-login接受可选openid,微信内手机号登录自动绑定/换绑(last-login-wins:openid原绑定A则清A.openid+会话代数+1踢掉A各端,再写入当前账号B),无需手动换绑操作;③微信登录接口(/api/employee/wechat/login)返回openid供前端缓存,配合H5登录页微信内自动静默授权(打开页面即自动登录、任意端/任意设备免登录)+手机号登录自动换绑+主动退出后本次会话不再自动授权;已在V0.0.61的会话代数(session_generation)+sg claim校验基础上实现,后端/wechat/rebind保留作安全阀",
-    "V0.0.61 微信openid会话代数+跨端同步注销+换号重绑+首登建议改密:①employee表新增session_generation会话代数,员工token写入sg claim,PasswordFreshnessValidator校验sg与当前值一致(旧token无sg视为1,未发生退出不受影响避免全员重登),退出登录(POST /api/auth/logout)递增代数+黑名单,使该员工其他端token立即失效——实现"退出一个端其他端同步退出",微信openid永久身份+静默授权实现任意端自动登录;②新增POST /api/employee/wechat/rebind换号重绑(填新手机号+密码,验证通过后将openid从旧账号迁移到新账号,旧账号清openid+会话代数+1,返回新账号token登录);③首次登录改密免原密码:mustChangePassword=1时changePassword跳过原密码校验,配合H5建议改密弹窗",
+    "V0.0.61 微信openid会话代数+跨端同步注销+换号重绑+首登建议改密:①employee表新增session_generation会话代数,员工token写入sg claim,PasswordFreshnessValidator校验sg与当前值一致(旧token无sg视为1,未发生退出不受影响避免全员重登),退出登录(POST /api/auth/logout)递增代数+黑名单,使该员工其他端token立即失效——实现「退出一个端其他端同步退出」,微信openid永久身份+静默授权实现任意端自动登录;②新增POST /api/employee/wechat/rebind换号重绑(填新手机号+密码,验证通过后将openid从旧账号迁移到新账号,旧账号清openid+会话代数+1,返回新账号token登录);③首次登录改密免原密码:mustChangePassword=1时changePassword跳过原密码校验,配合H5建议改密弹窗",
     "V0.0.60 修复微信免密登录:公众号网页授权回调地址改用配置的 WECHAT_H5_BASE_URL 构造(代替请求Host拼接),规避反向代理下 redirect_uri 域名与后台「网页授权域名」不一致导致的错误码10003;未配置 WECHAT_H5_BASE_URL 时降级为按请求 Host/X-Forwarded 拼接(开发环境兼容);并修复微信换取openid失败(微信报错返回text/plain,原Map.class反序列化抛no suitable HttpMessageConverter,改为取文本经Jackson解析)",
     "V0.0.59 终端卡号匹配增加补零反向兼容:findEmployeeByCardNo 匹配链扩展为 6 级(精确→去前导零→仅数字→补零到10/8位→后10位→后8位),兼容不同型号读卡器输出卡号位数不一致的场景(读卡器短卡号 vs 数据库历史补零格式)",
     "V0.0.58 接管公众号菜单与自动回复(启用服务器配置后公众号后台自动回复/自定义菜单失效,只能API管理):①新增syncDefaultMenu下发底部菜单(单个「在线订餐」view按钮→H5首页,重复调用即覆盖,用户端约5分钟刷新);②新增POST /api/wechat/menu/sync管理端点(仅管理员)重新下发菜单;③任意用户消息统一回复欢迎语+订餐指引(点击底部菜单【在线订餐】开始点餐);④wechat_setup.py新增下发菜单步骤(第5步)",

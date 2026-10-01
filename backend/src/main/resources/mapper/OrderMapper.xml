@@ -51,7 +51,7 @@
         <if test="keyword != null and keyword != ''">
             AND (order_no LIKE CONCAT('%', #{keyword}, '%')
                  OR employee_name LIKE CONCAT('%', #{keyword}, '%')
-                 OR card_no LIKE CONCAT('%', #{keyword}, '%'))
+                 OR employee_card_no LIKE CONCAT('%', #{keyword}, '%'))
         </if>
         GROUP BY status
     </select>
