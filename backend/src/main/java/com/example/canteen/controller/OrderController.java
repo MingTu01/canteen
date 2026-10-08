@@ -76,9 +76,14 @@ public class OrderController {
         if (SecurityContext.isEmployee()) {
             throw new SecurityException("无权访问管理端数据");
         }
+        // 多条件排序:日期降序(最近的日期在前,同一天的订单聚在一起)
+        // → 餐次升序(早→中→晚) → 下单时间升序(id 自增)
+        // 不能只按 id 排:订餐支持提前下单,创建顺序与就餐日期不一致,会出现 4号/5号交错
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<Order>()
                 .eq(Order::getStoreId, storeId)
-                .orderByDesc(Order::getId);
+                .orderByDesc(Order::getDate)
+                .orderByAsc(Order::getMealType)
+                .orderByAsc(Order::getId);
         if (status != null) {
             wrapper.eq(Order::getStatus, status);
         }

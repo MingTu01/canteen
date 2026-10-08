@@ -8,9 +8,9 @@
 
 | 模块 | 版本 | 版本文件 | 说明 |
 |------|------|----------|------|
-| 系统整体 | **0.7.57** | `VERSIONS.json` → `system` | 汇总版本，用于 deploy 分支发布 |
-| 后端服务 | **0.0.77** | `backend/pom.xml`、`backend/src/main/resources/version.json` | Spring Boot API |
-| 管理后台 | **0.0.57** | `admin-web/package.json` | Vue 3 管理端 |
+| 系统整体 | **0.7.58** | `VERSIONS.json` → `system` | 汇总版本，用于 deploy 分支发布 |
+| 后端服务 | **0.0.78** | `backend/pom.xml`、`backend/src/main/resources/version.json` | Spring Boot API |
+| 管理后台 | **0.0.58** | `admin-web/package.json` | Vue 3 管理端 |
 | H5 订餐端 | **0.0.58** | `h5/package.json` | Vue 3 移动端 |
 | X86 取餐终端 | **3.0.6** | `x86-v3/VERSIONS.json` → `terminal` | Windows EXE，独立发版 |
 

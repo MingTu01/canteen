@@ -1,8 +1,9 @@
 {
-  "version": "0.0.77",
-  "buildTime": "2026-10-01",
+  "version": "0.0.78",
+  "buildTime": "2026-10-08",
   "description": "企业智慧食堂预定餐系统",
   "changes": [
+    "V0.0.78 订单列表多条件排序+导出全量修复:①订单列表排序由仅「id 倒序」改为「就餐日期降序→餐次升序→下单时间(id)升序」——此前 id 为自增主键反映的是下单动作时间,订餐支持提前下单,创建顺序与就餐日期不一致,导致列表出现 4号/5号交错;现同一天订单聚在一起,日期降序(31→1),同日内早→中→晚排序;②修复管理后台导出 Excel 缺失较早日期订单:前端导出原以 size=10000 请求列表接口,被分页插件 maxLimit=500 静默钳制为 500 条,又因原排序 id 倒序只取到最新 500 条,整月导出时 1-4 号等较早订单被挤出丢失;现改为每页 500 条循环拉取直到取完全部再统一导出",
     "V0.0.77 修复订单搜索报服务器内部错误:countByStatus(订单状态条数统计)的关键字分支误写了 employee 表的 card_no 列,而 order 表卡号快照列名是 employee_card_no(V29 迁移新增),关键字非空时该分支才拼入 SQL,导致 Unknown column 'card_no' 报 500——管理后台订单管理的姓名/会员号/订单号搜索一律失败(不搜索时正常);已改为 employee_card_no,与实体 @TableField 映射一致",
     "V0.0.75 删除订餐配置死键:移除从未生效的 max_order_quantity(单次最大订餐数)与 allow_cross_day_order(允许跨日订餐)两个配置项——前后端此前仅解析从不校验,实际限购由菜品级'单次限购'承担;StoreConfigController/VersionController 白名单与默认值、schema-h2 种子数据同步清理,历史迁移 V7 不动(已执行)",
     "V0.0.74 修复CI后端构建失败:MenuService.createMenu 快照固化代码把 dishes 变量声明在 if 块内、却在块外 dishes.stream() 引用,导致编译报错 cannot find symbol: variable dishes,V0.0.72/V0.0.73 两次 GitHub CI 后端构建均因此失败;已改为在方法级先声明 dishById 映射、if 块内构建,编译通过",

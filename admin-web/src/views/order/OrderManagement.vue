@@ -222,7 +222,7 @@ const handleSizeChange = (s: number) => {
   fetchOrders()
 }
 
-/** 导出当前筛选条件下的订单为 Excel(一次性拉取最多 10000 条) */
+/** 导出当前筛选条件下的订单为 Excel(分页循环拉取全部,不受后端 size 上限影响) */
 const handleExport = async () => {
   if (noStoreSelected.value) {
     ElMessage.warning('请先选择食堂')
@@ -230,9 +230,19 @@ const handleExport = async () => {
   }
   exporting.value = true
   try {
-    const res = await orderApi.list(buildQuery({ page: 1, size: 10000 }))
-    const data = res as unknown as PageResult<OrderRow> | OrderRow[]
-    const rows = Array.isArray(data) ? data : data.records ?? []
+    // 后端分页插件有 size 上限(maxLimit=500),一次请求 size=10000 会被钳制成 500 条,
+    // 大范围筛选(如整月)只会拿到最新 500 条,较早日期的订单会被截断丢失。
+    // 故按每页 500 循环拉取直到取完全部,再统一导出。
+    const PAGE_SIZE = 500
+    const rows: OrderRow[] = []
+    for (let curPage = 1; ; curPage++) {
+      const res = await orderApi.list(buildQuery({ page: curPage, size: PAGE_SIZE }))
+      const data = res as unknown as PageResult<OrderRow> | OrderRow[]
+      const batch = Array.isArray(data) ? data : data.records ?? []
+      rows.push(...batch)
+      // 数组响应(无分页)一次取完;本页不足一页说明已是最后一页
+      if (Array.isArray(data) || batch.length < PAGE_SIZE) break
+    }
     if (rows.length === 0) {
       ElMessage.warning('当前筛选条件下没有可导出的订单')
       return
@@ -509,6 +519,7 @@ watch(() => authStore.storeId, () => {
           value-format="YYYY-MM-DD"
           style="width: 220px"
           aria-label="选择日期范围"
+          @change="handleSearch"
         />
         <template #actions>
           <!-- 未订餐就餐快捷筛选:点击切换,激活时高亮仅显示未订餐用餐订单(手续费设置入口在菜单管理页) -->
