@@ -74,6 +74,15 @@ OPERATOR=$(get_operator)
 OPERATOR_UID=$(id -u "$OPERATOR" 2>/dev/null || echo 1000)
 OPERATOR_GID=$(id -g "$OPERATOR" 2>/dev/null || echo 1000)
 
+# 以 root 身份执行(兼容 root 直跑与 sudo 运行;精简系统可能没有 sudo 命令)
+as_root() {
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 #==============================================================
 # 核心权限管理 —— 统一处理所有权限问题
 #==============================================================
@@ -156,13 +165,14 @@ fix_all_permissions() {
 # .env 安全读写(兼容 Docker Compose dotenv)
 #==============================================================
 
-# 转义值:双引号包裹下,Docker Compose 需转义 \ " $ `
+# 转义值:双引号包裹下,Docker Compose 只认 \" \\ \$ 三种转义。
+# 注意:Compose 不还原 \`(反引号)的转义,若写 \` 会导致实际密码多一个反斜杠,
+# 因此这里不转义反引号,改为在 read_password 中禁止输入反引号。
 escape_env_value() {
     local v="$1"
     v="${v//\\/\\\\}"
     v="${v//\"/\\\"}"
     v="${v//\$/\\\$}"
-    v="${v//\`/\\\`}"
     printf '%s' "$v"
 }
 
@@ -283,10 +293,12 @@ read_password() {
             warn "未捕获到密码输入(第 ${attempt}/3 次)" >&2
             continue
         fi
-        # 禁止双引号和反斜杠:Docker Compose dotenv 解析器不认 \" 转义,
-        # 密码含 " 会导致整个 .env 解析失败,所有 docker compose 命令全挂
-        if [[ "$pwd1" == *'"'* ]] || [[ "$pwd1" == *'\\'* ]]; then
-            warn "密码不能包含双引号(\")或反斜杠(\\),请更换密码" >&2
+        # 禁止双引号、反斜杠和反引号:
+        #   - " 会让 dotenv 解析失败,所有 docker compose 命令全挂
+        #   - \ 无法在 .env 中安全往返
+        #   - ` 会被 MySQL healthcheck 的 shell 二次解析,且 Compose 不还原 \` 转义
+        if [[ "$pwd1" == *'"'* ]] || [[ "$pwd1" == *'\\'* ]] || [[ "$pwd1" == *'`'* ]]; then
+            warn "密码不能包含双引号(\")、反斜杠(\\)或反引号(\`),请更换密码" >&2
             continue
         fi
         pwd2=""
@@ -331,35 +343,103 @@ check_prerequisites() {
         exit 1
     fi
 
-    local min_gb=2 avail_kb avail_gb
+    local min_gb=3 avail_kb avail_gb
     avail_kb=$(df -P "$PROJECT_DIR" | awk 'NR==2{print $4}')
+    avail_kb="${avail_kb:-0}"
     avail_gb=$((avail_kb / 1024 / 1024))
     if [ "$avail_gb" -lt "$min_gb" ]; then
         error "磁盘空间不足: 剩余 ${avail_gb}GB, 需要至少 ${min_gb}GB"
         exit 1
     fi
-    info "磁盘空间: 剩余 ${avail_gb}GB"
+    if [ "$avail_gb" -lt 10 ]; then
+        warn "磁盘剩余 ${avail_gb}GB, 推荐 ≥10GB(Docker 镜像 + 数据卷 + 备份)"
+    else
+        info "磁盘空间: 剩余 ${avail_gb}GB"
+    fi
+}
+
+# 启动 Docker 守护进程并等待就绪
+start_docker_service() {
+    if ! command -v systemctl &>/dev/null; then
+        warn "未检测到 systemd,请确认 Docker 守护进程已运行"
+        return 0
+    fi
+    systemctl enable docker 2>/dev/null || as_root systemctl enable docker 2>/dev/null || true
+    systemctl start docker 2>/dev/null || as_root systemctl start docker 2>/dev/null || true
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        docker info &>/dev/null && return 0
+        sleep 2
+    done
+    return 1
+}
+
+# 确保 docker compose 插件可用(预装的老版本 Docker 常缺这个,后续所有 compose 命令都会失败)
+ensure_compose_plugin() {
+    if docker compose version &>/dev/null; then
+        return 0
+    fi
+    warn "未检测到 docker compose 插件,尝试安装..."
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y docker-compose-plugin 2>/dev/null || true
+    elif command -v yum &>/dev/null; then
+        yum install -y docker-compose-plugin 2>/dev/null || true
+    fi
+    if ! docker compose version &>/dev/null; then
+        error "docker compose 插件不可用(需要 Docker Compose v2)"
+        echo "  安装: apt-get install -y docker-compose-plugin  或  yum install -y docker-compose-plugin"
+        echo "  验证: docker compose version"
+        exit 1
+    fi
+    info "docker compose 插件已就绪"
 }
 
 # 安装 Docker
 install_docker() {
     step "1/8 检测 Docker 环境"
 
-    if command -v docker &>/dev/null && docker info &>/dev/null; then
-        info "Docker 已安装且运行中,跳过安装"
+    if command -v docker &>/dev/null; then
+        if docker info &>/dev/null; then
+            info "Docker 已安装且运行中,跳过安装"
+        else
+            info "Docker 已安装但未运行,尝试启动..."
+            if ! start_docker_service; then
+                error "Docker 已安装但无法启动,请检查: systemctl status docker"
+                echo "  常见原因: 磁盘满 / 内核不支持 cgroups / /etc/docker/daemon.json 配置错误"
+                exit 1
+            fi
+            info "Docker 已启动"
+        fi
+        ensure_compose_plugin
         return 0
     fi
 
     info "Docker 未安装,开始安装(使用国内源)..."
 
     if command -v apt-get &>/dev/null; then
-        info "检测到 Debian/Ubuntu..."
+        # Debian 与 Ubuntu 的 docker-ce 仓库路径不同(linux/debian vs linux/ubuntu),
+        # 混用会直接 404,这里按 /etc/os-release 区分
+        local repo_flavor="ubuntu" codename="" distro_id=""
+        distro_id=$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")
+        codename=$(. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_CODENAME:-}")
+        [[ "$distro_id" == "debian" ]] && repo_flavor="debian"
+        if [[ -z "$codename" ]] && command -v lsb_release &>/dev/null; then
+            codename=$(lsb_release -cs 2>/dev/null || true)
+        fi
+        if [[ -z "$codename" ]]; then
+            error "无法识别系统版本代号(VERSION_CODENAME),请手动安装 Docker"
+            exit 1
+        fi
+        info "检测到 ${repo_flavor} (${codename})..."
+
         apt-get update -y
-        apt-get install -y ca-certificates curl gnupg lsb-release
+        apt-get install -y ca-certificates curl gnupg
         install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        curl -fsSL "https://mirrors.aliyun.com/docker-ce/linux/${repo_flavor}/gpg" \
+            | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
         chmod a+r /etc/apt/keyrings/docker.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/${repo_flavor} ${codename} stable" \
+            > /etc/apt/sources.list.d/docker.list
         apt-get update -y
         apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     elif command -v yum &>/dev/null; then
@@ -372,39 +452,85 @@ install_docker() {
         exit 1
     fi
 
-    systemctl enable docker
-    systemctl start docker
-    info "Docker 安装完成"
+    if ! start_docker_service; then
+        error "Docker 安装后无法启动,请检查: systemctl status docker"
+        exit 1
+    fi
+    ensure_compose_plugin
+    info "Docker 安装完成: $(docker --version)"
 }
 
-# 配置 Docker 镜像加速
+# 配置 Docker 镜像加速(已有 daemon.json 时只合并,不整文件覆盖)
 configure_docker_mirror() {
     step "2/8 配置 Docker 镜像加速器"
 
     local daemon_json="/etc/docker/daemon.json"
+    local replace=0
 
-    # 检测是否已有镜像加速器配置(用 sudo cat 兼容非 root 运行场景)
-    local has_mirror=false
-    if [[ -f "$daemon_json" ]]; then
-        if sudo cat "$daemon_json" 2>/dev/null | grep -q "registry-mirrors"; then
-            has_mirror=true
-        fi
-    fi
-
-    if [[ "$has_mirror" == "true" ]]; then
+    if [[ -f "$daemon_json" ]] && grep -q "registry-mirrors" "$daemon_json" 2>/dev/null; then
         info "检测到已有镜像加速器配置"
-        ask "是否替换为推荐配置? [y/N]"
+        ask "是否替换为推荐加速器?(其它字段会保留) [y/N]"
         read -r ans
-        [[ "$ans" != "y" && "$ans" != "Y" ]] && { info "保留现有配置"; return; }
-    else
-        info "未检测到镜像加速器配置,将写入推荐配置"
+        if [[ "$ans" != "y" && "$ans" != "Y" ]]; then
+            info "保留现有配置"
+            return 0
+        fi
+        replace=1
     fi
 
-    info "写入国内 Docker 镜像加速器..."
-    sudo mkdir -p /etc/docker
-    [[ -f "$daemon_json" ]] && [[ ! -f "${daemon_json}.bak" ]] && sudo cp "$daemon_json" "${daemon_json}.bak"
+    as_root mkdir -p /etc/docker
 
-    sudo tee "$daemon_json" > /dev/null <<'EOF'
+    if [[ -f "$daemon_json" ]]; then
+        # 已有配置(data-root / insecure-registries 等):先备份,再用 python3 深合并,
+        # 绝不整文件覆盖,避免抹掉用户原有设置
+        local bak
+        bak="${daemon_json}.bak.$(date +%Y%m%d_%H%M%S)"
+        if ! as_root cp -a "$daemon_json" "$bak"; then
+            error "备份 ${daemon_json} 失败,为避免覆盖已有配置,已停止"
+            return 1
+        fi
+        info "已备份原配置: ${bak}"
+        if ! command -v python3 &>/dev/null; then
+            warn "缺少 python3,无法安全合并 daemon.json(避免覆盖已有字段)"
+            warn "请手动在 ${daemon_json} 中添加 registry-mirrors 后重启 Docker,本次跳过"
+            return 0
+        fi
+        if ! as_root python3 - "$daemon_json" "$replace" <<'PY'
+import json, sys
+
+path, replace = sys.argv[1], sys.argv[2] == "1"
+mirrors = [
+    "https://docker.1panel.live",
+    "https://docker.m.daocloud.io",
+    "https://dockerhub.icu",
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com",
+]
+try:
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+except Exception as e:
+    # 原文件不是合法 JSON:直接失败,绝不覆盖(否则会丢掉用户的 data-root 等配置)
+    print("daemon.json 不是合法 JSON: %s" % e, file=sys.stderr)
+    sys.exit(1)
+if not isinstance(cfg, dict):
+    print("daemon.json 顶层必须是对象", file=sys.stderr)
+    sys.exit(1)
+if replace or not cfg.get("registry-mirrors"):
+    cfg["registry-mirrors"] = mirrors
+cfg.setdefault("log-driver", "json-file")
+cfg.setdefault("log-opts", {"max-size": "50m", "max-file": "3"})
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
+        then
+            error "合并 daemon.json 失败,已保留原文件(备份: ${bak})"
+            return 1
+        fi
+    else
+        info "未检测到 daemon.json,写入推荐配置"
+        as_root tee "$daemon_json" > /dev/null <<'EOF'
 {
   "registry-mirrors": [
     "https://docker.1panel.live",
@@ -420,8 +546,21 @@ configure_docker_mirror() {
   }
 }
 EOF
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
+    fi
+
+    if command -v systemctl &>/dev/null; then
+        as_root systemctl daemon-reload 2>/dev/null || true
+        as_root systemctl restart docker 2>/dev/null || {
+            error "重启 Docker 失败,请检查 ${daemon_json} 格式是否正确"
+            exit 1
+        }
+        # 等守护进程重新就绪
+        local i
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            docker info &>/dev/null && break
+            sleep 2
+        done
+    fi
     info "镜像加速器配置完成"
 }
 
@@ -628,23 +767,28 @@ build_runtime_image() {
 start_services() {
     step "6/8 启动服务"
 
-    # 端口占用检查
+    # 端口占用检查:本系统容器已在运行(重跑部署/修复场景)时直接重启,不误报占用
     local required_ports=("18080" "18081" "18082" "13306" "16379")
     local port_busy=false
-    for p in "${required_ports[@]}"; do
-        if ss -tlnp 2>/dev/null | grep -q ":${p} " || netstat -tlnp 2>/dev/null | grep -q ":${p} "; then
-            error "端口 ${p} 已被占用"
-            port_busy=true
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "canteen-admin"; then
+        info "检测到本系统容器已在运行,跳过端口占用检查(将直接重启)"
+    else
+        for p in "${required_ports[@]}"; do
+            if ss -tlnp 2>/dev/null | grep -q ":${p} " || netstat -tlnp 2>/dev/null | grep -q ":${p} "; then
+                error "端口 ${p} 已被占用"
+                port_busy=true
+            fi
+        done
+        if [[ "$port_busy" == "true" ]]; then
+            echo ""
+            echo "排查建议:"
+            echo "  1) 查看占用: sudo ss -tlnp | grep -E '18080|18081|18082|13306|16379'"
+            echo "  2) 停止旧服务: sudo ./deploy.sh stop"
+            echo "  3) 若占用者是本系统残留容器: docker compose down"
+            exit 1
         fi
-    done
-    if [[ "$port_busy" == "true" ]]; then
-        echo ""
-        echo "排查建议:"
-        echo "  1) 查看占用: sudo ss -tlnp | grep -E '18080|18081|18082|13306|16379'"
-        echo "  2) 停止旧服务: sudo ./deploy.sh stop"
-        exit 1
+        info "端口 18080/18081/18082/13306/16379 可用"
     fi
-    info "端口 18080/18081/18082/13306/16379 可用"
 
     mkdir -p backup uploads logs
 
@@ -910,9 +1054,27 @@ cmd_deploy() {
     # 部署前:权限修正
     fix_all_permissions
 
-    install_docker
+    if [[ "$SKIP_DOCKER" == "true" ]]; then
+        info "已指定 --skip-docker,跳过 Docker 安装检查"
+        command -v docker &>/dev/null || {
+            error "未检测到 docker,无法跳过安装"
+            exit 1
+        }
+        ensure_compose_plugin
+    else
+        install_docker
+    fi
     configure_docker_mirror
-    configure_env
+
+    if [[ "$SKIP_ENV" == "true" ]]; then
+        if [[ ! -f .env ]]; then
+            error "已指定 --skip-env,但当前目录没有 .env,无法跳过环境配置"
+            exit 1
+        fi
+        info "已指定 --skip-env,复用现有 .env"
+    else
+        configure_env
+    fi
     build_artifacts
     build_runtime_image
     start_services
@@ -1051,10 +1213,16 @@ cmd_reset_admin() {
 # 主入口
 #==============================================================
 FROM_INSTALL="false"
-if [[ "$1" == "--from-install" ]]; then
-    FROM_INSTALL="true"
-    shift
-fi
+SKIP_DOCKER="false"
+SKIP_ENV="false"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --from-install) FROM_INSTALL="true"; shift ;;
+        --skip-docker)  SKIP_DOCKER="true"; shift ;;
+        --skip-env)     SKIP_ENV="true"; shift ;;
+        *) break ;;
+    esac
+done
 
 COMMAND="${1:-deploy}"
 case "$COMMAND" in
@@ -1087,6 +1255,10 @@ case "$COMMAND" in
         echo "  restart [服务]  重启服务(默认全部)"
         echo "  reset-admin     重置超管账号密码"
         echo "  help            显示帮助"
+        echo ""
+        echo "选项(可组合):"
+        echo "  --skip-docker   跳过 Docker 安装检查(服务器已装 Docker 时使用)"
+        echo "  --skip-env      跳过环境变量配置(复用当前目录已有 .env)"
         echo ""
         echo "一键安装(多通道自动切换,jsdelivr CDN 优先):"
         echo "  for u in \"https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh\" \"https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh\" \"https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh\" \"https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh\"; do"
