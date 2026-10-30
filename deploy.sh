@@ -12,7 +12,7 @@
 #   ./deploy.sh reset-admin    # 重置超管账号密码
 #
 # 一键安装(在全新服务器上,多通道自动切换,jsdelivr CDN 优先):
-#   for u in "https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://testingcf.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh" "https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh"; do curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break; done && sudo bash /tmp/canteen-install.sh
+#   for u in "https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://testingcf.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh" "https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh"; do curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o /tmp/canteen-install.sh && grep -q "canteen-install-version: 2" /tmp/canteen-install.sh && break; done && sudo bash /tmp/canteen-install.sh || echo "下载失败或 CDN 缓存了旧版脚本,请重试"
 #
 # 适用系统: CentOS 7+/8/9, Ubuntu 18.04+, Debian 10+
 #==============================================================
@@ -95,10 +95,6 @@ as_root() {
 #   5. backup/uploads/logs 目录属主不对 → chown
 #   6. Docker 组未加入 → usermod -aG docker
 fix_all_permissions() {
-    local target_user="$OPERATOR"
-    local target_uid="$OPERATOR_UID"
-    local target_gid="$OPERATOR_GID"
-
     # 1. 项目目录所有权(sudo 运行时才需要修正)
     if [[ -n "$SUDO_USER" ]] && [[ "$SUDO_USER" != "root" ]]; then
         local owner
