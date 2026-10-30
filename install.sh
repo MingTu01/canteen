@@ -1,14 +1,17 @@
 #!/bin/bash
+# canteen-install-version: 2   # 一键命令以此校验 CDN 返回的是最新脚本,改版时递增
 #==============================================================
 # 企业智慧食堂系统 - 一键安装脚本(install.sh)
 #==============================================================
 # 用法(在任意全新服务器上执行,多通道自动切换):
 #
-#   for u in "https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://testingcf.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh" "https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh"; do curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o /tmp/canteen-install.sh && [ -s /tmp/canteen-install.sh ] && break; done && sudo bash /tmp/canteen-install.sh
+#   for u in "https://fastly.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://cdn.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://testingcf.jsdelivr.net/gh/MingTu01/canteen@main/install.sh" "https://gh-proxy.com/https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh" "https://raw.githubusercontent.com/MingTu01/canteen/main/install.sh"; do curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o /tmp/canteen-install.sh && grep -q "canteen-install-version: 2" /tmp/canteen-install.sh && break; done && sudo bash /tmp/canteen-install.sh || echo "下载失败或 CDN 缓存了旧版脚本,请重试;仍失败可手动执行: sudo bash /tmp/canteen-install.sh"
 #
 # 说明:jsdelivr CDN 为主通道(真 CDN 不挑客户端 IP,国内云服务器稳定可达);
 # GitHub 代理节点(gh-proxy.com 等)对数据中心 IP(腾讯云/阿里云等)常返回
 # 403/404 防滥用拦截,仅作兜底;直连最后兜底。
+# 注意:jsdelivr 对 @main 有 12 小时左右的缓存,刚推送的脚本可能仍返回旧版,
+# 所以下载后必须校验版本标记,旧版会继续尝试下一个通道。
 #
 # 或指定安装目录 / 覆盖已有目录:
 #
