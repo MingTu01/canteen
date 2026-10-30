@@ -116,13 +116,13 @@ sudo bash /tmp/canteen-install.sh /opt/my-canteen
 
 #### 步骤 1：获取 ZIP 包
 
-开发机生成的 ZIP 包：`canteen-deploy-v0.7.55.zip`（约 47MB，文件名取 `VERSIONS.json` 的 `system.version`，输出到仓库的上一级目录），包含全部部署产物。用 [pack_deploy_zip.py](pack_deploy_zip.py) 从 deploy 分支打包。
+开发机生成的 ZIP 包：`canteen-deploy-v0.7.58.zip`（约 47MB，文件名取 `VERSIONS.json` 的 `system.version`，输出到仓库的上一级目录），包含全部部署产物。用 [pack_deploy_zip.py](pack_deploy_zip.py) 从 deploy 分支打包。
 
 #### 步骤 2：上传到服务器
 
 ```bash
 # 用 scp 上传（替换为你的服务器 IP 和用户名）
-scp canteen-deploy-v0.7.55.zip canteen@<服务器IP>:/tmp/
+scp canteen-deploy-v0.7.58.zip canteen@<服务器IP>:/tmp/
 
 # 或用 1Panel 面板上传到 /tmp/ 目录
 ```
@@ -136,7 +136,7 @@ sudo chown -R $(whoami):$(whoami) /opt/canteen
 
 # 解压 ZIP 包到 /opt/canteen
 cd /opt/canteen
-unzip /tmp/canteen-deploy-v0.7.55.zip
+unzip /tmp/canteen-deploy-v0.7.58.zip
 chmod +x *.sh scripts/*.sh
 
 # 用 sudo 运行 deploy.sh
@@ -176,13 +176,21 @@ git checkout -b deploy FETCH_HEAD
 > | 可靠性 | 高（不依赖 git） | 受网络影响 |
 > | 推荐场景 | 国内服务器、网络不稳定 | 网络稳定环境 |
 
-### 1.3 跳过 Docker 安装
+### 1.3 跳过 Docker 安装 / 复用已有 .env
 
 如果服务器已安装 Docker：
 
 ```bash
-sudo ./deploy.sh --skip-env
+sudo ./deploy.sh --skip-docker
 ```
+
+已有 `.env`、只想重新启动服务时（跳过环境变量重新配置）：
+
+```bash
+sudo ./deploy.sh --skip-env    # 当前目录必须已有 .env，否则会报错退出
+```
+
+两个参数可组合：`sudo ./deploy.sh --skip-docker --skip-env`。
 
 ### 1.4 部署后访问
 
@@ -204,7 +212,7 @@ sudo ./deploy.sh --skip-env
 
 ### 1.5 canteen 管理命令（部署时自动安装）
 
-部署向导的第 7 步会自动安装 `canteen` 系统命令，无需单独操作。部署完成后在服务器任意目录输入 `canteen` 即可弹出管理面板：
+部署向导的第 8 步（最后一步）会自动安装 `canteen` 系统命令，无需单独操作。部署完成后在服务器任意目录输入 `canteen` 即可弹出管理面板：
 
 ```bash
 canteen              # 打开交互式管理菜单
@@ -318,8 +326,8 @@ canteen
 ╔══════════════════════════════════════════════╗
 ║   企业智慧食堂系统 - 管理面板 V2              ║
 ╠══════════════════════════════════════════════╣
-║  系统版本: v0.7.55   状态: ● 全部运行中       ║
-║  后端: v0.0.76  管理后台: v0.0.56  H5: v0.0.58 ║
+║  系统版本: v0.7.58   状态: ● 全部运行中       ║
+║  后端: v0.0.78  管理后台: v0.0.58  H5: v0.0.58 ║
 ║  终端: v3.0.6   分支: deploy                  ║
 ╠══════════════════════════════════════════════╣
 ║                                              ║
@@ -1000,7 +1008,7 @@ A: 确保超管已在「账号管理」中创建了该店长账号并指派到�
 
 ### Q: X86 终端连接后端失败
 
-A: 检查终端配置的后端地址是否正确，确保服务器 18082 端口对局域网开放。
+A: 检查终端配置的后端地址是否正确。**18082 默认只绑定 `127.0.0.1`，局域网终端无法直连**：请用反向代理把 18082 暴露给局域网（如 Nginx `listen 18082; proxy_pass 127.0.0.1:18082`），终端填代理地址。不要直接把端口暴露到公网。
 
 ### Q: 如何修改 MySQL 密码
 
@@ -1008,7 +1016,7 @@ A: 修改 `.env` 中的 `MYSQL_ROOT_PASSWORD`，然后：
 
 ```bash
 docker compose down
-docker volume rm enterprise-canteen_mysql_data  # ⚠️ 会丢失数据，先备份！
+docker volume rm canteen_mysql_data  # ⚠️ 会丢失数据，先备份！
 docker compose up -d
 ```
 
@@ -1070,6 +1078,6 @@ git pull origin main
 1. **生产环境必须修改默认密码** — 部署向导中设置自定义超管密码
 2. **妥善保管 .env 文件** — 包含 MySQL 密码、JWT 密钥等敏感信息，已通过 `.gitignore` 忽略
 3. **定期备份** — 配置 cron 定时备份，备份文件不要与服务器同机存放
-4. **端口暴露** — 仅 18080/18081/18082 对外开放，13306/16379 仅绑定 127.0.0.1
+4. **端口暴露** — 所有容器端口（18080/18081/18082/13306/16379）默认只绑定 `127.0.0.1`，公网/局域网访问一律走反向代理并按需放行
 5. **HTTPS** — 生产环境建议在 nginx 前端加 HTTPS 反向代理（如 Nginx + Let's Encrypt）
 6. **密码策略** — 全系统统一最低 8 位密码校验（管理后台、H5、终端）
